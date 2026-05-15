@@ -1,0 +1,15 @@
+logs/
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+frontend/node_modules/
+frontend/dist/
+.env
+*.pyc
+/tmp/echohub_*.pid
+.venv-vllm/
+*.db
+frontend/.env.development
+.venv-vllm/
+*.db
+frontend/.env.development

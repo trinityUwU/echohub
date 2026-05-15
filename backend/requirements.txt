@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+huggingface_hub
+loguru
+pydantic
+httpx
+python-dotenv
+
+# Inference — llama-cpp-python (backend principal, cross-platform)
+# Install selon le hardware :
+#   NVIDIA CUDA  : CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
+#   AMD ROCm     : CMAKE_ARGS="-DGGML_HIPBLAS=on" pip install llama-cpp-python
+#   Apple Metal  : CMAKE_ARGS="-DGGML_METAL=on" pip install llama-cpp-python
+#   CPU only     : pip install llama-cpp-python
+llama-cpp-python

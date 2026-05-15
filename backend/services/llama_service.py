@@ -1,0 +1,346 @@
+"""
+llama_service — backend llama-cpp-python pour GGUF.
+
+Performance target : niveau LM Studio (~60 tok/s sur 4B), PAS Ollama.
+Params critiques : n_gpu_layers=-1, n_batch=512, flash_attn=True.
+"""
+from __future__ import annotations
+
+import asyncio
+import atexit
+import json
+import os
+import threading
+import time
+from pathlib import Path
+from typing import AsyncGenerator, Optional
+
+from loguru import logger
+
+from backend.models.schemas import ModelInfo
+
+# ──────────────────────────────────────────────────────────────────────────────
+# State
+# ──────────────────────────────────────────────────────────────────────────────
+
+_llm = None                                    # Llama instance
+_current_model: Optional[ModelInfo] = None
+_loading_model_id: Optional[str] = None
+_load_error: Optional[str] = None
+_eject_requested: bool = False
+_lock = threading.Lock()
+
+LOG_PATH = Path("/mnt/projects/echohub/logs/llama.log")
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GPU layer mapping
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _n_gpu_layers(gpu_type: str) -> int:
+    """Full offload sur tout GPU supporté — même politique que LM Studio."""
+    if gpu_type in ("nvidia", "amd", "apple"):
+        return -1   # -1 = offload toutes les couches
+    return 0        # CPU only
+
+
+def _detect_n_threads() -> int:
+    """Utilise tous les cores physiques pour le prefill CPU."""
+    try:
+        count = os.cpu_count() or 4
+        # Sur systèmes avec HT : préférer les cores physiques
+        return max(4, count // 2)
+    except Exception:
+        return 4
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Log helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _log(msg: str) -> None:
+    logger.info(msg)
+    try:
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(LOG_PATH, "a") as f:
+            f.write(f"{msg}\n")
+    except Exception:
+        pass
+
+
+def _reset_log() -> None:
+    try:
+        LOG_PATH.write_text("")
+    except Exception:
+        pass
+
+
+def get_log(n_lines: int = 100) -> str:
+    if not LOG_PATH.exists():
+        return ""
+    try:
+        lines = LOG_PATH.read_text(errors="replace").splitlines()
+        return "\n".join(lines[-n_lines:])
+    except Exception:
+        return ""
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Load / unload
+# ──────────────────────────────────────────────────────────────────────────────
+
+def load_model(
+    gguf_path: str,
+    model_id: str,
+    n_ctx: int = 4096,
+    gpu_type: str = "nvidia",
+) -> None:
+    """Charge le modèle GGUF. Bloquant — appelé depuis un thread."""
+    global _llm, _current_model, _load_error, _eject_requested
+
+    try:
+        from llama_cpp import Llama
+    except ImportError:
+        raise RuntimeError(
+            "llama-cpp-python not installed. "
+            "Run: pip install llama-cpp-python "
+            "(CUDA: CMAKE_ARGS='-DGGML_CUDA=on' pip install llama-cpp-python)"
+        )
+
+    _reset_log()
+    n_gpu = _n_gpu_layers(gpu_type)
+    n_threads = _detect_n_threads()
+
+    _log(f"[llama] Loading {model_id}")
+    _log(f"[llama] File: {gguf_path}")
+    _log(f"[llama] n_gpu_layers={n_gpu} | n_ctx={n_ctx} | n_batch=512 | flash_attn=True | n_threads={n_threads}")
+
+    if _eject_requested:
+        raise RuntimeError("Ejected by user")
+
+    start = time.time()
+
+    _llm = Llama(
+        model_path=gguf_path,
+        n_ctx=n_ctx,
+        n_batch=512,           # throughput critique — NE PAS baisser
+        n_gpu_layers=n_gpu,    # -1 = full GPU offload
+        flash_attn=True,       # FlashAttention pour VRAM + vitesse
+        n_threads=n_threads,   # prefill CPU
+        verbose=False,         # pas de spam stderr
+        use_mmap=True,         # mapping mémoire pour chargement rapide
+        use_mlock=False,       # pas de lock mémoire (peut échouer sans privilèges)
+    )
+
+    elapsed = time.time() - start
+    _log(f"[llama] Model loaded in {elapsed:.1f}s")
+
+    _current_model = ModelInfo(
+        id=model_id,
+        name=model_id.split("/")[-1],
+        downloaded=True,
+        loaded=True,
+        max_context_window=n_ctx,
+        quantization=_detect_quant_from_path(gguf_path),
+    )
+    logger.info(f"llama model loaded: {model_id} ({elapsed:.1f}s)")
+
+
+def load_model_async(
+    gguf_path: str,
+    model_id: str,
+    n_ctx: int = 4096,
+    gpu_type: str = "nvidia",
+) -> None:
+    """Lance le chargement dans un thread background — retourne immédiatement."""
+    global _loading_model_id, _load_error, _eject_requested
+    _loading_model_id = model_id
+    _load_error = None
+    _eject_requested = False
+
+    def _run() -> None:
+        global _loading_model_id, _load_error
+        try:
+            load_model(gguf_path, model_id, n_ctx, gpu_type)
+        except Exception as e:
+            if not _eject_requested:
+                _load_error = str(e)
+                _log(f"[llama] ERROR: {e}")
+                logger.error(f"llama async load failed: {e}")
+        finally:
+            _loading_model_id = None
+
+    threading.Thread(target=_run, daemon=True, name=f"llama-load-{model_id}").start()
+
+
+def unload_model() -> None:
+    """Décharge le modèle et libère la VRAM."""
+    global _llm, _current_model, _loading_model_id, _eject_requested
+
+    _eject_requested = True
+    _loading_model_id = None
+
+    with _lock:
+        if _llm is not None:
+            try:
+                # llama_cpp libère automatiquement via __del__ mais on force
+                _llm.close() if hasattr(_llm, "close") else None
+            except Exception as e:
+                logger.warning(f"llama unload warning: {e}")
+            finally:
+                _llm = None
+
+    _current_model = None
+    _log("[llama] Model unloaded")
+    logger.info("llama model unloaded")
+
+    # Log VRAM après unload pour vérification
+    _log_vram_freed()
+
+
+def _log_vram_freed() -> None:
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used,memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            used, free = result.stdout.strip().split(",")
+            _log(f"[llama] VRAM after unload — used: {used.strip()} MB, free: {free.strip()} MB")
+    except Exception:
+        pass
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# State queries
+# ──────────────────────────────────────────────────────────────────────────────
+
+def get_status() -> Optional[ModelInfo]:
+    return _current_model
+
+
+def get_load_state() -> dict:
+    return {
+        "loading_model_id": _loading_model_id,
+        "loaded_model_id": _current_model.id if _current_model else None,
+        "error": _load_error,
+        "engine": "llama",
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Generation
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def generate(
+    messages: list[dict],
+    stream: bool = True,
+    temperature: float = 0.7,
+    max_tokens: int = 2048,
+    top_p: float = 0.95,
+    top_k: int = -1,
+    repetition_penalty: float = 1.1,
+    stop: Optional[list[str]] = None,
+    # Ces params sont acceptés pour compatibilité avec l'interface vLLM mais ignorés
+    presence_penalty: float = 0.0,
+    frequency_penalty: float = 0.0,
+    **_ignored,
+) -> AsyncGenerator:
+    """
+    Génère une réponse via llama-cpp-python.
+    Quand stream=True, yield des chaînes SSE format OpenAI compatible.
+    Quand stream=False, yield un seul dict.
+    """
+    if _llm is None:
+        raise RuntimeError("No model loaded")
+
+    # llama-cpp-python est synchrone — on le run dans un executor
+    loop = asyncio.get_event_loop()
+
+    top_k_val = top_k if top_k > 0 else 40  # llama.cpp préfère une valeur positive
+
+    common_kwargs = dict(
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        top_p=top_p,
+        top_k=top_k_val,
+        repeat_penalty=repetition_penalty,
+        stop=stop or [],
+    )
+
+    if stream:
+        # Streaming via thread + queue
+        queue: asyncio.Queue = asyncio.Queue()
+        completion_tokens = 0
+        prompt_tokens = 0
+
+        def _stream_sync() -> None:
+            nonlocal completion_tokens, prompt_tokens
+            try:
+                for chunk in _llm.create_chat_completion(stream=True, **common_kwargs):
+                    if _eject_requested:
+                        break
+                    delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                    finish = chunk.get("choices", [{}])[0].get("finish_reason")
+                    if delta:
+                        completion_tokens += 1
+                        # Format SSE identique à OpenAI/vLLM pour compatibilité frontend
+                        payload = json.dumps({
+                            "choices": [{"delta": {"content": delta}, "finish_reason": None}]
+                        })
+                        asyncio.run_coroutine_threadsafe(queue.put(f"data: {payload}"), loop)
+                    if finish:
+                        break
+            except Exception as e:
+                if not _eject_requested:
+                    asyncio.run_coroutine_threadsafe(queue.put(f"data: {{\"error\": \"{e}\"}}"), loop)
+            finally:
+                asyncio.run_coroutine_threadsafe(queue.put(None), loop)  # sentinel
+
+        threading.Thread(target=_stream_sync, daemon=True).start()
+
+        while True:
+            item = await queue.get()
+            if item is None:
+                # Envoyer le chunk usage final (compatible avec stream_options vLLM)
+                usage_payload = json.dumps({
+                    "usage": {"completion_tokens": completion_tokens, "prompt_tokens": 0}
+                })
+                yield f"data: {usage_payload}"
+                break
+            yield item
+
+    else:
+        def _sync() -> dict:
+            return _llm.create_chat_completion(stream=False, **common_kwargs)
+
+        result = await loop.run_in_executor(None, _sync)
+        yield result
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _detect_quant_from_path(gguf_path: str) -> Optional[str]:
+    name = Path(gguf_path).stem.upper()
+    for q in ("Q4_K_M", "Q5_K_M", "Q4_K_S", "Q5_K_S", "Q8_0", "Q4_0", "Q6_K", "F16"):
+        if q in name:
+            return q
+    return "GGUF"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Cleanup
+# ──────────────────────────────────────────────────────────────────────────────
+
+def cleanup() -> None:
+    logger.info("llama cleanup — unloading if needed")
+    try:
+        unload_model()
+    except Exception as e:
+        logger.error(f"llama cleanup error: {e}")
+
+
+atexit.register(cleanup)

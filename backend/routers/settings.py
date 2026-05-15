@@ -1,0 +1,126 @@
+import os
+import platform
+import subprocess
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException
+from loguru import logger
+
+router = APIRouter(prefix="/settings", tags=["settings"])
+
+_ENV_FILE = Path(__file__).parent.parent.parent / ".env"
+
+
+def _update_env_file(key: str, value: str) -> None:
+    """Update or insert KEY=value in the .env file."""
+    lines: list[str] = []
+    if _ENV_FILE.exists():
+        lines = _ENV_FILE.read_text(encoding="utf-8").splitlines()
+
+    found = False
+    for i, line in enumerate(lines):
+        if line.startswith(f"{key}=") or line.startswith(f"{key} ="):
+            lines[i] = f"{key}={value}" if value else f"# {key}="
+            found = True
+            break
+
+    if not found:
+        if value:
+            lines.append(f"{key}={value}")
+
+    _ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+@router.post("/hf-token")
+def set_hf_token(req: dict) -> dict:
+    """Met à jour HF_TOKEN dans l'environnement runtime + fichier .env"""
+    token: str = req.get("token", "").strip()
+
+    if token and not token.startswith("hf_"):
+        raise HTTPException(status_code=400, detail="Token invalide : doit commencer par 'hf_' ou être vide.")
+
+    if token:
+        os.environ["HF_TOKEN"] = token
+        logger.info("HF_TOKEN updated in runtime environment")
+    else:
+        os.environ.pop("HF_TOKEN", None)
+        logger.info("HF_TOKEN removed from runtime environment")
+
+    try:
+        _update_env_file("HF_TOKEN", token)
+    except Exception as e:
+        logger.warning(f"Could not update .env file: {e}")
+
+    return {"status": "ok", "token_set": bool(token)}
+
+
+@router.get("/hf-token")
+def get_hf_token() -> dict:
+    """Retourne si un token est configuré (pas le token lui-même)."""
+    token = os.getenv("HF_TOKEN", "")
+    preview = f"hf_...{token[-4:]}" if len(token) > 8 else ""
+    return {"token_set": bool(token), "token_preview": preview}
+
+
+def _detect_gpu_backend() -> dict:
+    """
+    Détecte le backend GPU disponible pour llama-cpp-python.
+    Retourne : { "backend": "cuda"|"rocm"|"metal"|"cpu", "gpu_name": str|null, "cuda_available": bool }
+    """
+    sys = platform.system()
+
+    # Mac → Metal natif, toujours OK
+    if sys == "Darwin":
+        return {"backend": "metal", "gpu_name": "Apple Silicon", "cuda_available": True}
+
+    # Vérifier si llama-cpp-python est compilé avec CUDA
+    try:
+        import llama_cpp
+        lib_dir = Path(llama_cpp.__file__).parent / "lib"
+        libs = list(lib_dir.iterdir()) if lib_dir.exists() else []
+        has_cuda_lib = any("cuda" in f.name.lower() or "cublas" in f.name.lower() for f in libs)
+    except Exception:
+        has_cuda_lib = False
+
+    # Détecter GPU NVIDIA
+    nvidia_name = None
+    try:
+        r = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=5
+        )
+        if r.returncode == 0:
+            nvidia_name = r.stdout.strip().split("\n")[0]
+    except Exception:
+        pass
+
+    # Détecter AMD ROCm
+    amd_name = None
+    try:
+        r = subprocess.run(["rocm-smi", "--showproductname"], capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
+            amd_name = "AMD GPU"
+    except Exception:
+        pass
+
+    if nvidia_name:
+        if has_cuda_lib:
+            return {"backend": "cuda", "gpu_name": nvidia_name, "cuda_available": True}
+        else:
+            return {"backend": "cpu", "gpu_name": nvidia_name, "cuda_available": False,
+                    "reason": "llama-cpp-python built without CUDA support"}
+
+    if amd_name:
+        if has_cuda_lib:
+            return {"backend": "rocm", "gpu_name": amd_name, "cuda_available": True}
+        else:
+            return {"backend": "cpu", "gpu_name": amd_name, "cuda_available": False,
+                    "reason": "llama-cpp-python built without ROCm support"}
+
+    return {"backend": "cpu", "gpu_name": None, "cuda_available": False, "reason": "No GPU detected"}
+
+
+@router.get("/gpu-backend")
+def get_gpu_backend() -> dict:
+    """Retourne le backend GPU actif pour llama-cpp-python."""
+    return _detect_gpu_backend()

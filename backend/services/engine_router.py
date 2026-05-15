@@ -1,0 +1,259 @@
+"""
+Engine router — détecte le format du modèle et dispatche vers le bon engine.
+
+Logique de routing :
+  GGUF → llama_service (cross-platform, défaut)
+  AWQ / GPTQ / FP8 / EXL2 / FP16 → vllm_service (NVIDIA requis)
+
+L'engine actif est unique — un seul modèle chargé à la fois.
+"""
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+from typing import Optional
+
+from loguru import logger
+
+from backend.models.schemas import ModelInfo
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Format detection
+# ──────────────────────────────────────────────────────────────────────────────
+
+def detect_format(model_id: str, model_path: str) -> str:
+    """
+    Retourne 'gguf' ou 'vllm' selon le format du modèle.
+    Priorité : fichiers présents > nom du modèle.
+    """
+    path = Path(model_path)
+    if path.is_dir():
+        gguf_files = list(path.glob("*.gguf"))
+        if gguf_files:
+            return "gguf"
+        safetensor_files = list(path.glob("*.safetensors")) + list(path.glob("*.bin"))
+        if safetensor_files:
+            return "vllm"
+
+    name_lower = model_id.lower()
+    if "gguf" in name_lower:
+        return "gguf"
+    if any(k in name_lower for k in ("awq", "gptq", "fp8", "exl2")):
+        return "vllm"
+
+    # Défaut : llama si aucun signal clair
+    return "gguf"
+
+
+def find_gguf_file(model_path: str) -> Optional[str]:
+    """Trouve le fichier .gguf principal dans le répertoire du modèle."""
+    path = Path(model_path)
+    if path.suffix == ".gguf" and path.exists():
+        return str(path)
+
+    # Préférer Q4_K_M > Q5_K_M > Q8_0 > tout autre
+    priority = ["q4_k_m", "q5_k_m", "q4_k_s", "q5_k_s", "q8_0", "q4_0"]
+    gguf_files = list(path.glob("*.gguf")) if path.is_dir() else []
+
+    for pref in priority:
+        for f in gguf_files:
+            if pref in f.name.lower():
+                return str(f)
+
+    # Fallback : premier fichier trouvé
+    return str(gguf_files[0]) if gguf_files else None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GPU detection
+# ──────────────────────────────────────────────────────────────────────────────
+
+def detect_gpu() -> dict:
+    """
+    Détecte le GPU disponible.
+    Retourne : { "type": "nvidia"|"amd"|"apple"|"cpu", "vram_mb": int }
+    """
+    # NVIDIA
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            vram_mb = int(result.stdout.strip().split("\n")[0].strip())
+            logger.info(f"GPU detected: NVIDIA ({vram_mb} MB VRAM)")
+            return {"type": "nvidia", "vram_mb": vram_mb}
+    except Exception:
+        pass
+
+    # AMD ROCm
+    try:
+        result = subprocess.run(
+            ["rocm-smi", "--showmeminfo", "vram", "--noheader"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and "vram" in result.stdout.lower():
+            logger.info("GPU detected: AMD ROCm")
+            return {"type": "amd", "vram_mb": 0}
+    except Exception:
+        pass
+
+    # Apple Metal
+    try:
+        import platform
+        if platform.system() == "Darwin":
+            result = subprocess.run(
+                ["system_profiler", "SPDisplaysDataType"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0 and "Metal" in result.stdout:
+                logger.info("GPU detected: Apple Metal")
+                return {"type": "apple", "vram_mb": 0}
+    except Exception:
+        pass
+
+    logger.info("No GPU detected — CPU only")
+    return {"type": "cpu", "vram_mb": 0}
+
+
+def is_vllm_available() -> bool:
+    """Vérifie si vLLM est installé dans .venv-vllm."""
+    from pathlib import Path
+    vllm_python = Path("/mnt/projects/echohub/.venv-vllm/bin/python")
+    if not vllm_python.exists():
+        return False
+    try:
+        result = subprocess.run(
+            [str(vllm_python), "-c", "import vllm"],
+            capture_output=True, timeout=10,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Active engine tracking
+# ──────────────────────────────────────────────────────────────────────────────
+
+_active_engine: Optional[str] = None  # "llama" | "vllm" | None
+
+
+def get_active_engine() -> Optional[str]:
+    return _active_engine
+
+
+def set_active_engine(engine: Optional[str]) -> None:
+    global _active_engine
+    _active_engine = engine
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Unified interface — délègue au bon engine
+# ──────────────────────────────────────────────────────────────────────────────
+
+def get_status() -> Optional[ModelInfo]:
+    from backend.services import llama_service, vllm_service
+    if _active_engine == "llama":
+        return llama_service.get_status()
+    if _active_engine == "vllm":
+        return vllm_service.get_status()
+    return None
+
+
+def get_load_state() -> dict:
+    from backend.services import llama_service, vllm_service
+    if _active_engine == "llama":
+        return llama_service.get_load_state()
+    if _active_engine == "vllm":
+        return vllm_service.get_load_state()
+    # Check both if no active engine (loading in progress)
+    vllm_state = vllm_service.get_load_state()
+    if vllm_state["loading_model_id"]:
+        return vllm_state
+    return llama_service.get_load_state()
+
+
+def load_model_async(
+    model_path: str,
+    model_id: str,
+    gpu_memory_utilization: Optional[float] = None,
+    max_model_len: Optional[int] = None,
+) -> None:
+    from backend.services import llama_service, vllm_service
+
+    fmt = detect_format(model_id, model_path)
+    gpu = detect_gpu()
+
+    # GGUF → toujours llama
+    if fmt == "gguf":
+        gguf_path = find_gguf_file(model_path)
+        if not gguf_path:
+            raise FileNotFoundError(f"No .gguf file found in {model_path}")
+        set_active_engine("llama")
+        logger.info(f"Routing {model_id} → llama-cpp-python (GGUF: {Path(gguf_path).name})")
+        llama_service.load_model_async(
+            gguf_path=gguf_path,
+            model_id=model_id,
+            n_ctx=max_model_len or 4096,
+            gpu_type=gpu["type"],
+        )
+        return
+
+    # AWQ/GPTQ/FP8 → vLLM si NVIDIA disponible
+    if gpu["type"] == "nvidia" and is_vllm_available():
+        set_active_engine("vllm")
+        logger.info(f"Routing {model_id} → vLLM ({fmt.upper()})")
+        vllm_service.load_model_async(
+            model_path=model_path,
+            model_id=model_id,
+            gpu_memory_utilization=gpu_memory_utilization,
+            max_model_len=max_model_len,
+        )
+        return
+
+    raise RuntimeError(
+        f"Cannot load {fmt.upper()} model: vLLM not available or no NVIDIA GPU detected. "
+        "Install vLLM in .venv-vllm or use a GGUF model instead."
+    )
+
+
+def unload_model() -> None:
+    from backend.services import llama_service, vllm_service
+    engine = _active_engine
+    set_active_engine(None)
+    if engine == "llama":
+        llama_service.unload_model()
+    elif engine == "vllm":
+        vllm_service.unload_model()
+
+
+async def generate(messages: list[dict], **kwargs):
+    from backend.services import llama_service, vllm_service
+    if _active_engine == "llama":
+        async for chunk in llama_service.generate(messages=messages, **kwargs):
+            yield chunk
+    elif _active_engine == "vllm":
+        async for chunk in vllm_service.generate(messages=messages, **kwargs):
+            yield chunk
+    else:
+        raise RuntimeError("No model loaded")
+
+
+def get_engine_log(n_lines: int = 100) -> str:
+    from backend.services import llama_service, vllm_service
+    if _active_engine == "llama":
+        return llama_service.get_log(n_lines)
+    if _active_engine == "vllm":
+        log_path = Path("/mnt/projects/echohub/logs/vllm.log")
+        if not log_path.exists():
+            return ""
+        lines = log_path.read_text(errors="replace").splitlines()
+        return "\n".join(lines[-n_lines:])
+    return ""
+
+
+def cleanup() -> None:
+    from backend.services import llama_service, vllm_service
+    llama_service.cleanup()
+    vllm_service.cleanup()

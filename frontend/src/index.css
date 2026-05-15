@@ -1,0 +1,92 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Reset & base ──────────────────────────────────────────────────────── */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #07090f;
+  color: rgba(255, 255, 255, 0.90);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 3px; height: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+/* ── Glassmorphism utilities ────────────────────────────────────────────── */
+
+@layer utilities {
+  .glass {
+    background: rgba(13, 17, 23, 0.72);
+    backdrop-filter: blur(12px) saturate(180%);
+    -webkit-backdrop-filter: blur(12px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .glass-light {
+    background: rgba(26, 33, 48, 0.50);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .echo-focus {
+    outline: none;
+    box-shadow: 0 0 0 1px rgba(74, 158, 191, 0.40), 0 0 16px rgba(74, 158, 191, 0.08);
+  }
+
+  /* Surface avec légère transparence pour la sidebar */
+  .surface-translucent {
+    background: rgba(13, 17, 23, 0.80);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+}
+
+/* ── Focus visible global ───────────────────────────────────────────────── */
+
+:focus-visible {
+  outline: 1px solid rgba(74, 158, 191, 0.50);
+  outline-offset: 2px;
+}
+
+/* ── Selection ─────────────────────────────────────────────────────────── */
+
+::selection {
+  background: rgba(74, 158, 191, 0.25);
+  color: white;
+}
+
+/* ── Range input (sliders) ─────────────────────────────────────────────── */
+
+input[type='range'] {
+  accent-color: #4A9EBF;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  background: #4A9EBF;
+}
+
+/* ── Transitions globales ───────────────────────────────────────────────── */
+
+button, a, input, select, textarea {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}

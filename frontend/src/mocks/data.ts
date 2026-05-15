@@ -1,0 +1,245 @@
+// Données mock réalistes pour le développement design
+
+export const MOCK_GPU = {
+  name: 'NVIDIA GeForce RTX 3060',
+  vram_used_mb: 2680,
+  vram_total_mb: 12288,
+  vram_free_mb: 9608,
+  gpu_utilization_pct: 27,
+  temperature_c: 52,
+}
+
+export const MOCK_GPU_BACKEND = {
+  backend: 'cuda',
+  gpu_name: 'NVIDIA GeForce RTX 3060',
+  cuda_available: true,
+}
+
+export const MOCK_CONVERSATIONS = [
+  {
+    id: 'conv-1',
+    title: 'Explain quantum entanglement',
+    model_id: 'Qwen/Qwen3-8B-AWQ',
+    created_at: '2026-05-16T10:00:00Z',
+    updated_at: '2026-05-16T10:05:00Z',
+    message_count: 4,
+  },
+  {
+    id: 'conv-2',
+    title: 'Write a Rust async runtime',
+    model_id: 'bartowski/Qwen_Qwen3.5-4B-GGUF',
+    created_at: '2026-05-16T09:00:00Z',
+    updated_at: '2026-05-16T09:30:00Z',
+    message_count: 8,
+  },
+  {
+    id: 'conv-3',
+    title: 'New Chat',
+    model_id: null,
+    created_at: '2026-05-16T11:00:00Z',
+    updated_at: '2026-05-16T11:00:00Z',
+    message_count: 0,
+  },
+]
+
+export const MOCK_MESSAGES: Record<string, object[]> = {
+  'conv-1': [
+    {
+      id: 'msg-1', conversation_id: 'conv-1', role: 'user',
+      content: 'Can you explain quantum entanglement in simple terms?',
+      stats: null, created_at: '2026-05-16T10:00:10Z',
+    },
+    {
+      id: 'msg-2', conversation_id: 'conv-1', role: 'assistant',
+      content: 'Quantum entanglement is a phenomenon where two particles become correlated in such a way that the quantum state of each particle cannot be described independently of the others, even when separated by large distances.\n\nImagine you have two coins that are "entangled". When you flip one and it lands heads, the other will *instantly* land tails — no matter how far apart they are. This isn\'t about hidden information; it\'s a fundamental property of quantum mechanics.\n\nEinstein famously called this "spooky action at a distance" because it seemed to violate the principle that nothing can travel faster than light. However, entanglement cannot be used to transmit information faster than light — the correlations only become apparent when you compare measurements through classical channels.',
+      stats: { tokens: 142, tok_per_sec: 48.3, time_ms: 2940, prompt_tokens: 18 },
+      created_at: '2026-05-16T10:00:13Z',
+    },
+    {
+      id: 'msg-3', conversation_id: 'conv-1', role: 'user',
+      content: 'How is this used in quantum computing?',
+      stats: null, created_at: '2026-05-16T10:04:00Z',
+    },
+    {
+      id: 'msg-4', conversation_id: 'conv-1', role: 'assistant',
+      content: 'In quantum computing, entanglement is one of the core resources that gives quantum computers their power:\n\n**1. Quantum parallelism** — Entangled qubits can represent exponentially many states simultaneously. A system of *n* entangled qubits exists in a superposition of 2ⁿ states at once.\n\n**2. Quantum teleportation** — Not physical teleportation, but the transfer of quantum states between locations using entanglement + classical communication. Essential for quantum networks.\n\n**3. Error correction** — Entanglement allows encoding logical qubits across multiple physical qubits, making quantum information more robust against decoherence.\n\n**4. Key algorithms** — Shor\'s algorithm (factoring) and Grover\'s algorithm (search) both rely heavily on entanglement to achieve their exponential speedups.',
+      stats: { tokens: 168, tok_per_sec: 51.2, time_ms: 3281, prompt_tokens: 31 },
+      created_at: '2026-05-16T10:04:05Z',
+    },
+  ],
+  'conv-2': [
+    {
+      id: 'msg-5', conversation_id: 'conv-2', role: 'user',
+      content: 'Write a minimal async runtime in Rust from scratch',
+      stats: null, created_at: '2026-05-16T09:00:10Z',
+    },
+    {
+      id: 'msg-6', conversation_id: 'conv-2', role: 'assistant',
+      content: '```rust\nuse std::{\n    collections::VecDeque,\n    future::Future,\n    pin::Pin,\n    sync::{Arc, Mutex},\n    task::{Context, Poll, RawWaker, RawWakerVTable, Waker},\n};\n\ntype BoxFuture = Pin<Box<dyn Future<Output = ()> + Send>>;\n\nstruct Task {\n    future: Mutex<BoxFuture>,\n}\n\nstruct Runtime {\n    queue: Arc<Mutex<VecDeque<Arc<Task>>>>,\n}\n\nimpl Runtime {\n    fn new() -> Self {\n        Runtime { queue: Arc::new(Mutex::new(VecDeque::new())) }\n    }\n\n    fn spawn(&self, future: impl Future<Output = ()> + Send + \'static) {\n        let task = Arc::new(Task {\n            future: Mutex::new(Box::pin(future)),\n        });\n        self.queue.lock().unwrap().push_back(task);\n    }\n\n    fn run(&self) {\n        loop {\n            let task = self.queue.lock().unwrap().pop_front();\n            let Some(task) = task else { break };\n            let waker = dummy_waker();\n            let mut cx = Context::from_waker(&waker);\n            let _ = task.future.lock().unwrap().as_mut().poll(&mut cx);\n        }\n    }\n}\n```',
+      stats: { tokens: 218, tok_per_sec: 44.7, time_ms: 4876, prompt_tokens: 12 },
+      created_at: '2026-05-16T09:00:18Z',
+    },
+  ],
+  'conv-3': [],
+}
+
+export const MOCK_DOWNLOADED_MODELS = [
+  {
+    id: 'Qwen/Qwen3-8B-AWQ',
+    name: 'Qwen3-8B-AWQ',
+    author: 'Qwen',
+    size_gb: 5.69,
+    quantization: 'AWQ',
+    params_billion: 8,
+    vram_estimate_gb: 4.8,
+    max_context_window: 131072,
+    capabilities: { thinking: true, vision: false, code: true, multilingual: true, tools: true },
+    downloaded: true, loaded: false,
+    downloads: 2117567, likes: 43,
+    description: 'Qwen3 is the latest generation of large language models in the Qwen series.',
+    last_modified: '2026-05-10',
+    pipeline_tag: 'text-generation',
+    arch_tag: 'qwen3',
+    gguf_files: null,
+    more_from_author: null,
+    gated: false,
+  },
+  {
+    id: 'Qwen/Qwen2-VL-7B-Instruct-AWQ',
+    name: 'Qwen2-VL-7B-Instruct-AWQ',
+    author: 'Qwen',
+    size_gb: 6.46,
+    quantization: 'AWQ',
+    params_billion: 7,
+    vram_estimate_gb: 4.2,
+    max_context_window: 32768,
+    capabilities: { thinking: false, vision: true, code: false, multilingual: true, tools: false },
+    downloaded: true, loaded: false,
+    downloads: 1687257, likes: 49,
+    description: null,
+    last_modified: '2025-12-01',
+    pipeline_tag: 'image-text-to-text',
+    arch_tag: 'qwen3',
+    gguf_files: null,
+    more_from_author: null,
+    gated: false,
+  },
+  {
+    id: 'bartowski/Qwen_Qwen3.5-4B-GGUF',
+    name: 'Qwen_Qwen3.5-4B-GGUF',
+    author: 'bartowski',
+    size_gb: 2.35,
+    quantization: 'GGUF/Q4_K_M',
+    params_billion: 4,
+    vram_estimate_gb: 2.2,
+    max_context_window: 131072,
+    capabilities: { thinking: true, vision: false, code: true, multilingual: true, tools: false },
+    downloaded: true, loaded: false,
+    downloads: 84682, likes: 29,
+    description: 'Qwen3.5 4B quantized with llama.cpp. All quants made using imatrix.',
+    last_modified: '2026-03-10',
+    pipeline_tag: 'text-generation',
+    arch_tag: 'qwen3',
+    gguf_files: [
+      { name: 'Qwen_Qwen3.5-4B-Q4_K_M.gguf', size_gb: 2.35, variant: 'Q4_K_M' },
+      { name: 'Qwen_Qwen3.5-4B-Q5_K_M.gguf', size_gb: 2.87, variant: 'Q5_K_M' },
+      { name: 'Qwen_Qwen3.5-4B-Q8_0.gguf', size_gb: 4.12, variant: 'Q8_0' },
+    ],
+    more_from_author: null,
+    gated: false,
+  },
+]
+
+export const MOCK_LOADED_MODEL = {
+  ...MOCK_DOWNLOADED_MODELS[0],
+  loaded: true,
+  max_context_window: 16384,
+}
+
+export const MOCK_SEARCH_RESULTS = [
+  {
+    id: 'unsloth/Qwen3.6-35B-A3B-GGUF',
+    name: 'Qwen3.6-35B-A3B-GGUF',
+    author: 'unsloth',
+    size_gb: null,
+    quantization: 'GGUF',
+    params_billion: 35,
+    vram_estimate_gb: 19.25,
+    max_context_window: 131072,
+    capabilities: { thinking: true, vision: false, code: true, multilingual: true, tools: true },
+    downloaded: false, loaded: false,
+    downloads: 3075105, likes: 1038,
+    description: 'See Unsloth Dynamic 2.0 GGUFs for our quantization benchmarks.',
+    last_modified: '2026-04-21',
+    pipeline_tag: 'text-generation',
+    arch_tag: 'qwen3',
+    gguf_files: [
+      { name: 'Qwen3.6-35B-A3B-Q2_K.gguf', size_gb: 3.1, variant: 'Q2_K' },
+      { name: 'Qwen3.6-35B-A3B-Q4_K_M.gguf', size_gb: 5.2, variant: 'Q4_K_M' },
+      { name: 'Qwen3.6-35B-A3B-Q5_K_M.gguf', size_gb: 6.1, variant: 'Q5_K_M' },
+      { name: 'Qwen3.6-35B-A3B-Q8_0.gguf', size_gb: 9.8, variant: 'Q8_0' },
+    ],
+    more_from_author: [
+      { id: 'unsloth/Qwen3-8B-GGUF', downloads: 202143, likes: 10 },
+      { id: 'unsloth/Qwen3-14B-GGUF', downloads: 202795, likes: 9 },
+    ],
+    gated: false,
+  },
+  {
+    id: 'bartowski/Qwen3-8B-GGUF',
+    name: 'Qwen3-8B-GGUF',
+    author: 'bartowski',
+    size_gb: null,
+    quantization: 'GGUF',
+    params_billion: 8,
+    vram_estimate_gb: 4.4,
+    max_context_window: 131072,
+    capabilities: { thinking: true, vision: false, code: true, multilingual: true, tools: false },
+    downloaded: true, loaded: false,
+    downloads: 1842317, likes: 234,
+    description: 'Qwen3 8B quantized with llama.cpp. All quants made using imatrix option.',
+    last_modified: '2026-05-01',
+    pipeline_tag: 'text-generation',
+    arch_tag: 'qwen3',
+    gguf_files: [
+      { name: 'Qwen3-8B-Q4_K_M.gguf', size_gb: 4.68, variant: 'Q4_K_M' },
+      { name: 'Qwen3-8B-Q5_K_M.gguf', size_gb: 5.73, variant: 'Q5_K_M' },
+      { name: 'Qwen3-8B-Q8_0.gguf', size_gb: 8.54, variant: 'Q8_0' },
+    ],
+    more_from_author: [
+      { id: 'bartowski/Qwen3-4B-GGUF', downloads: 892000, likes: 112 },
+    ],
+    gated: false,
+  },
+  {
+    id: 'google/gemma-3-9b-it',
+    name: 'gemma-3-9b-it',
+    author: 'google',
+    size_gb: null,
+    quantization: 'GGUF',
+    params_billion: 9,
+    vram_estimate_gb: 4.95,
+    max_context_window: 131072,
+    capabilities: { thinking: false, vision: true, code: false, multilingual: false, tools: false },
+    downloaded: false, loaded: false,
+    downloads: 924582, likes: 421,
+    description: 'Gemma 3 9B instruction-tuned model with vision capabilities.',
+    last_modified: '2026-04-15',
+    pipeline_tag: 'image-text-to-text',
+    arch_tag: 'gemma',
+    gguf_files: null,
+    more_from_author: null,
+    gated: true,
+  },
+]
+
+export const MOCK_DOWNLOAD_JOBS = [
+  {
+    model_id: 'bartowski/Qwen3-8B-GGUF',
+    state: 'running',
+    downloaded_gb: 2.34,
+    total_gb: 4.68,
+    progress: 0.5,
+    error: null,
+  },
+]
