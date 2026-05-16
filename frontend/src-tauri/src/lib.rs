@@ -52,21 +52,53 @@ fn spawn_backend(app: &AppHandle, port: u16) {
 
     let root = locate_project_root(app);
     let python = format!("{}/backend/.venv/bin/python", root);
+    let log_path = format!("{}/logs/backend.log", root);
+
+    // Ensure logs directory exists
+    let _ = std::fs::create_dir_all(format!("{}/logs", root));
 
     log::info!("Spawning backend on port {} (python: {})", port, python);
+    log::info!("Backend logs -> {}", log_path);
 
     let result = app.shell()
         .command(&python)
         .args(["-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", &port.to_string()])
         .env("PYTHONPATH", &root)
+        .env("LOGURU_SINK", &log_path)
         .spawn();
 
     match result {
-        Ok((_, child)) => {
+        Ok((mut rx, child)) => {
             let child_arc = get_child_arc(app);
             let mut guard = child_arc.lock().unwrap();
             *guard = Some(child);
             log::info!("Backend spawned successfully");
+
+            // Forward backend stdout/stderr to log file via Tauri's event stream
+            let log_path_clone = log_path.clone();
+            tauri::async_runtime::spawn(async move {
+                use tauri_plugin_shell::process::CommandEvent;
+                use std::io::Write;
+
+                let file = std::fs::OpenOptions::new()
+                    .create(true).append(true).open(&log_path_clone);
+
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        CommandEvent::Stdout(line) | CommandEvent::Stderr(line) => {
+                            if let Ok(mut f) = file.as_ref() {
+                                let _ = f.write_all(&line);
+                                let _ = f.write_all(b"\n");
+                            }
+                        }
+                        CommandEvent::Terminated(_) => {
+                            log::info!("Backend process terminated");
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+            });
         }
         Err(e) => log::error!("Failed to spawn backend: {}", e),
     }
