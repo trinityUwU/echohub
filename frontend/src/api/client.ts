@@ -149,13 +149,8 @@ export async function chatStream(
     const startTime = Date.now()
     let completionTokens = 0, promptTokens = 0
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      const lines = buf.split('\n\n')
-      buf = lines.pop() ?? ''
-      for (const block of lines) {
+    const processBlocks = (blocks: string[]): void => {
+      for (const block of blocks) {
         if (!block.startsWith('data: ')) continue
         const raw = block.slice(6).trim()
         if (raw === '[DONE]') continue
@@ -172,6 +167,19 @@ export async function chatStream(
           }
         } catch { /* skip malformed */ }
       }
+    }
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        // Flush remaining buffer — last chunks (usage, [DONE]) may still be in buf
+        processBlocks(buf.split('\n\n'))
+        break
+      }
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n\n')
+      buf = lines.pop() ?? ''
+      processBlocks(lines)
     }
 
     const endTime = Date.now()
