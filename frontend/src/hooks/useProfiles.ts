@@ -84,7 +84,7 @@ export function useProfiles() {
 
   const deleteProfile = useCallback((id: string): void => {
     // Built-in profiles cannot be deleted
-    if (['default', 'coder', 'creative'].includes(id)) return
+    if (id === 'default') return
     setProfiles(prev => {
       const updated = prev.filter(p => p.id !== id)
       persistProfiles(updated)

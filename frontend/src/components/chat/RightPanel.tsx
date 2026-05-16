@@ -121,7 +121,7 @@ function ProfileSection({ params, profiles }: ProfileSectionProps): React.ReactE
   )
 }
 
-const BUILTIN_IDS = ['default', 'coder', 'creative']
+const BUILTIN_IDS = ['default']
 
 function ProfileDropdown({ list, activeId, onSelect, onDelete }: {
   list: import('@/types').ChatProfile[]
