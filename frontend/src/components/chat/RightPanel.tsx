@@ -70,11 +70,9 @@ function ProfileSection({ params, profiles }: ProfileSectionProps): React.ReactE
     setNaming(false)
   }
 
-  const isBuiltin = ['default', 'coder', 'creative'].includes(activeId)
-
   return (
     <div className="flex flex-col gap-2.5">
-      <ProfileDropdown list={list} activeId={activeId} onSelect={handleSelect} />
+      <ProfileDropdown list={list} activeId={activeId} onSelect={handleSelect} onDelete={deleteProfile} />
 
       {!naming ? (
         <div className="flex gap-1.5">
@@ -90,20 +88,6 @@ function ProfileSection({ params, profiles }: ProfileSectionProps): React.ReactE
           >
             New
           </button>
-          {!isBuiltin && (
-            <button
-              onClick={() => {
-                const name = list.find(p => p.id === activeId)?.name ?? 'Profile'
-                if (window.confirm(`Delete "${name}"?`)) deleteProfile(activeId)
-              }}
-              className="w-8 flex items-center justify-center rounded-sm border border-border hover:border-red/30 hover:bg-red/10 text-text-muted hover:text-red cursor-pointer transition-colors"
-              title="Delete profile"
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/>
-              </svg>
-            </button>
-          )}
         </div>
       ) : (
         <div className="flex flex-col gap-1.5">
@@ -137,10 +121,13 @@ function ProfileSection({ params, profiles }: ProfileSectionProps): React.ReactE
   )
 }
 
-function ProfileDropdown({ list, activeId, onSelect }: {
+const BUILTIN_IDS = ['default', 'coder', 'creative']
+
+function ProfileDropdown({ list, activeId, onSelect, onDelete }: {
   list: import('@/types').ChatProfile[]
   activeId: string
   onSelect: (id: string) => void
+  onDelete: (id: string) => void
 }): React.ReactElement {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -154,6 +141,14 @@ function ProfileDropdown({ list, activeId, onSelect }: {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
+
+  const handleDelete = (e: React.MouseEvent, p: import('@/types').ChatProfile): void => {
+    e.stopPropagation()
+    if (window.confirm(`Delete "${p.name}"?`)) {
+      onDelete(p.id)
+      setOpen(false)
+    }
+  }
 
   return (
     <div className="relative" ref={ref}>
@@ -171,22 +166,33 @@ function ProfileDropdown({ list, activeId, onSelect }: {
       {open && (
         <div className="absolute top-full left-0 right-0 mt-1 bg-elevated border border-border-hover rounded-md shadow-[0_8px_24px_rgba(0,0,0,0.4)] z-50 overflow-hidden">
           {list.map(p => (
-            <button
+            <div
               key={p.id}
               onClick={() => { onSelect(p.id); setOpen(false) }}
-              className={`w-full text-left px-3 py-2 text-sm cursor-pointer transition-colors flex items-center justify-between gap-2 ${
+              className={`w-full px-3 py-2 text-sm cursor-pointer transition-colors flex items-center gap-2 group ${
                 p.id === activeId
                   ? 'bg-accent-dim text-accent'
                   : 'text-text-secondary hover:bg-overlay hover:text-text-primary'
               }`}
             >
-              <span>{p.name}</span>
-              {p.id === activeId && (
+              <span className="flex-1">{p.name}</span>
+              {p.id === activeId && !BUILTIN_IDS.includes(p.id) && (
+                <button
+                  onClick={e => handleDelete(e, p)}
+                  className="opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center rounded hover:bg-red/20 text-text-muted hover:text-red transition-all flex-shrink-0"
+                  title={`Delete ${p.name}`}
+                >
+                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/>
+                  </svg>
+                </button>
+              )}
+              {p.id === activeId && BUILTIN_IDS.includes(p.id) && (
                 <svg className="w-3 h-3 stroke-accent flex-shrink-0" viewBox="0 0 24 24" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12"/>
                 </svg>
               )}
-            </button>
+            </div>
           ))}
         </div>
       )}
