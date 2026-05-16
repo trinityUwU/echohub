@@ -151,3 +151,25 @@ async def stream_downloads() -> StreamingResponse:
             pass
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.get("/readme/{model_id:path}")
+def get_model_readme(model_id: str) -> dict:
+    """Return the full README.md for a model (fetches from HF cache or downloads)."""
+    try:
+        from huggingface_hub import hf_hub_download
+        from pathlib import Path as _P
+        readme_path = hf_hub_download(
+            repo_id=model_id,
+            filename="README.md",
+            token=_get_hf_token(),
+        )
+        content = _P(readme_path).read_text(encoding="utf-8", errors="ignore")
+        # Strip YAML front matter
+        if content.startswith("---"):
+            end = content.find("\n---", 3)
+            if end != -1:
+                content = content[end + 4:].lstrip("\n")
+        return {"content": content}
+    except Exception as e:
+        return {"content": None, "error": str(e)}

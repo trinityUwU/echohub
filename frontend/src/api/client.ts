@@ -236,3 +236,6 @@ export const canLoadModel = (modelId: string, gpuUtil?: number, maxModelLen?: nu
   method: 'POST',
   body: JSON.stringify({ model_id: modelId, gpu_memory_utilization: gpuUtil, max_model_len: maxModelLen }),
 })
+
+export const getModelReadme = (modelId: string): Promise<{ content: string | null; error?: string }> =>
+  apiRequest(`/models/readme/${encodeURIComponent(modelId)}`)
