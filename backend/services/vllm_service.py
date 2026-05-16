@@ -16,8 +16,8 @@ VLLM_PID_FILE = Path("/tmp/echohub_vllm.pid")
 VLLM_PORT = 37823
 VLLM_BASE_URL = f"http://127.0.0.1:{VLLM_PORT}"
 VLLM_PYTHON = Path("/mnt/projects/echohub/.venv-vllm/bin/python")
-VRAM_SAFETY_MARGIN = 0.02   # 2% of total reserved
-VRAM_FIXED_OVERHEAD_MB = 1024  # 1GB fixed: vLLM process startup, NCCL, misc
+VRAM_SAFETY_MARGIN = 0.03   # 3% of total reserved
+VRAM_FIXED_OVERHEAD_MB = 1536  # 1.5GB fixed: vLLM process startup, NCCL, CUDA graphs
 VRAM_SAMPLE_WINDOW = 10    # last N nvidia-smi samples for baseline
 
 _current_model: Optional[ModelInfo] = None
@@ -318,25 +318,30 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
         except Exception:
             pass
         suggested_len = _parse_suggested_max_len(log_content)
+        is_util_oom = "Free memory on device" in log_content and "is less than desired GPU memory utilization" in log_content
         unload_model()
         if _eject_requested:
             raise RuntimeError("Ejected by user")
+
+        # Retry: KV cache OOM → reduce context
         if suggested_len and (max_model_len is None or suggested_len < max_model_len):
-            logger.warning(
-                f"KV cache OOM: max_model_len={max_model_len} too large. "
-                f"Auto-retrying with max_model_len={suggested_len}."
-            )
-            load_model(
-                model_path=model_path,
-                model_id=model_id,
-                gpu_memory_utilization=gpu_memory_utilization,
-                max_model_len=suggested_len,
-            )
+            logger.warning(f"KV cache OOM — auto-retrying with max_model_len={suggested_len}")
+            load_model(model_path=model_path, model_id=model_id,
+                       gpu_memory_utilization=gpu_memory_utilization, max_model_len=suggested_len)
             return
+
+        # Retry: GPU util OOM → reduce utilization by 3%
+        if is_util_oom and gpu_memory_utilization is not None and gpu_memory_utilization > 0.55:
+            reduced = round(gpu_memory_utilization - 0.03, 2)
+            logger.warning(f"GPU util OOM — auto-retrying with gpu_memory_utilization={reduced}")
+            load_model(model_path=model_path, model_id=model_id,
+                       gpu_memory_utilization=reduced, max_model_len=max_model_len)
+            return
+
         raise RuntimeError(
             f"vLLM failed to start. "
-            + (f"Try reducing context window (suggested max: {suggested_len} tokens)." if suggested_len
-               else "Check VRAM — not enough memory for this model.")
+            + (f"Try reducing context window (max: {suggested_len} tokens)." if suggested_len
+               else "Not enough VRAM — lower GPU utilization % or reduce context length.")
         )
 
     _current_model = ModelInfo(
