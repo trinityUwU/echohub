@@ -6,13 +6,8 @@ import { canLoadModel } from '@/api/client'
 import type { ModelInfo } from '@/types'
 
 interface CanLoadResult {
-  engine: string
-  format: string
-  feasible: boolean
-  reason: string | null
-  vram_estimate_gb: number | null
-  gpu_type: string
-  vllm_available: boolean
+  engine: string; format: string; feasible: boolean; reason: string | null
+  vram_estimate_gb: number | null; gpu_type: string; vllm_available: boolean
 }
 
 interface LoadModelModalProps {
@@ -23,84 +18,61 @@ interface LoadModelModalProps {
   onCancel: () => void
 }
 
-const VLLM_CUDA_OVERHEAD_GB = 1.2  // CUDA graphs + runtime baseline
-const SAFETY_MARGIN_GB      = 0.5  // buffer to avoid edge-case OOM
+const CUDA_OVERHEAD_GB  = 1.2   // CUDA graphs + runtime
+const SAFETY_MARGIN_GB  = 0.3   // buffer
 
-/**
- * KV cache estimate for vLLM.
- * Real formula: 2 * num_layers * num_heads * head_dim * ctx * dtype_bytes
- * Approximation for 7-8B models: ~0.25 GB per 8k ctx tokens
- */
-function estimateKvCacheGb(ctxLen: number, paramsBillion: number): number {
-  const ctxK = ctxLen / 1000
-  const scale = (paramsBillion ?? 8) / 8  // scale relative to 8B baseline
-  return ctxK * 0.03 * scale  // ~0.03 GB per 1k ctx tokens for 8B
-}
-
-
-/**
- * VRAM budget available = total * gpuUtil - alreadyUsed
- * vLLM allocates up to gpuUtil * total for its memory pool.
- */
-function computeVllmBudget(vramTotalGb: number, vramUsedGb: number, gpuUtil: number): number {
-  return vramTotalGb * gpuUtil - vramUsedGb
+function kvCacheGb(ctxLen: number, paramsBillion: number): number {
+  // ~0.025 GB per 1k ctx for 8B — scales linearly with params
+  return (ctxLen / 1000) * 0.025 * (paramsBillion / 8)
 }
 
 export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCancel }: LoadModelModalProps): React.ReactElement {
-  const defaultCtx = Math.min(model.max_context_window ?? 16384, 16384)
   const [gpuUtilPct, setGpuUtilPct] = useState(80)
-  const gpuUtil = gpuUtilPct / 100
-  const [ctxLen, setCtxLen] = useState(defaultCtx)
+  const [ctxLen, setCtxLen] = useState(Math.min(model.max_context_window ?? 16384, 16384))
   const [check, setCheck] = useState<CanLoadResult | null>(null)
   const [checking, setChecking] = useState(true)
 
   useEffect(() => {
     setChecking(true)
     canLoadModel(model.id)
-      .then(setCheck)
-      .catch(() => setCheck(null))
-      .finally(() => setChecking(false))
+      .then(setCheck).catch(() => setCheck(null)).finally(() => setChecking(false))
   }, [model.id])
 
-  const engine = check?.engine ?? (model.quantization?.toLowerCase().includes('gguf') ? 'llama' : 'vllm')
-  const weightsGb = check?.vram_estimate_gb ?? model.vram_estimate_gb ?? 5.0
-  const params = model.params_billion ?? 8
+  const gpuUtil   = gpuUtilPct / 100
+  const engine    = check?.engine ?? (model.quantization?.toLowerCase().includes('gguf') ? 'llama' : 'vllm')
+  const params    = model.params_billion ?? 8
 
-  // Real-time VRAM accounting (recalculates on every slider move)
-  const kvGb      = estimateKvCacheGb(ctxLen, params)
-  const totalNeed = engine === 'vllm'
-    ? weightsGb + kvGb + VLLM_CUDA_OVERHEAD_GB
-    : weightsGb  // llama.cpp manages its own memory
-  const budget    = computeVllmBudget(vramTotalGb, vramUsedGb, gpuUtil)
-  const freeAfter = Math.max(0, vramTotalGb - vramUsedGb - totalNeed)
-  const isOom     = engine === 'vllm'
-    ? totalNeed + SAFETY_MARGIN_GB > budget
-    : totalNeed > vramTotalGb - vramUsedGb
+  // Priority: metadata from HF (most accurate) > backend file estimate > fallback
+  const weightsGb = model.vram_estimate_gb ?? check?.vram_estimate_gb ?? params * 0.6
+
+  const kv        = engine === 'vllm' ? kvCacheGb(ctxLen, params) : 0
+  const overhead  = engine === 'vllm' ? CUDA_OVERHEAD_GB : 0
+  const totalNeed = weightsGb + kv + overhead
+
+  // vLLM allocates: total * gpuUtil. Must fit totalNeed + safety margin.
+  const budgetGb  = vramTotalGb * gpuUtil
+  const available = budgetGb - vramUsedGb
+  const isOom     = totalNeed + SAFETY_MARGIN_GB > available
+
+  // Ctx ceiling: largest ctx that fits within current budget
+  const safeCtxK  = Math.max(2, (available - weightsGb - overhead - SAFETY_MARGIN_GB) / (0.025 * params / 8))
+  const ctxMax    = engine === 'vllm'
+    ? Math.min(model.max_context_window ?? 131072, Math.floor(safeCtxK) * 1000)
+    : (model.max_context_window ?? 131072)
 
   const canSubmit = !checking && (check?.feasible ?? false) && !isOom
 
-  // Safe ctx max = ctx where totalNeed exactly fits budget
-  const maxSafeCtx = Math.floor(
-    Math.max(2048, ((budget - weightsGb - VLLM_CUDA_OVERHEAD_GB - SAFETY_MARGIN_GB) / (0.03 * params / 8)) * 1000 / 2048) * 2048
-  )
-  const ctxMax = engine === 'vllm'
-    ? Math.min(model.max_context_window ?? 131072, Math.max(2048, maxSafeCtx))
-    : Math.min(model.max_context_window ?? 131072, 131072)
-
   return (
-    <Modal
-      title="Load model"
-      onClose={onCancel}
-      footer={
-        <>
-          <Btn onClick={onCancel}>Cancel</Btn>
-          <Btn variant="primary" disabled={!canSubmit}
-            onClick={() => onConfirm({ gpuMemoryUtilization: gpuUtil, maxModelLen: ctxLen })}>
-            {checking ? 'Checking…' : 'Load model'}
-          </Btn>
-        </>
-      }
-    >
+    <Modal title="Load model" onClose={onCancel} footer={
+      <>
+        <Btn onClick={onCancel}>Cancel</Btn>
+        <Btn variant="primary" disabled={!canSubmit}
+          onClick={() => onConfirm({ gpuMemoryUtilization: gpuUtil, maxModelLen: ctxLen })}>
+          {checking ? 'Checking…' : 'Load model'}
+        </Btn>
+      </>
+    }>
+      {/* Model + engine */}
       <div className="bg-elevated border border-border rounded-sm px-3 py-2.5 flex items-center justify-between">
         <span className="text-sm font-semibold text-text-primary">{model.name}</span>
         <span className={`text-2xs px-1.5 py-0.5 rounded ${engine === 'llama' ? 'bg-green/15 text-green' : 'bg-blue/15 text-blue'}`}>
@@ -108,6 +80,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCa
         </span>
       </div>
 
+      {/* Infeasibility */}
       {check && !check.feasible && (
         <div className="flex items-start gap-2 bg-red/8 border border-red/25 rounded-sm px-3 py-2.5 text-sm text-red">
           <svg className="w-4 h-4 flex-shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -117,86 +90,91 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCa
         </div>
       )}
 
-      <VramPreview
-        usedGb={vramUsedGb}
-        modelGb={totalNeed}
-        freeGb={freeAfter}
-        totalGb={vramTotalGb}
-        budgetGb={engine === 'vllm' ? budget : vramTotalGb - vramUsedGb}
-        isOom={isOom}
-        engine={engine}
-        weightsGb={weightsGb}
-        kvGb={kvGb}
+      {/* VRAM preview */}
+      <VramBar
+        totalGb={vramTotalGb} usedGb={vramUsedGb}
+        weightsGb={weightsGb} kvGb={kv} overheadGb={overhead}
+        budgetGb={budgetGb} isOom={isOom} engine={engine}
       />
 
+      {/* Parameters */}
       <div>
         <div className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-2.5">Parameters</div>
         {engine === 'vllm' && (
-          <Slider label="GPU memory utilization" value={gpuUtilPct} min={50} max={95} step={1} onChange={setGpuUtilPct} formatValue={v => `${v}%`} />
+          <Slider label="GPU memory utilization" value={gpuUtilPct} min={50} max={95} step={1}
+            onChange={setGpuUtilPct} formatValue={v => `${v}%`} />
         )}
-        <Slider
-          label="Context length"
-          value={Math.min(ctxLen, ctxMax)}
-          min={2048}
-          max={ctxMax}
-          step={2048}
-          onChange={setCtxLen}
-          formatValue={v => v.toLocaleString('en')}
-        />
+        <Slider label="Context length"
+          value={Math.min(ctxLen, Math.max(2048, ctxMax))}
+          min={2048} max={Math.max(2048, ctxMax)} step={2048}
+          onChange={setCtxLen} formatValue={v => v.toLocaleString('en')} />
         {engine === 'vllm' && ctxMax < (model.max_context_window ?? 131072) && (
           <div className="text-xs text-yellow mt-1">
-            Max safe context at {gpuUtilPct}% utilization: {ctxMax.toLocaleString('en')} tokens
+            Max safe ctx at {gpuUtilPct}% util: {ctxMax.toLocaleString('en')} tokens
           </div>
         )}
         {engine === 'llama' && (
-          <div className="text-xs text-text-muted mt-1">
-            GPU memory is managed automatically by llama.cpp
-          </div>
+          <div className="text-xs text-text-muted mt-1">GPU memory managed automatically by llama.cpp</div>
         )}
       </div>
     </Modal>
   )
 }
 
-function VramPreview({ usedGb, modelGb, freeGb, totalGb, budgetGb, isOom, engine, weightsGb, kvGb }: {
-  usedGb: number; modelGb: number; freeGb: number; totalGb: number; budgetGb: number
-  isOom: boolean; engine: string; weightsGb: number; kvGb: number
+function VramBar({ totalGb, usedGb, weightsGb, kvGb, overheadGb, budgetGb, isOom, engine }: {
+  totalGb: number; usedGb: number; weightsGb: number; kvGb: number
+  overheadGb: number; budgetGb: number; isOom: boolean; engine: string
 }): React.ReactElement {
-  const usedPct   = Math.min((usedGb  / totalGb) * 100, 100)
-  const modelPct  = Math.min((modelGb / totalGb) * 100, 100 - usedPct)
-  const budgetPct = Math.min((budgetGb / totalGb) * 100, 100)
+  const pct = (gb: number): number => Math.min((gb / totalGb) * 100, 100)
+
+  const systemPct   = pct(usedGb)
+  const weightsPct  = pct(weightsGb)
+  const kvPct       = pct(kvGb)
+  const overheadPct = pct(overheadGb)
+  const budgetPct   = pct(budgetGb)
+  const freeGb      = Math.max(0, totalGb - usedGb - weightsGb - kvGb - overheadGb)
+  const modelColor  = isOom ? 'bg-red' : 'bg-accent'
 
   return (
     <div className="bg-elevated border border-border rounded-sm p-3">
-      <div className="text-xs text-text-muted mb-2">VRAM preview</div>
-      <div className="relative h-2 bg-overlay rounded overflow-hidden mb-1">
-        <div className="absolute left-0 top-0 h-full bg-white/10" style={{ width: `${usedPct}%` }} />
-        <div className={`absolute top-0 h-full transition-all ${isOom ? 'bg-red' : 'bg-accent'}`}
-          style={{ left: `${usedPct}%`, width: `${modelPct}%` }} />
+      <div className="text-xs text-text-muted mb-2">VRAM preview — {totalGb.toFixed(0)} GB total</div>
+
+      {/* Stacked bar */}
+      <div className="relative h-5 bg-overlay rounded-sm overflow-hidden mb-3 flex">
+        <div className="h-full bg-white/20 transition-all" style={{ width: `${systemPct}%` }} title={`System: ${usedGb.toFixed(1)} GB`} />
+        <div className={`h-full ${modelColor} transition-all`} style={{ width: `${weightsPct}%` }} title={`Weights: ${weightsGb.toFixed(1)} GB`} />
+        {kvGb > 0 && <div className={`h-full ${modelColor} opacity-60 transition-all`} style={{ width: `${kvPct}%` }} title={`KV cache: ${kvGb.toFixed(1)} GB`} />}
+        {overheadGb > 0 && <div className={`h-full ${modelColor} opacity-30 transition-all`} style={{ width: `${overheadPct}%` }} title={`CUDA overhead: ${overheadGb.toFixed(1)} GB`} />}
+        {/* Budget line */}
         {engine === 'vllm' && (
-          <div className="absolute top-0 h-full border-r-2 border-yellow/60 border-dashed"
-            style={{ left: `${budgetPct}%` }} />
+          <div className="absolute top-0 bottom-0 w-0.5 bg-yellow z-10 transition-all"
+            style={{ left: `${Math.min(budgetPct, 99.5)}%` }} />
         )}
       </div>
-      {engine === 'vllm' && (
-        <div className="text-2xs text-yellow/60 mb-2 text-right">▲ GPU util limit</div>
-      )}
-      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-text-muted">
-        <LegendItem color="bg-white/15" label={`System ${usedGb.toFixed(1)} GB`} />
-        <LegendItem color={isOom ? 'bg-red' : 'bg-accent'} label={`Weights ${weightsGb.toFixed(1)} GB`} />
-        {engine === 'vllm' && <LegendItem color="bg-accent/50" label={`KV cache ~${kvGb.toFixed(1)} GB`} />}
-        <LegendItem color="bg-overlay" label={`Free ${freeGb.toFixed(1)} GB`} />
-        {isOom && <span className="text-red font-medium ml-auto">⚠ OOM — reduce ctx or GPU util</span>}
+
+      {/* Legend */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+        <Leg color="bg-white/20"       label="System"   val={`${usedGb.toFixed(1)} GB`} />
+        <Leg color={modelColor}        label="Weights"  val={`${weightsGb.toFixed(1)} GB`} />
+        {kvGb > 0    && <Leg color={`${modelColor} opacity-60`} label="KV cache" val={`~${kvGb.toFixed(1)} GB`} />}
+        {overheadGb > 0 && <Leg color={`${modelColor} opacity-30`} label="Overhead" val={`${overheadGb.toFixed(1)} GB`} />}
+        <Leg color="bg-overlay border border-border" label="Free" val={`${freeGb.toFixed(1)} GB`} />
+        {engine === 'vllm' && <Leg color="bg-yellow" label="GPU util limit" val={`${budgetGb.toFixed(1)} GB`} />}
       </div>
+
+      {isOom && (
+        <div className="mt-2 text-xs text-red font-medium">⚠ OOM — lower context length or increase GPU utilization</div>
+      )}
     </div>
   )
 }
 
-function LegendItem({ color, label }: { color: string; label: string }): React.ReactElement {
+function Leg({ color, label, val }: { color: string; label: string; val: string }): React.ReactElement {
   return (
-    <span className="flex items-center gap-1">
-      <span className={`w-1.5 h-1.5 rounded-full ${color}`} />
-      {label}
+    <span className="flex items-center gap-1.5 text-text-muted">
+      <span className={`w-2.5 h-2.5 rounded-sm flex-shrink-0 ${color}`} />
+      <span>{label}</span>
+      <span className="ml-auto font-mono text-text-secondary">{val}</span>
     </span>
   )
 }
