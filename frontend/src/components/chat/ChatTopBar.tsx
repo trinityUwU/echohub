@@ -12,10 +12,10 @@ interface ChatTopBarProps {
 
 export function ChatTopBar({ loadedModel, loading, loadingPct, onOpenPicker, onOpenLoad, onClear, onEject }: ChatTopBarProps): React.ReactElement {
   if (loading) return <LoadingBar pct={loadingPct} modelName={loadedModel?.name ?? '…'} onEject={onEject} />
-  return <NormalBar loadedModel={loadedModel} onOpenPicker={onOpenPicker} onOpenLoad={onOpenLoad} onClear={onClear} />
+  return <NormalBar loadedModel={loadedModel} onOpenPicker={onOpenPicker} onOpenLoad={onOpenLoad} onClear={onClear} onEject={onEject} />
 }
 
-function NormalBar({ loadedModel, onOpenPicker, onOpenLoad, onClear }: Pick<ChatTopBarProps, 'loadedModel' | 'onOpenPicker' | 'onOpenLoad' | 'onClear'>): React.ReactElement {
+function NormalBar({ loadedModel, onOpenPicker, onOpenLoad, onClear, onEject }: Pick<ChatTopBarProps, 'loadedModel' | 'onOpenPicker' | 'onOpenLoad' | 'onClear' | 'onEject'>): React.ReactElement {
   return (
     <div className="h-[50px] bg-surface border-b border-border flex items-center px-4 gap-2.5 flex-shrink-0">
       <button
@@ -37,6 +37,12 @@ function NormalBar({ loadedModel, onOpenPicker, onOpenLoad, onClear }: Pick<Chat
           <path d="M21 2H3v16h5v4l4-4h5l4-4V2z"/>
           Load
         </TopBarBtn>
+        {loadedModel && (
+          <TopBarBtn onClick={onEject}>
+            <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/>
+            Eject
+          </TopBarBtn>
+        )}
         <TopBarBtn onClick={onClear}>
           <polyline points="1 4 1 10 7 10"/>
           <path d="M3.51 15a9 9 0 1 0 .49-5.01"/>
