@@ -27,7 +27,7 @@ function kvCacheGb(ctxLen: number, paramsBillion: number): number {
 }
 
 export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCancel }: LoadModelModalProps): React.ReactElement {
-  const [gpuUtilPct, setGpuUtilPct] = useState(80)
+  const [gpuUtilPct, setGpuUtilPct] = useState(72)
   const [ctxLen, setCtxLen] = useState(Math.min(model.max_context_window ?? 16384, 16384))
   const [check, setCheck] = useState<CanLoadResult | null>(null)
   const [checking, setChecking] = useState(true)
@@ -49,13 +49,17 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCa
   const overhead  = engine === 'vllm' ? CUDA_OVERHEAD_GB : 0
   const totalNeed = weightsGb + kv + overhead
 
-  // vLLM allocates: total * gpuUtil. Must fit totalNeed + safety margin.
-  const budgetGb  = vramTotalGb * gpuUtil
-  const available = budgetGb - vramUsedGb
-  const isOom     = totalNeed + SAFETY_MARGIN_GB > available
+  // vLLM requires: vramCuda * gpuUtil >= totalNeed
+  // vramCuda (GiB) ≈ vramTotal (GB) * 0.9313 (1 GiB = 1.0737 GB conversion)
+  // We compute budget from free VRAM to stay conservative.
+  const vramCudaGib = vramTotalGb * 0.9313
+  const budgetGb    = vramCudaGib * gpuUtil
+  // vLLM checks: free >= budget. free = vramCuda - vramUsed
+  const cudaFreeGib = vramCudaGib - vramUsedGb
+  const isOom       = budgetGb > cudaFreeGib || totalNeed + SAFETY_MARGIN_GB > cudaFreeGib
 
-  // Ctx ceiling: largest ctx that fits within current budget
-  const safeCtxK  = Math.max(2, (available - weightsGb - overhead - SAFETY_MARGIN_GB) / (0.025 * params / 8))
+  // Ctx ceiling: largest ctx that fits within budget
+  const safeCtxK  = Math.max(2, (cudaFreeGib - weightsGb - overhead - SAFETY_MARGIN_GB) / (0.025 * params / 8))
   const ctxMax    = engine === 'vllm'
     ? Math.min(model.max_context_window ?? 131072, Math.floor(safeCtxK) * 1000)
     : (model.max_context_window ?? 131072)
