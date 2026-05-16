@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useChat } from '@/hooks/useChat'
 import { useProfiles } from '@/hooks/useProfiles'
 import type { ConversationSummary, ModelInfo, GpuStats, ChatMessage } from '@/types'
@@ -35,12 +35,16 @@ export function ChatPage({
   setActiveMessages,
 }: ChatPageProps): React.ReactElement {
   const profilesHook = useProfiles()
-  const params = profilesHook.activeProfile.params
-  const setParams = (p: typeof params): void => profilesHook.saveProfile(
-    profilesHook.activeId,
-    profilesHook.activeProfile.name,
-    p,
-  )
+  // Local params state — syncs from profile on profile switch, edited freely by sliders
+  const [params, setParams] = useState(profilesHook.activeProfile.params)
+  const prevProfileId = useRef(profilesHook.activeId)
+
+  useEffect(() => {
+    if (profilesHook.activeId !== prevProfileId.current) {
+      setParams(profilesHook.activeProfile.params)
+      prevProfileId.current = profilesHook.activeId
+    }
+  }, [profilesHook.activeId, profilesHook.activeProfile.params])
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const { messages, streaming, stats, send, stop, setMessages } = useChat(

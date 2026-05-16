@@ -17,7 +17,7 @@ export function RightPanel({ params, onChange, profiles }: RightPanelProps): Rea
   return (
     <aside className="w-[260px] bg-surface border-l border-border flex flex-col flex-shrink-0 overflow-y-auto">
       <Accordion title="Profile">
-        <ProfileSection params={params} onChange={onChange} profiles={profiles} />
+        <ProfileSection params={params} profiles={profiles} />
       </Accordion>
       <Accordion title="System Prompt">
         <textarea
@@ -46,18 +46,17 @@ export function RightPanel({ params, onChange, profiles }: RightPanelProps): Rea
 
 interface ProfileSectionProps {
   params: ChatParams
-  onChange: (p: ChatParams) => void
   profiles: ReturnType<typeof useProfiles>
 }
 
-function ProfileSection({ params, onChange, profiles }: ProfileSectionProps): React.ReactElement {
+function ProfileSection({ params, profiles }: ProfileSectionProps): React.ReactElement {
   const { profiles: list, activeId, selectProfile, saveProfile, deleteProfile } = profiles
   const [saving, setSaving] = useState(false)
   const [newName, setNewName] = useState('')
 
   const handleSelect = (id: string): void => {
-    const loaded = selectProfile(id)
-    onChange(loaded)
+    selectProfile(id)
+    // activeProfile.params updates automatically via hook state — no need to call onChange
   }
 
   const handleSaveCurrent = (): void => {
