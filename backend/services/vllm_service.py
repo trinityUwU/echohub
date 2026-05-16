@@ -338,10 +338,17 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
                        gpu_memory_utilization=reduced, max_model_len=max_model_len)
             return
 
+        # Extract root cause from vLLM log
+        root_cause = ""
+        for line in reversed(log_content.splitlines()):
+            if "ValueError:" in line or "RuntimeError:" in line or "OSError:" in line:
+                root_cause = line.split("Error:")[-1].strip()[:200]
+                break
+
         raise RuntimeError(
-            f"vLLM failed to start. "
-            + (f"Try reducing context window (max: {suggested_len} tokens)." if suggested_len
-               else "Not enough VRAM — lower GPU utilization % or reduce context length.")
+            root_cause if root_cause
+            else ("Not enough VRAM — lower GPU utilization % or reduce context length."
+                  if is_util_oom else "vLLM failed to start — check model compatibility.")
         )
 
     _current_model = ModelInfo(
