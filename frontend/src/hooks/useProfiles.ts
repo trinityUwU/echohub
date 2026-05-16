@@ -18,7 +18,7 @@ const BUILTIN_PROFILES: ChatProfile[] = [
     id: 'coder',
     name: 'Coder',
     params: {
-      systemPrompt: 'You are an expert software engineer. Write clean, correct, well-structured code. Be concise.',
+      systemPrompt: 'You are an expert software engineer. Write clean, correct, well-structured code.',
       temperature: 0.2, maxTokens: 4096,
       topP: 0.95, topK: -1, repetitionPenalty: 1.05,
       presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: true,
@@ -41,11 +41,10 @@ function loadProfiles(): ChatProfile[] {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return BUILTIN_PROFILES
     const saved: ChatProfile[] = JSON.parse(raw)
-    // Merge: builtins first (overwritten by saved versions), then custom
+    // Builtins always use code definition (source of truth) — only custom profiles come from localStorage
     const builtinIds = new Set(BUILTIN_PROFILES.map(p => p.id))
     const custom = saved.filter(p => !builtinIds.has(p.id))
-    const updatedBuiltins = BUILTIN_PROFILES.map(b => saved.find(s => s.id === b.id) ?? b)
-    return [...updatedBuiltins, ...custom]
+    return [...BUILTIN_PROFILES, ...custom]
   } catch {
     return BUILTIN_PROFILES
   }
