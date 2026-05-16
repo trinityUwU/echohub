@@ -159,3 +159,61 @@ async def summarize_messages(req: ChatRequest) -> dict:
 
     summary = result.get("choices", [{}])[0].get("message", {}).get("content", "")
     return {"summary": summary}
+
+
+@router.post("/can-load")
+def can_load(req: LoadRequest) -> dict:
+    """
+    Preview what would happen if we load this model.
+    Returns engine, estimated VRAM, and whether it's feasible.
+    """
+    try:
+        model_path = _resolve_model_path(req.model_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    fmt = engine_router.detect_format(req.model_id, model_path)
+    gpu = engine_router.detect_gpu()
+    vllm_ok = engine_router.is_vllm_available()
+
+    if fmt == "gguf":
+        engine = "llama"
+        feasible = True
+        reason = None
+    elif gpu["type"] == "nvidia" and vllm_ok:
+        engine = "vllm"
+        feasible = True
+        reason = None
+    else:
+        engine = "vllm"
+        feasible = False
+        if gpu["type"] != "nvidia":
+            reason = "vLLM requires an NVIDIA GPU"
+        else:
+            reason = "vLLM not installed — use a GGUF model or install vLLM in .venv-vllm"
+
+    # VRAM estimate
+    vram_model_gb = None
+    if fmt == "gguf":
+        gguf_path = engine_router.find_gguf_file(model_path)
+        if gguf_path:
+            from pathlib import Path as _P
+            size_bytes = _P(gguf_path).stat().st_size
+            vram_model_gb = round(size_bytes / (1024 ** 3) * 1.05, 2)  # +5% overhead
+    else:
+        # vLLM: safetensors size + KV cache estimate
+        from pathlib import Path as _P
+        st_files = list(_P(model_path).glob("*.safetensors")) if _P(model_path).is_dir() else []
+        if st_files:
+            total = sum(f.stat().st_size for f in st_files)
+            vram_model_gb = round(total / (1024 ** 3) + 1.1, 2)  # +1.1GB CUDA graph overhead
+
+    return {
+        "engine": engine,
+        "format": fmt,
+        "feasible": feasible,
+        "reason": reason,
+        "vram_estimate_gb": vram_model_gb,
+        "gpu_type": gpu["type"],
+        "vllm_available": vllm_ok,
+    }

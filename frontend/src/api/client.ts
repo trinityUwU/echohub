@@ -215,3 +215,16 @@ export const getGpuStats = (): Promise<GpuStats> =>
   apiRequest('/system/gpu')
 
 export const downloadModel = startDownload
+
+export const canLoadModel = (modelId: string, gpuUtil?: number, maxModelLen?: number): Promise<{
+  engine: string
+  format: string
+  feasible: boolean
+  reason: string | null
+  vram_estimate_gb: number | null
+  gpu_type: string
+  vllm_available: boolean
+}> => apiRequest('/inference/can-load', {
+  method: 'POST',
+  body: JSON.stringify({ model_id: modelId, gpu_memory_utilization: gpuUtil, max_model_len: maxModelLen }),
+})
