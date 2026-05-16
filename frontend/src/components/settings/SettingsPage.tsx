@@ -1,170 +1,141 @@
-import { useEffect, useState } from 'react'
-import { getHfToken, setHfToken, getGpuBackend } from '@/api/client'
+import { useState } from 'react'
+import { Toggle } from '@/components/shared/Toggle'
+import { Btn } from '@/components/shared/Btn'
 
-interface GpuBackendInfo {
-  backend: 'cuda' | 'rocm' | 'metal' | 'cpu'
-  gpu_name: string | null
-  cuda_available: boolean
-  reason?: string
-}
+type Section = 'setup' | 'hardware' | 'models' | 'about'
 
-export function SettingsPage() {
-  const [tokenInput, setTokenInput] = useState('')
-  const [tokenSet, setTokenSet] = useState(false)
-  const [tokenPreview, setTokenPreview] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [saveFeedback, setSaveFeedback] = useState(false)
-  const [gpuBackend, setGpuBackend] = useState<GpuBackendInfo | null>(null)
-  const [showInstructions, setShowInstructions] = useState(false)
-  const [showToken, setShowToken] = useState(false)
+const NAV: { id: Section; label: string; icon: string }[] = [
+  { id: 'setup',    label: 'Setup',    icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
+  { id: 'hardware', label: 'Hardware', icon: 'M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18' },
+  { id: 'models',   label: 'Models',   icon: 'M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20' },
+  { id: 'about',    label: 'About',    icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 7v4m0 4h.01' },
+]
 
-  useEffect(() => {
-    getHfToken()
-      .then(res => { setTokenSet(res.token_set); setTokenPreview(res.token_preview) })
-      .catch(() => {})
-    getGpuBackend()
-      .then(setGpuBackend)
-      .catch(() => {})
-  }, [])
-
-  const handleSave = async (): Promise<void> => {
-    if (!tokenInput.trim()) return
-    setSaving(true)
-    try {
-      const res = await setHfToken(tokenInput.trim())
-      setTokenSet(res.token_set)
-      setTokenInput('')
-      setSaveFeedback(true)
-      setTimeout(() => setSaveFeedback(false), 2000)
-      const info = await getHfToken()
-      setTokenPreview(info.token_preview)
-    } catch {
-      // ignore
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleRemove = async (): Promise<void> => {
-    setSaving(true)
-    try {
-      await setHfToken('')
-      setTokenSet(false)
-      setTokenPreview('')
-    } catch {
-      // ignore
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const backendColors: Record<string, string> = {
-    cuda: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-    cpu: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    metal: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-    rocm: 'bg-violet-500/10 text-violet-400 border-violet-500/20',
-  }
+export function SettingsPage(): React.ReactElement {
+  const [section, setSection] = useState<Section>('setup')
 
   return (
-    <div className="max-w-xl mx-auto p-6 space-y-5 overflow-y-auto h-full">
-      <div>
-        <h2 className="text-2xs font-semibold uppercase tracking-widest text-muted/50 mb-2">HuggingFace Token</h2>
-        <div className="bg-surface-1 rounded-xl border border-white/[0.07] p-5 space-y-3">
-          <div className="flex items-center gap-2">
-            <span className={`w-1.5 h-1.5 rounded-full ${tokenSet ? 'bg-emerald-400' : 'bg-muted/30'}`} />
-            <span className={`text-xs ${tokenSet ? 'text-emerald-400' : 'text-muted/50'}`}>
-              {tokenSet ? 'Token configured' : 'Not configured'}
-            </span>
-          </div>
-
-          {tokenSet && tokenPreview && (
-            <p className="text-2xs font-mono text-muted/40">{tokenPreview}</p>
-          )}
-
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <input
-                type={showToken ? 'text' : 'password'}
-                value={tokenInput}
-                onChange={e => setTokenInput(e.target.value)}
-                placeholder="hf_..."
-                className="bg-surface-2 w-full rounded-lg px-3 py-2 text-xs text-white border-0 focus:outline-none focus:ring-1 focus:ring-accent/30 pr-8"
-              />
-              <button
-                onClick={() => setShowToken(!showToken)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted/40 hover:text-white"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-              </button>
-            </div>
-            <button
-              onClick={handleSave}
-              disabled={saving || !tokenInput.trim()}
-              className="bg-accent rounded-lg px-4 py-2 text-sm text-white hover:bg-accent-dim disabled:opacity-40 transition-colors"
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <div className="h-[54px] bg-surface border-b border-border flex items-center px-5 flex-shrink-0">
+        <span className="text-md font-semibold">Settings</span>
+      </div>
+      <div className="flex flex-1 overflow-hidden">
+        <nav className="w-[200px] border-r border-border p-2 flex-shrink-0">
+          {NAV.map(item => (
+            <button key={item.id} onClick={() => setSection(item.id)}
+              className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-sm text-sm cursor-pointer transition-colors ${
+                section === item.id ? 'bg-accent-dim text-accent' : 'text-text-secondary hover:bg-overlay'
+              }`}
             >
-              Save
+              <svg className="w-[15px] h-[15px] flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <path d={item.icon}/>
+              </svg>
+              {item.label}
             </button>
-          </div>
-
-          {tokenSet && (
-            <button onClick={handleRemove} disabled={saving} className="text-2xs text-red-400/60 hover:text-red-400">
-              Remove token
-            </button>
-          )}
-
-          {saveFeedback && <p className="text-2xs text-emerald-400">Saved ✓</p>}
+          ))}
+        </nav>
+        <div className="flex-1 overflow-y-auto px-7 py-6">
+          {section === 'setup'    && <SetupSection />}
+          {section === 'hardware' && <HardwareSection />}
+          {section === 'models'   && <ModelsSection />}
+          {section === 'about'    && <AboutSection />}
         </div>
       </div>
+    </div>
+  )
+}
 
+function SetupSection(): React.ReactElement {
+  return (
+    <>
+      <SettingsGroup title="Installation" desc="EchoHub auto-installs inference engines based on your hardware.">
+        <SetupCard title="llama-cpp-python (CUDA)" status="ok" desc="Primary inference engine. GGUF models. CUDA backend compiled for RTX 3060 (arch 86)." />
+        <SetupCard title="vLLM" status="ok" desc="Optional engine for AWQ/GPTQ models. NVIDIA only. Higher throughput." />
+        <SetupCard title="Python environment" status="warn" desc={<>Isolated venv at <code className="font-mono text-xs bg-white/7 px-1 py-px rounded-sm">backend/.venv</code></>} />
+      </SettingsGroup>
+      <SettingsGroup title="Hugging Face" desc="Required for gated models and faster downloads.">
+        <SettingsRow label="HF Token" desc="Access gated models (Llama, Gemma…)">
+          <input type="password" defaultValue="hf_••••••••••••••" className="w-[200px] bg-elevated border border-border focus:border-border-hover rounded-sm px-2.5 py-1.5 text-sm font-mono text-text-primary outline-none transition-colors" />
+        </SettingsRow>
+      </SettingsGroup>
+    </>
+  )
+}
+
+function HardwareSection(): React.ReactElement {
+  return (
+    <SettingsGroup title="GPU" desc="Detected hardware configuration.">
+      <SettingsRow label="GPU" desc="Primary inference device">
+        <span className="text-sm font-mono text-text-secondary">NVIDIA RTX 3060</span>
+      </SettingsRow>
+      <SettingsRow label="VRAM" desc="Total GPU memory">
+        <span className="text-sm font-mono text-text-secondary">12 GB</span>
+      </SettingsRow>
+      <SettingsRow label="Flash Attention" desc="Requires compatible GPU">
+        <Toggle on={true} onChange={() => {}} />
+      </SettingsRow>
+    </SettingsGroup>
+  )
+}
+
+function ModelsSection(): React.ReactElement {
+  return (
+    <SettingsGroup title="Model Storage" desc="Where downloaded models are stored.">
+      <SettingsRow label="Models directory" desc="Default: /mnt/models/echohub">
+        <input type="text" defaultValue="/mnt/models/echohub" className="w-[200px] bg-elevated border border-border rounded-sm px-2.5 py-1.5 text-sm font-mono text-text-primary outline-none focus:border-border-hover transition-colors" />
+        <Btn>Browse</Btn>
+      </SettingsRow>
+      <SettingsRow label="Keep model in memory" desc="Prevent auto-unload on new chat">
+        <Toggle on={false} onChange={() => {}} />
+      </SettingsRow>
+    </SettingsGroup>
+  )
+}
+
+function AboutSection(): React.ReactElement {
+  return (
+    <SettingsGroup title="EchoHub" desc="">
+      <SettingsRow label="Version" desc=""><span className="text-sm font-mono text-text-secondary">0.1.0</span></SettingsRow>
+      <SettingsRow label="License" desc=""><span className="text-sm text-text-secondary">MIT</span></SettingsRow>
+      <SettingsRow label="GitHub" desc="">
+        <span className="text-sm text-accent">github.com/trinityUwU/echohub</span>
+      </SettingsRow>
+    </SettingsGroup>
+  )
+}
+
+function SettingsGroup({ title, desc, children }: { title: string; desc: string; children: React.ReactNode }): React.ReactElement {
+  return (
+    <div className="mb-7">
+      <h2 className="text-[15px] font-semibold text-text-primary mb-1">{title}</h2>
+      {desc && <p className="text-sm text-text-muted mb-4">{desc}</p>}
+      {children}
+    </div>
+  )
+}
+
+function SettingsRow({ label, desc, children }: { label: string; desc: string; children: React.ReactNode }): React.ReactElement {
+  return (
+    <div className="flex justify-between items-center py-3 border-b border-border last:border-b-0">
       <div>
-        <h2 className="text-2xs font-semibold uppercase tracking-widest text-muted/50 mb-2">GPU Backend</h2>
-        <div className="bg-surface-1 rounded-xl border border-white/[0.07] p-5 space-y-3">
-          {gpuBackend && (
-            <>
-              <div className="flex items-center gap-2">
-                <span className={`text-2xs font-mono px-2 py-0.5 rounded border ${backendColors[gpuBackend.backend] ?? 'bg-surface-3 text-muted/60 border-white/[0.05]'}`}>
-                  {gpuBackend.backend.toUpperCase()}
-                </span>
-                {gpuBackend.gpu_name && (
-                  <span className="text-xs text-muted/60">{gpuBackend.gpu_name}</span>
-                )}
-              </div>
-
-              {gpuBackend.backend === 'cpu' && gpuBackend.gpu_name && (
-                <div className="space-y-2">
-                  <button
-                    onClick={() => setShowInstructions(!showInstructions)}
-                    className="text-2xs text-accent hover:text-accent-dim"
-                  >
-                    How to fix {showInstructions ? '↑' : '↓'}
-                  </button>
-                  {showInstructions && (
-                    <div className="bg-surface-2 rounded-lg p-3 text-2xs text-muted/60 space-y-1">
-                      <p>GPU detected ({gpuBackend.gpu_name}) but CUDA not available.</p>
-                      <p>Install CUDA toolkit and PyTorch with CUDA support:</p>
-                      <code className="block bg-surface-0 rounded px-2 py-1 font-mono">pip install torch --index-url https://download.pytorch.org/whl/cu121</code>
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-        </div>
+        <div className="text-sm text-text-primary">{label}</div>
+        {desc && <div className="text-xs text-text-muted mt-0.5">{desc}</div>}
       </div>
+      <div className="flex items-center gap-2 flex-shrink-0">{children}</div>
+    </div>
+  )
+}
 
-      <div>
-        <h2 className="text-2xs font-semibold uppercase tracking-widest text-muted/50 mb-2">About</h2>
-        <div className="bg-surface-1 rounded-xl border border-white/[0.07] p-5 space-y-1">
-          <p className="text-lg font-semibold">EchoHub <span className="text-xs text-muted/50 font-normal">v0.1.0</span></p>
-          <p className="text-xs text-muted/60">Local LLM Manager — MIT License</p>
-          <a href="https://github.com/trinityUwU/echohub" target="_blank" rel="noreferrer" className="text-xs text-accent hover:text-accent-dim">
-            GitHub
-          </a>
-        </div>
+function SetupCard({ title, status, desc }: { title: string; status: 'ok' | 'warn' | 'error'; desc: React.ReactNode }): React.ReactElement {
+  const statusStyle = { ok: 'bg-green/15 text-green', warn: 'bg-yellow/12 text-yellow', error: 'bg-red/12 text-red' }
+  const statusLabel = { ok: 'installed', warn: 'check', error: 'error' }
+  return (
+    <div className="bg-elevated border border-border rounded-md p-4 mb-2.5">
+      <div className="flex justify-between items-center mb-2">
+        <span className="text-sm font-semibold text-text-primary">{title}</span>
+        <span className={`text-xs px-2 py-0.5 rounded font-medium ${statusStyle[status]}`}>{statusLabel[status]}</span>
       </div>
+      <p className="text-sm text-text-muted leading-relaxed">{desc}</p>
     </div>
   )
 }

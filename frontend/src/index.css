@@ -1,99 +1,32 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:wght@400;500&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* ── Reset ─────────────────────────────────────────────────────────────────── */
-*, *::before, *::after { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body, #root {
   height: 100%;
-  margin: 0;
-  padding: 0;
-  font-family: 'Inter', system-ui, sans-serif;
+  background: #111113;
+  color: #f0f0f0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
   font-size: 13px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  color: rgba(255,255,255,0.88);
   overflow: hidden;
 }
 
-/* ── Background avec profondeur (requis pour le glassmorphism) ─────────────── */
-body {
-  background: #060810;
+::-webkit-scrollbar        { width: 4px; height: 4px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: #26262c; border-radius: 2px; }
+
+input[type="range"] {
+  -webkit-appearance: none;
+  width: 100%; height: 3px;
+  background: #26262c; border-radius: 2px; outline: none;
 }
-
-#root {
-  position: relative;
-  background: transparent;
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px; height: 13px; border-radius: 50%;
+  background: #7c6aff; cursor: pointer;
+  box-shadow: 0 0 0 2px #18181b;
 }
-
-/* Fond de profondeur — les "ondes" qui permettent au glass de blurer */
-#root::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background:
-    radial-gradient(ellipse 80% 60% at 15% 20%, rgba(74,158,191,0.06) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 50% at 85% 75%, rgba(74,158,191,0.04) 0%, transparent 55%),
-    radial-gradient(ellipse 100% 80% at 50% 100%, rgba(10,20,40,0.8) 0%, transparent 70%),
-    linear-gradient(160deg, #070b14 0%, #060810 50%, #050810 100%);
-  z-index: 0;
-  pointer-events: none;
-}
-
-/* Tout le contenu au-dessus du fond */
-#root > * { position: relative; z-index: 1; }
-
-/* ── Glassmorphism ─────────────────────────────────────────────────────────── */
-@layer utilities {
-  .glass {
-    background: rgba(8, 12, 22, 0.65);
-    backdrop-filter: blur(20px) saturate(160%);
-    -webkit-backdrop-filter: blur(20px) saturate(160%);
-  }
-
-  .glass-panel {
-    background: rgba(10, 15, 26, 0.55);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-  }
-
-  .surface-translucent {
-    background: rgba(8, 12, 22, 0.60);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-  }
-
-  .echo-border {
-    border: 1px solid rgba(255,255,255,0.06);
-  }
-
-  .echo-border-accent {
-    border: 1px solid rgba(74,158,191,0.25);
-  }
-}
-
-/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 3px; height: 3px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.07); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.13); }
-
-/* ── Focus ─────────────────────────────────────────────────────────────────── */
-:focus-visible {
-  outline: 1px solid rgba(74,158,191,0.45);
-  outline-offset: 2px;
-}
-
-/* ── Selection ─────────────────────────────────────────────────────────────── */
-::selection {
-  background: rgba(74,158,191,0.22);
-  color: white;
-}
-
-/* ── Inputs / Range ────────────────────────────────────────────────────────── */
-input[type='range'] { accent-color: #4A9EBF; }
-
-/* ── Transitions ───────────────────────────────────────────────────────────── */
-button, a { transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease, opacity 120ms ease; }

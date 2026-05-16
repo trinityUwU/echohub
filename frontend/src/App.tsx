@@ -1,103 +1,160 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useModels } from '@/hooks/useModels'
 import { useGpu } from '@/hooks/useGpu'
 import { useConversations } from '@/hooks/useConversations'
-import { subscribeDownloads } from '@/api/client'
+import { subscribeDownloads, cancelDownload } from '@/api/client'
 import type { DownloadJob, ModelInfo } from '@/types'
-import { TopBar } from '@/components/ui/TopBar'
-import { Sidebar } from '@/components/ui/Sidebar'
+import { NavRail } from '@/components/nav/NavRail'
+import { ChatPage } from '@/components/chat/ChatPage'
+import { LibraryPage } from '@/components/library/LibraryPage'
 import { DiscoverPage } from '@/components/discover/DiscoverPage'
-import { ChatView } from '@/components/chat/ChatView'
+import { DownloadsPage } from '@/components/downloads/DownloadsPage'
 import { SettingsPage } from '@/components/settings/SettingsPage'
-import { LoadConfigModal } from '@/components/ui/LoadConfigModal'
-import { CpuOnlyBanner } from '@/components/ui/CpuOnlyBanner'
+import { LoadModelModal } from '@/components/modals/LoadModelModal'
+import { ModelPickerModal } from '@/components/modals/ModelPickerModal'
 
-type Tab = 'discover' | 'chat' | 'settings'
+type Page = 'chat' | 'library' | 'discover' | 'downloads' | 'settings'
 
-export default function App() {
-  const [tab, setTab] = useState<Tab>('discover')
+export default function App(): React.ReactElement {
+  const [page, setPage] = useState<Page>('chat')
   const [pendingLoad, setPendingLoad] = useState<ModelInfo | null>(null)
+  const [showPicker, setShowPicker] = useState(false)
   const [downloadJobs, setDownloadJobs] = useState<DownloadJob[]>([])
+  const [loadingPct, setLoadingPct] = useState(0)
   const notifiedComplete = useRef<Set<string>>(new Set())
+  const loadPctTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const { downloaded, loadedModel, loadingModelId, loadError, unloading, refresh, loadModel, unloadModel } = useModels()
   const gpu = useGpu()
-  const { conversations, activeId, activeMessages, newConversation, selectConversation, deleteConversation, renameConversation, setActiveMessages } = useConversations()
+  const { conversations, activeId, activeMessages, newConversation, selectConversation, setActiveMessages } = useConversations()
 
   useEffect(() => {
-    const unsub = subscribeDownloads((jobs) => {
+    const unsub = subscribeDownloads(jobs => {
       setDownloadJobs(jobs)
-      const newlyDone = jobs.filter(j => j.state === 'complete' && !notifiedComplete.current.has(j.model_id))
-      if (newlyDone.length > 0) {
-        newlyDone.forEach(j => notifiedComplete.current.add(j.model_id))
+      const done = jobs.filter(j => j.state === 'complete' && !notifiedComplete.current.has(j.model_id))
+      if (done.length > 0) {
+        done.forEach(j => notifiedComplete.current.add(j.model_id))
         refresh()
       }
     })
     return unsub
   }, [refresh])
 
-  const requestLoad = (modelId: string, manual = true): void => {
+  // Fake loading pct for UX feedback
+  useEffect(() => {
+    if (loadingModelId) {
+      setLoadingPct(0)
+      clearInterval(loadPctTimer.current ?? undefined)
+      loadPctTimer.current = setInterval(() => {
+        setLoadingPct(p => Math.min(p + Math.random() * 3, 88))
+      }, 500)
+    } else {
+      clearInterval(loadPctTimer.current ?? undefined)
+      setLoadingPct(0)
+    }
+    return () => clearInterval(loadPctTimer.current ?? undefined)
+  }, [loadingModelId])
+
+  const requestLoad = (modelId: string): void => {
     const model = downloaded.find(m => m.id === modelId)
     if (!model) return
-    if (!manual) { loadModel(modelId); setTab('chat'); return }
     setPendingLoad(model)
-    setTab('chat')
   }
 
-  const confirmLoad = (config: { maxModelLen: number; gpuMemoryUtilization: number }): void => {
+  const confirmLoad = (cfg: { gpuMemoryUtilization: number; maxModelLen: number | null }): void => {
     if (!pendingLoad) return
-    loadModel(pendingLoad.id, config)
+    loadModel(pendingLoad.id, { gpuMemoryUtilization: cfg.gpuMemoryUtilization, maxModelLen: cfg.maxModelLen ?? undefined })
     setPendingLoad(null)
   }
 
-  const activeDownloads = downloadJobs.filter(j => j.state === 'running' || j.state === 'pending').length
+  const handlePickerConfirm = (modelId: string): void => {
+    setShowPicker(false)
+    requestLoad(modelId)
+  }
+
+  const handleCancelDownload = async (modelId: string): Promise<void> => {
+    try { await cancelDownload(modelId) } catch { /* best-effort */ }
+  }
+
+  const isLoading = !!loadingModelId || unloading
+  const activeJobs = downloadJobs.filter(j => j.state === 'running' || j.state === 'pending').length
+  const hasCuda = gpu !== null
 
   return (
-    <div className="flex flex-col h-screen bg-surface-0 text-white overflow-hidden">
-      <TopBar loadedModel={loadedModel} onUnload={unloadModel} loading={!!loadingModelId || unloading} />
-      <CpuOnlyBanner />
-      <div className="flex flex-1 min-h-0">
-        <Sidebar tab={tab} setTab={setTab as (t: 'discover' | 'chat' | 'settings') => void} conversationCount={conversations.length} activeDownloads={activeDownloads} gpu={gpu} downloadJobs={downloadJobs} />
-        <main className="flex-1 min-w-0 overflow-hidden">
-          {tab === 'discover' && (
-            <DiscoverPage
-              loadedModelId={loadedModel?.id ?? null}
-              onLoad={requestLoad}
-              onDownloaded={refresh}
-              downloadJobs={Object.fromEntries(downloadJobs.map(j => [j.model_id, j]))}
-              vramTotalGb={gpu ? gpu.vram_total_mb / 1024 : 0}
-              vramFreeGb={gpu ? gpu.vram_free_mb / 1024 : 0}
-            />
-          )}
-          {tab === 'chat' && (
-            <ChatView
-              loadedModel={loadedModel}
-              downloaded={downloaded}
-              loadError={loadError}
-              loadingModelId={!!loadingModelId}
-              onLoad={requestLoad}
-              onUnload={unloadModel}
-              conversations={conversations}
-              activeId={activeId}
-              activeMessages={activeMessages}
-              onNewConversation={newConversation}
-              onSelectConversation={selectConversation}
-              onDeleteConversation={deleteConversation}
-              onRenameConversation={renameConversation}
-              setActiveMessages={setActiveMessages}
-            />
-          )}
-          {tab === 'settings' && <SettingsPage />}
-        </main>
+    <div className="flex h-screen bg-base text-text-primary overflow-hidden">
+      <NavRail active={page} onNavigate={setPage} downloadsBadge={activeJobs > 0} />
+
+      <div className="flex flex-1 overflow-hidden">
+        {page === 'chat' && (
+          <ChatPage
+            loadedModel={loadedModel}
+            loading={isLoading}
+            loadingPct={Math.round(loadingPct)}
+            gpu={gpu}
+            hasCuda={hasCuda}
+            conversations={conversations}
+            activeId={activeId}
+            activeMessages={activeMessages}
+            onNewConversation={newConversation}
+            onSelectConversation={selectConversation}
+            onOpenPicker={() => setShowPicker(true)}
+            onOpenLoad={() => loadedModel && setPendingLoad(loadedModel)}
+            onEject={unloadModel}
+            onGoToSettings={() => setPage('settings')}
+            setActiveMessages={setActiveMessages}
+          />
+        )}
+        {page === 'library' && (
+          <LibraryPage
+            models={downloaded}
+            onLoad={requestLoad}
+            onUnload={unloadModel}
+            onDelete={() => { /* TODO */ }}
+            onAddModel={() => setPage('discover')}
+            totalDiskGb={downloaded.reduce((s, m) => s + (m.size_gb ?? 0), 0)}
+          />
+        )}
+        {page === 'discover' && (
+          <DiscoverPage
+            loadedModelId={loadedModel?.id ?? null}
+            onLoad={requestLoad}
+            onDownloaded={refresh}
+            downloadJobs={Object.fromEntries(downloadJobs.map(j => [j.model_id, j]))}
+            vramTotalGb={gpu ? gpu.vram_total_mb / 1024 : 0}
+            vramFreeGb={gpu ? gpu.vram_free_mb / 1024 : 0}
+          />
+        )}
+        {page === 'downloads' && (
+          <DownloadsPage
+            jobs={downloadJobs}
+            onCancel={handleCancelDownload}
+            onLoad={id => { requestLoad(id); setPage('chat') }}
+          />
+        )}
+        {page === 'settings' && <SettingsPage />}
       </div>
+
       {pendingLoad && gpu && (
-        <LoadConfigModal
+        <LoadModelModal
           model={pendingLoad}
           vramTotalGb={gpu.vram_total_mb / 1024}
           vramUsedGb={gpu.vram_used_mb / 1024}
           onConfirm={confirmLoad}
           onCancel={() => setPendingLoad(null)}
         />
+      )}
+      {showPicker && (
+        <ModelPickerModal
+          models={downloaded}
+          loadedModelId={loadedModel?.id ?? null}
+          onConfirm={handlePickerConfirm}
+          onCancel={() => setShowPicker(false)}
+        />
+      )}
+      {loadError && (
+        <div className="fixed bottom-4 right-4 bg-red/15 border border-red/30 text-red text-sm px-4 py-3 rounded-md max-w-sm">
+          Load failed: {loadError}
+        </div>
       )}
     </div>
   )

@@ -31,5 +31,6 @@
     "workerDirectory": [
       "public"
     ]
-  }
+  },
+  "type": "module"
 }

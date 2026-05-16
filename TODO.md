@@ -2,19 +2,23 @@
 *Dernière mise à jour : 2026-05-16*
 
 ## En cours
-- [ ] **REFAIRE TOUT LE DESIGN** — nouvelle identité visuelle, nouvelle session dédiée
+- [ ] **Compléter maquette HTML** (`mockup/index.html`) — modals + états manquants
+- [ ] **Intégration Tauri v2** — init + componentisation React
 
 ## À faire (priorité)
 
-### Design (P1 — prochaine session)
-- [ ] Définir nouvelle identité visuelle (pas de recycler l'existant)
-- [ ] Scaffolder tous les composants avec le vrai design
-- [ ] Tous les composants branchés sur MSW et fonctionnels
+### Maquette HTML (P1 — session en cours)
+- [x] Modal "Load model" — sliders GPU util + context len, preview VRAM, log vLLM live
+- [x] Banner CPU-only — affiché si pas de GPU détecté
+- [x] État loading modèle dans topbar — progress bar heuristique + eject
+- [x] Modal "Model picker" — changer de modèle depuis le chat
 
 ### Tauri v2 (P1)
-- [ ] `cargo tauri init` dans le repo
-- [ ] CSP strict (connect-src 127.0.0.1 uniquement, pas de réseau externe)
-- [ ] Frontend React dans la webview Tauri (identique)
+- [x] `cargo tauri init` dans le repo
+- [x] `tauri.conf.json` : CSP, window size, identifiers (agency.echo.echohub)
+- [x] Componentiser en React depuis la maquette (NavRail, ConvSidebar, ChatPage, RightPanel, InputBar, LibraryPage, DiscoverPage, DownloadsPage, SettingsPage, LoadModelModal, ModelPickerModal)
+- [x] Build TypeScript propre — 0 erreur
+- [ ] `bun tauri dev` qui tourne avec MSW — valider visuellement
 - [ ] Python sidecar FastAPI WebSocket (remplacer SSE)
 - [ ] Port aléatoire sidecar injecté via stdout → `window.__ECHOHUB_WS_PORT__`
 - [ ] Packaging binaire .exe / .dmg / .AppImage
@@ -46,6 +50,7 @@
 - [ ] Orchestrateur cloud (Groq/Mistral) qui pilote agents locaux
 
 ## Terminé ✅
+- [x] Maquette HTML `mockup/index.html` — design complet 5 pages + accordéons right panel
 - [x] Scaffold complet backend + frontend
 - [x] vLLM subprocess manager (eject, VRAM cleanup, OOM auto-retry)
 - [x] engine_router + llama_service (dual-engine GGUF/vLLM)
