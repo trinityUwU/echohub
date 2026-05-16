@@ -117,19 +117,19 @@ def detect_gpu() -> dict:
 
 
 def is_vllm_available() -> bool:
-    """Vérifie si vLLM est installé dans .venv-vllm."""
-    from pathlib import Path
-    vllm_python = Path("/mnt/projects/echohub/.venv-vllm/bin/python")
-    if not vllm_python.exists():
-        return False
-    try:
-        result = subprocess.run(
-            [str(vllm_python), "-c", "import vllm"],
-            capture_output=True, timeout=10,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
+    """Check vLLM installation via file presence — no subprocess, no timeout risk."""
+    import glob as _glob
+    candidates = [
+        Path("/mnt/projects/echohub/.venv-vllm"),
+        Path(__file__).resolve().parents[3] / ".venv-vllm",
+    ]
+    for venv in candidates:
+        if not (venv / "bin" / "python").exists():
+            continue
+        for sp in venv.glob("lib/python*/site-packages"):
+            if (sp / "vllm").is_dir() or _glob.glob(str(sp / "vllm-*.dist-info")):
+                return True
+    return False
 
 
 # ──────────────────────────────────────────────────────────────────────────────
