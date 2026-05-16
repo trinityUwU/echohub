@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
-import { useChat, DEFAULT_CHAT_PARAMS } from '@/hooks/useChat'
-import type { ConversationSummary, ModelInfo, GpuStats, ChatMessage, ChatParams } from '@/types'
+import { useEffect, useRef } from 'react'
+import { useChat } from '@/hooks/useChat'
+import { useProfiles } from '@/hooks/useProfiles'
+import type { ConversationSummary, ModelInfo, GpuStats, ChatMessage } from '@/types'
 import { ConvSidebar } from '@/components/nav/ConvSidebar'
 import { ChatTopBar } from './ChatTopBar'
 import { CpuBanner } from './CpuBanner'
@@ -33,7 +34,13 @@ export function ChatPage({
   onOpenPicker, onOpenLoad, onEject, onGoToSettings,
   setActiveMessages,
 }: ChatPageProps): React.ReactElement {
-  const [params, setParams] = useState<ChatParams>(DEFAULT_CHAT_PARAMS)
+  const profilesHook = useProfiles()
+  const params = profilesHook.activeProfile.params
+  const setParams = (p: typeof params): void => profilesHook.saveProfile(
+    profilesHook.activeId,
+    profilesHook.activeProfile.name,
+    p,
+  )
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const { messages, streaming, stats, send, stop, setMessages } = useChat(
@@ -92,7 +99,7 @@ export function ChatPage({
           onStop={stop}
         />
       </div>
-      <RightPanel params={params} onChange={setParams} />
+      <RightPanel params={params} onChange={setParams} profiles={profilesHook} />
     </div>
   )
 }

@@ -3,21 +3,21 @@ import { Accordion } from '@/components/shared/Accordion'
 import { Slider } from '@/components/shared/Slider'
 import { Toggle } from '@/components/shared/Toggle'
 import type { ChatParams } from '@/types'
+import type { useProfiles } from '@/hooks/useProfiles'
 
 interface RightPanelProps {
   params: ChatParams
   onChange: (p: ChatParams) => void
+  profiles: ReturnType<typeof useProfiles>
 }
 
-const PROFILES = ['Default', 'Coder', 'Creative']
-
-export function RightPanel({ params, onChange }: RightPanelProps): React.ReactElement {
+export function RightPanel({ params, onChange, profiles }: RightPanelProps): React.ReactElement {
   const set = <K extends keyof ChatParams>(k: K, v: ChatParams[K]): void => onChange({ ...params, [k]: v })
 
   return (
     <aside className="w-[260px] bg-surface border-l border-border flex flex-col flex-shrink-0 overflow-y-auto">
       <Accordion title="Profile">
-        <ProfileSelector />
+        <ProfileSection params={params} onChange={onChange} profiles={profiles} />
       </Accordion>
       <Accordion title="System Prompt">
         <textarea
@@ -44,17 +44,114 @@ export function RightPanel({ params, onChange }: RightPanelProps): React.ReactEl
   )
 }
 
-function ProfileSelector(): React.ReactElement {
-  const [active, setActive] = useState('Default')
+interface ProfileSectionProps {
+  params: ChatParams
+  onChange: (p: ChatParams) => void
+  profiles: ReturnType<typeof useProfiles>
+}
+
+function ProfileSection({ params, onChange, profiles }: ProfileSectionProps): React.ReactElement {
+  const { profiles: list, activeId, selectProfile, saveProfile, deleteProfile } = profiles
+  const [saving, setSaving] = useState(false)
+  const [newName, setNewName] = useState('')
+
+  const handleSelect = (id: string): void => {
+    const loaded = selectProfile(id)
+    onChange(loaded)
+  }
+
+  const handleSaveCurrent = (): void => {
+    saveProfile(activeId, list.find(p => p.id === activeId)?.name ?? 'Profile', params)
+    setSaving(false)
+  }
+
+  const handleSaveNew = (): void => {
+    const name = newName.trim()
+    if (!name) return
+    const id = `custom-${Date.now()}`
+    saveProfile(id, name, params)
+    setNewName('')
+    setSaving(false)
+  }
+
+  const isBuiltin = ['default', 'coder', 'creative'].includes(activeId)
+
   return (
-    <div className="flex gap-1.5 flex-wrap">
-      {PROFILES.map(p => (
-        <button key={p} onClick={() => setActive(p)}
-          className={`text-xs px-2.5 py-1 rounded-[20px] border cursor-pointer transition-colors ${
-            active === p ? 'bg-accent-dim border-accent/35 text-accent' : 'bg-elevated border-border text-text-secondary hover:border-border-hover'
-          }`}>{p}</button>
-      ))}
-      <button className="text-xs px-2.5 py-1 rounded-[20px] border border-border text-text-muted hover:border-border-hover cursor-pointer">+ New</button>
+    <div className="flex flex-col gap-2.5">
+      {/* Dropdown selector */}
+      <div className="relative">
+        <select
+          value={activeId}
+          onChange={e => handleSelect(e.target.value)}
+          className="w-full bg-elevated border border-border hover:border-border-hover rounded-sm px-2.5 py-2 text-sm text-text-primary outline-none cursor-pointer appearance-none transition-colors"
+        >
+          {list.map(p => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+        <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 stroke-text-muted pointer-events-none"
+          viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </div>
+
+      {/* Action buttons */}
+      {!saving ? (
+        <div className="flex gap-1.5">
+          <button
+            onClick={() => setSaving(true)}
+            className="flex-1 text-xs px-2.5 py-1.5 rounded-sm border border-border hover:border-border-hover bg-elevated text-text-secondary hover:text-text-primary cursor-pointer transition-colors"
+          >
+            Save as…
+          </button>
+          {!isBuiltin && (
+            <button
+              onClick={handleSaveCurrent}
+              className="flex-1 text-xs px-2.5 py-1.5 rounded-sm border border-accent/35 bg-accent-dim text-accent hover:bg-accent/20 cursor-pointer transition-colors"
+            >
+              Save
+            </button>
+          )}
+          {!isBuiltin && (
+            <button
+              onClick={() => deleteProfile(activeId)}
+              className="w-8 flex items-center justify-center rounded-sm border border-border hover:border-red/30 hover:bg-red/10 text-text-muted hover:text-red cursor-pointer transition-colors"
+              title="Delete profile"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/>
+              </svg>
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          <input
+            autoFocus
+            type="text"
+            value={newName}
+            onChange={e => setNewName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleSaveNew(); if (e.key === 'Escape') setSaving(false) }}
+            placeholder="Profile name…"
+            className="w-full bg-elevated border border-accent/40 rounded-sm px-2.5 py-1.5 text-sm text-text-primary placeholder-text-muted outline-none"
+          />
+          <div className="flex gap-1.5">
+            <button
+              onClick={handleSaveNew}
+              disabled={!newName.trim()}
+              className="flex-1 text-xs px-2.5 py-1.5 rounded-sm bg-accent hover:bg-accent-hover disabled:opacity-40 text-white cursor-pointer transition-colors"
+            >
+              Save new
+            </button>
+            <button
+              onClick={() => { setSaving(false); setNewName('') }}
+              className="flex-1 text-xs px-2.5 py-1.5 rounded-sm border border-border text-text-muted hover:text-text-secondary cursor-pointer transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
