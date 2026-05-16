@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useModels } from '@/hooks/useModels'
 import { useGpu } from '@/hooks/useGpu'
 import { useConversations } from '@/hooks/useConversations'
-import { subscribeDownloads, cancelDownload } from '@/api/client'
+import { subscribeDownloads, cancelDownload, deleteModel } from '@/api/client'
 import type { DownloadJob, ModelInfo } from '@/types'
 import { NavRail } from '@/components/nav/NavRail'
 import { ChatPage } from '@/components/chat/ChatPage'
@@ -107,9 +107,10 @@ export default function App(): React.ReactElement {
         {page === 'library' && (
           <LibraryPage
             models={downloaded}
-            onLoad={requestLoad}
-            onUnload={unloadModel}
-            onDelete={() => { /* TODO */ }}
+            onDelete={async (id) => {
+              if (!window.confirm(`Delete this model? This cannot be undone.`)) return
+              try { await deleteModel(id); refresh() } catch { /* TODO error toast */ }
+            }}
             onAddModel={() => setPage('discover')}
             totalDiskGb={downloaded.reduce((s, m) => s + (m.size_gb ?? 0), 0)}
           />

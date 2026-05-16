@@ -4,14 +4,12 @@ import { Btn } from '@/components/shared/Btn'
 
 interface LibraryPageProps {
   models: ModelInfo[]
-  onLoad: (id: string) => void
-  onUnload: () => void
   onDelete: (id: string) => void
   onAddModel: () => void
   totalDiskGb: number
 }
 
-export function LibraryPage({ models, onLoad, onUnload, onDelete, onAddModel, totalDiskGb }: LibraryPageProps): React.ReactElement {
+export function LibraryPage({ models, onDelete, onAddModel, totalDiskGb }: LibraryPageProps): React.ReactElement {
   const loadedCount = models.filter(m => m.loaded).length
 
   return (
@@ -32,7 +30,7 @@ export function LibraryPage({ models, onLoad, onUnload, onDelete, onAddModel, to
       </div>
       <div className="flex-1 overflow-y-auto p-5">
         {models.map(m => (
-          <LibraryRow key={m.id} model={m} onLoad={() => onLoad(m.id)} onUnload={onUnload} onDelete={() => onDelete(m.id)} />
+          <LibraryRow key={m.id} model={m} onDelete={() => onDelete(m.id)} />
         ))}
         {models.length === 0 && (
           <div className="text-center text-text-muted py-16">
@@ -45,10 +43,8 @@ export function LibraryPage({ models, onLoad, onUnload, onDelete, onAddModel, to
   )
 }
 
-function LibraryRow({ model, onLoad, onUnload, onDelete }: {
+function LibraryRow({ model, onDelete }: {
   model: ModelInfo
-  onLoad: () => void
-  onUnload: () => void
   onDelete: () => void
 }): React.ReactElement {
   const initials = model.name.replace(/[^A-Z0-9]/g, '').slice(0, 4) || 'M'
@@ -74,13 +70,19 @@ function LibraryRow({ model, onLoad, onUnload, onDelete }: {
       </div>
       <div className="flex gap-1.5 items-center flex-shrink-0">
         <ModelBadges model={model} />
-        {model.loaded ? (
-          <Btn onClick={onUnload}>Unload</Btn>
-        ) : (
-          <Btn onClick={onLoad}>Load</Btn>
-        )}
         {!model.loaded && (
-          <Btn variant="danger" onClick={onDelete}>Delete</Btn>
+          <button
+            onClick={onDelete}
+            className="w-8 h-8 flex items-center justify-center rounded-sm border border-border hover:border-red/30 hover:bg-red/10 text-text-muted hover:text-red cursor-pointer transition-colors"
+            title="Delete model"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14H6L5 6"/>
+              <path d="M10 11v6m4-6v6"/>
+              <path d="M9 6V4h6v2"/>
+            </svg>
+          </button>
         )}
       </div>
     </div>
