@@ -57,7 +57,9 @@ function ProfileSection({ params, profiles }: ProfileSectionProps): React.ReactE
   const handleSelect = (id: string): void => { selectProfile(id) }
 
   const handleSaveCurrent = (): void => {
-    saveProfile(activeId, list.find(p => p.id === activeId)?.name ?? 'Profile', params)
+    const name = list.find(p => p.id === activeId)?.name ?? 'Profile'
+    if (!window.confirm(`Overwrite "${name}" with current settings?`)) return
+    saveProfile(activeId, name, params)
   }
 
   const handleSaveNew = (): void => {
@@ -90,7 +92,10 @@ function ProfileSection({ params, profiles }: ProfileSectionProps): React.ReactE
           </button>
           {!isBuiltin && (
             <button
-              onClick={() => deleteProfile(activeId)}
+              onClick={() => {
+                const name = list.find(p => p.id === activeId)?.name ?? 'Profile'
+                if (window.confirm(`Delete "${name}"?`)) deleteProfile(activeId)
+              }}
               className="w-8 flex items-center justify-center rounded-sm border border-border hover:border-red/30 hover:bg-red/10 text-text-muted hover:text-red cursor-pointer transition-colors"
               title="Delete profile"
             >
