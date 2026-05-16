@@ -2,8 +2,8 @@
 *Dernière mise à jour : 2026-05-16*
 
 ## En cours
-- [ ] **Compléter maquette HTML** (`mockup/index.html`) — modals + états manquants
-- [ ] **Intégration Tauri v2** — init + componentisation React
+- [x] **Maquette HTML complète** — tous les états, modals, accordéons
+- [x] **Intégration Tauri v2** — init, composants React, sidecar Python, port dynamique
 
 ## À faire (priorité)
 
@@ -18,10 +18,10 @@
 - [x] `tauri.conf.json` : CSP, window size, identifiers (agency.echo.echohub)
 - [x] Componentiser en React depuis la maquette (NavRail, ConvSidebar, ChatPage, RightPanel, InputBar, LibraryPage, DiscoverPage, DownloadsPage, SettingsPage, LoadModelModal, ModelPickerModal)
 - [x] Build TypeScript propre — 0 erreur
-- [ ] `bun tauri dev` qui tourne avec MSW — valider visuellement
-- [ ] Python sidecar FastAPI WebSocket (remplacer SSE)
-- [ ] Port aléatoire sidecar injecté via stdout → `window.__ECHOHUB_WS_PORT__`
-- [ ] Packaging binaire .exe / .dmg / .AppImage
+- [x] `bun tauri dev` qui tourne — validé visuellement avec vrai backend
+- [x] Python sidecar — Rust spawne uvicorn, port dynamique, kill à la fermeture
+- [x] Port injecté via invoke('get_backend_port')
+- [ ] Packaging binaire .AppImage / .deb / .dmg
 
 ### Backend (P2)
 - [ ] Test load GGUF réel avec llama-cpp CUDA (après restart backend)
