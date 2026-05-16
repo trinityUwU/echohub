@@ -85,7 +85,7 @@ export default function App(): React.ReactElement {
       <NavRail active={page} onNavigate={setPage} downloadsBadge={activeJobs > 0} />
 
       <div className="flex flex-1 overflow-hidden">
-        {page === 'chat' && (
+        <div className={`flex flex-1 overflow-hidden ${page === 'chat' ? '' : 'hidden'}`}>
           <ChatPage
             loadedModel={loadedModel}
             loading={isLoading}
@@ -103,8 +103,8 @@ export default function App(): React.ReactElement {
             onGoToSettings={() => setPage('settings')}
             setActiveMessages={setActiveMessages}
           />
-        )}
-        {page === 'library' && (
+        </div>
+        <div className={`flex flex-1 overflow-hidden ${page === 'library' ? '' : 'hidden'}`}>
           <LibraryPage
             models={downloaded}
             onDelete={async (id) => {
@@ -114,8 +114,8 @@ export default function App(): React.ReactElement {
             onAddModel={() => setPage('discover')}
             totalDiskGb={downloaded.reduce((s, m) => s + (m.size_gb ?? 0), 0)}
           />
-        )}
-        {page === 'discover' && (
+        </div>
+        <div className={`flex flex-1 overflow-hidden ${page === 'discover' ? '' : 'hidden'}`}>
           <DiscoverPage
             loadedModelId={loadedModel?.id ?? null}
             onLoad={requestLoad}
@@ -124,15 +124,17 @@ export default function App(): React.ReactElement {
             vramTotalGb={gpu ? gpu.vram_total_mb / 1024 : 0}
             vramFreeGb={gpu ? gpu.vram_free_mb / 1024 : 0}
           />
-        )}
-        {page === 'downloads' && (
+        </div>
+        <div className={`flex flex-1 overflow-hidden ${page === 'downloads' ? '' : 'hidden'}`}>
           <DownloadsPage
             jobs={downloadJobs}
             onCancel={handleCancelDownload}
             onLoad={id => { requestLoad(id); setPage('chat') }}
           />
-        )}
-        {page === 'settings' && <SettingsPage />}
+        </div>
+        <div className={`flex flex-1 overflow-hidden ${page === 'settings' ? '' : 'hidden'}`}>
+          <SettingsPage />
+        </div>
       </div>
 
       {pendingLoad && gpu && (
