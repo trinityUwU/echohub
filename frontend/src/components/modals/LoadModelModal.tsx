@@ -56,7 +56,8 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCa
   const budgetGb    = vramCudaGib * gpuUtil
   // vLLM checks: free >= budget. free = vramCuda - vramUsed
   const cudaFreeGib = vramCudaGib - vramUsedGb
-  const isOom       = budgetGb > cudaFreeGib || totalNeed + SAFETY_MARGIN_GB > cudaFreeGib
+  const isOom       = totalNeed + SAFETY_MARGIN_GB > budgetGb  // model doesn't fit in allocated budget
+                   || budgetGb > cudaFreeGib                  // budget exceeds what's actually free
 
   // Ctx ceiling: largest ctx that fits within budget
   const safeCtxK  = Math.max(2, (cudaFreeGib - weightsGb - overhead - SAFETY_MARGIN_GB) / (0.025 * params / 8))
@@ -98,7 +99,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCa
       <VramBar
         totalGb={vramTotalGb} usedGb={vramUsedGb}
         weightsGb={weightsGb} kvGb={kv} overheadGb={overhead}
-        budgetGb={budgetGb} isOom={isOom} engine={engine}
+        budgetGb={budgetGb} cudaFreeGib={cudaFreeGib} isOom={isOom} engine={engine}
       />
 
       {/* Parameters */}
@@ -125,9 +126,9 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCa
   )
 }
 
-function VramBar({ totalGb, usedGb, weightsGb, kvGb, overheadGb, budgetGb, isOom, engine }: {
+function VramBar({ totalGb, usedGb, weightsGb, kvGb, overheadGb, budgetGb, cudaFreeGib, isOom, engine }: {
   totalGb: number; usedGb: number; weightsGb: number; kvGb: number
-  overheadGb: number; budgetGb: number; isOom: boolean; engine: string
+  overheadGb: number; budgetGb: number; cudaFreeGib: number; isOom: boolean; engine: string
 }): React.ReactElement {
   const pct = (gb: number): number => Math.min((gb / totalGb) * 100, 100)
 
@@ -167,7 +168,11 @@ function VramBar({ totalGb, usedGb, weightsGb, kvGb, overheadGb, budgetGb, isOom
       </div>
 
       {isOom && (
-        <div className="mt-2 text-xs text-red font-medium">⚠ OOM — lower context length or increase GPU utilization</div>
+        <div className="mt-2 text-xs text-red font-medium">
+          {budgetGb > cudaFreeGib
+            ? '⚠ OOM — GPU util limit exceeds free VRAM, lower the % slider'
+            : '⚠ OOM — model doesn\'t fit in budget, increase GPU utilization %'}
+        </div>
       )}
     </div>
   )
