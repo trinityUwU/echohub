@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:37822",
-    "beforeDevCommand": "VITE_MSW=true bun run dev",
+    "beforeDevCommand": "VITE_MSW=false bun run dev",
     "beforeBuildCommand": "bun run build"
   },
   "app": {
@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:37821 ws://127.0.0.1:37821; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'"
     }
   },
   "bundle": {

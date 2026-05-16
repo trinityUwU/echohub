@@ -30,7 +30,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:37822", "http://127.0.0.1:37822"],
+    # Tauri webview uses tauri:// or http://127.0.0.1 with a dynamic port
+    allow_origin_regex=r"(tauri://localhost|http://127\.0\.0\.1(:\d+)?|http://localhost(:\d+)?)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
