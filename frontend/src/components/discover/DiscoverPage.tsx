@@ -100,7 +100,7 @@ export function DiscoverPage({ onLoad, onDownloaded, downloadJobs, vramTotalGb, 
           onDownloaded={onDownloaded}
           onToggleFavorite={toggleFavorite}
           onSelectRelated={(id) => {
-            const stub = { id, name: id.split('/').pop() ?? id } as ModelInfo
+            const stub: ModelInfo = { id, name: id.split('/').pop() ?? id, author: id.split('/')[0] ?? null, size_gb: null, quantization: null, params_billion: null, vram_estimate_gb: null, max_context_window: null, description: null, last_modified: null, pipeline_tag: null, arch_tag: null, gguf_files: null, more_from_author: null, downloads: null, likes: null, downloaded: false, loaded: false, gated: false, capabilities: { thinking: false, vision: false, code: false, multilingual: false, tools: false } }
             selectModel(stub)
           }}
         />
