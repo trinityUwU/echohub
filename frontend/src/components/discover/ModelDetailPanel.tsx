@@ -10,6 +10,7 @@ type Tab = 'info' | 'readme'
 
 interface ModelDetailPanelProps {
   model: ModelInfo
+  loading?: boolean
   vramTotalGb: number
   vramFreeGb: number
   job?: DownloadJob
@@ -18,7 +19,7 @@ interface ModelDetailPanelProps {
   onDownloaded: () => void
 }
 
-export function ModelDetailPanel({ model, vramFreeGb, job, onClose, onLoad, onDownloaded }: ModelDetailPanelProps): React.ReactElement {
+export function ModelDetailPanel({ model, loading, vramFreeGb, job, onClose, onLoad, onDownloaded }: ModelDetailPanelProps): React.ReactElement {
   const [tab, setTab] = useState<Tab>('info')
   const [selectedGguf, setSelectedGguf] = useState<GgufFile | null>(
     model.gguf_files?.find(f => f.variant.includes('Q4_K_M')) ?? model.gguf_files?.[0] ?? null
@@ -116,7 +117,11 @@ export function ModelDetailPanel({ model, vramFreeGb, job, onClose, onLoad, onDo
 
       {/* ── Body ── */}
       <div className="flex-1 overflow-y-auto">
-        {tab === 'info' && <InfoTab model={model} selectedGguf={selectedGguf} onSelectGguf={setSelectedGguf} vramFreeGb={vramFreeGb} />}
+        {tab === 'info' && (
+          loading
+            ? <div className="flex items-center justify-center h-24 text-text-muted text-sm animate-pulse">Loading details…</div>
+            : <InfoTab model={model} selectedGguf={selectedGguf} onSelectGguf={setSelectedGguf} vramFreeGb={vramFreeGb} />
+        )}
         {tab === 'readme' && <ReadmeTab content={readme} loading={readmeLoading} />}
       </div>
 

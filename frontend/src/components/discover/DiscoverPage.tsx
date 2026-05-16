@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { searchModels } from '@/api/client'
+import { searchModels, getModelInfo } from '@/api/client'
 import type { DownloadJob, ModelInfo } from '@/types'
 import { ModelCard } from './ModelCard'
 import { ModelDetailPanel } from './ModelDetailPanel'
@@ -20,6 +20,18 @@ export function DiscoverPage({ onLoad, onDownloaded, downloadJobs, vramTotalGb, 
   const [filter, setFilter] = useState('All')
   const [results, setResults] = useState<ModelInfo[]>([])
   const [selected, setSelected] = useState<ModelInfo | null>(null)
+  const [selectedFull, setSelectedFull] = useState<ModelInfo | null>(null)
+
+  const selectModel = useCallback(async (m: ModelInfo): Promise<void> => {
+    setSelected(m)
+    setSelectedFull(null)
+    try {
+      const full = await getModelInfo(m.id)
+      setSelectedFull(full)
+    } catch {
+      setSelectedFull(m)
+    }
+  }, [])
 
   const doSearch = useCallback(async (q: string): Promise<void> => {
     try {
@@ -41,18 +53,19 @@ export function DiscoverPage({ onLoad, onDownloaded, downloadJobs, vramTotalGb, 
         </div>
         <div className="flex-1 overflow-y-auto p-5 grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-2.5 content-start">
           {results.map(m => (
-            <ModelCard key={m.id} model={m} job={downloadJobs[m.id]} onClick={() => setSelected(m)} />
+            <ModelCard key={m.id} model={m} job={downloadJobs[m.id]} onClick={() => selectModel(m)} />
           ))}
         </div>
       </div>
       {selected && (
         <ModelDetailPanel
-          model={selected}
+          model={selectedFull ?? selected}
+          loading={!selectedFull}
           vramTotalGb={vramTotalGb}
           vramFreeGb={vramFreeGb}
           job={downloadJobs[selected.id]}
-          onClose={() => setSelected(null)}
-          onLoad={() => { onLoad(selected.id); setSelected(null) }}
+          onClose={() => { setSelected(null); setSelectedFull(null) }}
+          onLoad={() => { onLoad(selected.id); setSelected(null); setSelectedFull(null) }}
           onDownloaded={onDownloaded}
         />
       )}
