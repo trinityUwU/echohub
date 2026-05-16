@@ -49,10 +49,9 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCa
   const overhead  = engine === 'vllm' ? CUDA_OVERHEAD_GB : 0
   const totalNeed = weightsGb + kv + overhead
 
-  // vLLM requires: vramCuda * gpuUtil >= totalNeed
-  // vramCuda (GiB) ≈ vramTotal (GB) * 0.9313 (1 GiB = 1.0737 GB conversion)
-  // We compute budget from free VRAM to stay conservative.
-  const vramCudaGib = vramTotalGb * 0.9313
+  // nvidia-smi reports in MiB, frontend already divides by 1024 → vramTotalGb is GiB
+  // No additional conversion needed.
+  const vramCudaGib = vramTotalGb
   const budgetGb    = vramCudaGib * gpuUtil
   // vLLM checks: free >= budget. free = vramCuda - vramUsed
   const cudaFreeGib = vramCudaGib - vramUsedGb
