@@ -176,21 +176,21 @@ function ProfileDropdown({ list, activeId, onSelect, onDelete }: {
               }`}
             >
               <span className="flex-1">{p.name}</span>
-              {p.id === activeId && !BUILTIN_IDS.includes(p.id) && (
+              {p.id === activeId && (
+                <svg className={`w-3 h-3 flex-shrink-0 ${BUILTIN_IDS.includes(p.id) ? 'stroke-accent' : 'stroke-text-muted'}`} viewBox="0 0 24 24" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              )}
+              {!BUILTIN_IDS.includes(p.id) && (
                 <button
                   onClick={e => handleDelete(e, p)}
-                  className="opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center rounded hover:bg-red/20 text-text-muted hover:text-red transition-all flex-shrink-0"
+                  className="w-5 h-5 flex items-center justify-center rounded hover:bg-red/20 text-text-muted hover:text-red transition-colors flex-shrink-0"
                   title={`Delete ${p.name}`}
                 >
                   <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/>
                   </svg>
                 </button>
-              )}
-              {p.id === activeId && BUILTIN_IDS.includes(p.id) && (
-                <svg className="w-3 h-3 stroke-accent flex-shrink-0" viewBox="0 0 24 24" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12"/>
-                </svg>
               )}
             </div>
           ))}
