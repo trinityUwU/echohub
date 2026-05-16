@@ -5,7 +5,7 @@ import type { Attachment, ChatMessage, ChatParams, ContentPart, GenerationStats 
 export const DEFAULT_CHAT_PARAMS: ChatParams = {
   systemPrompt: '',
   temperature: 0.7,
-  maxTokens: 512,
+  maxTokens: 4096,
   topP: 0.95,
   topK: -1,
   repetitionPenalty: 1.1,

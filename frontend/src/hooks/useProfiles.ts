@@ -9,7 +9,7 @@ const BUILTIN_PROFILES: ChatProfile[] = [
     id: 'default',
     name: 'Default',
     params: {
-      systemPrompt: '', temperature: 0.7, maxTokens: 2048,
+      systemPrompt: '', temperature: 0.7, maxTokens: 4096,
       topP: 0.95, topK: -1, repetitionPenalty: 1.1,
       presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: false,
     },
@@ -29,7 +29,7 @@ const BUILTIN_PROFILES: ChatProfile[] = [
     name: 'Creative',
     params: {
       systemPrompt: '',
-      temperature: 1.1, maxTokens: 2048,
+      temperature: 1.1, maxTokens: 4096,
       topP: 0.98, topK: 50, repetitionPenalty: 1.15,
       presencePenalty: 0.1, frequencyPenalty: 0, stop: '', enableThinking: false,
     },
