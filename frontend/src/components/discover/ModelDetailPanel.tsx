@@ -82,11 +82,11 @@ export function ModelDetailPanel({ model, vramFreeGb, job, onClose, onLoad, onDo
 
         {/* Key stats row */}
         <div className="flex gap-3 text-xs text-text-muted mt-2 mb-3">
-          {model.params_billion && <StatChip icon="⚡" val={`${model.params_billion}B`} />}
-          {model.max_context_window && <StatChip icon="📐" val={fmtCtx(model.max_context_window)} />}
-          {model.vram_estimate_gb && <StatChip icon="🎮" val={`~${model.vram_estimate_gb} GB`} />}
-          {model.downloads != null && <StatChip icon="↓" val={fmtNum(model.downloads)} />}
-          {model.likes != null && <StatChip icon="♥" val={String(model.likes)} />}
+          {model.params_billion && <StatChip type="params" val={`${model.params_billion}B`} />}
+          {model.max_context_window && <StatChip type="ctx" val={fmtCtx(model.max_context_window)} />}
+          {model.vram_estimate_gb && <StatChip type="vram" val={`~${model.vram_estimate_gb} GB`} />}
+          {model.downloads != null && <StatChip type="downloads" val={fmtNum(model.downloads)} />}
+          {model.likes != null && <StatChip type="likes" val={String(model.likes)} />}
         </div>
 
         {/* Badges */}
@@ -136,8 +136,9 @@ export function ModelDetailPanel({ model, vramFreeGb, job, onClose, onLoad, onDo
         {!isDownloading && selectedGguf && (
           <div className="flex justify-between text-xs text-text-muted">
             <span className="font-mono">{selectedGguf.variant} · {selectedGguf.size_gb} GB</span>
-            {isOom ? <span className="text-yellow">⚠ exceeds free VRAM</span>
-                   : <span className="text-green">✓ fits in VRAM</span>}
+            {isOom
+              ? <span className="flex items-center gap-1 text-yellow"><WarnIcon />exceeds free VRAM</span>
+              : <span className="flex items-center gap-1 text-green"><CheckIcon />fits in VRAM</span>}
           </div>
         )}
         {model.downloaded ? (
@@ -159,12 +160,36 @@ export function ModelDetailPanel({ model, vramFreeGb, job, onClose, onLoad, onDo
   )
 }
 
-function StatChip({ icon, val }: { icon: string; val: string }): React.ReactElement {
+type ChipType = 'params' | 'ctx' | 'vram' | 'downloads' | 'likes'
+
+function StatChip({ type, val }: { type: ChipType; val: string }): React.ReactElement {
   return (
     <span className="flex items-center gap-1 bg-elevated border border-border rounded px-1.5 py-0.5 text-text-secondary">
-      <span>{icon}</span><span>{val}</span>
+      <ChipIcon type={type} />
+      <span>{val}</span>
     </span>
   )
+}
+
+function ChipIcon({ type }: { type: ChipType }): React.ReactElement {
+  const p = { fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+  if (type === 'params') return <svg className="w-3 h-3" viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+  if (type === 'ctx') return <svg className="w-3 h-3" viewBox="0 0 24 24" {...p}><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+  if (type === 'vram') return <svg className="w-3 h-3" viewBox="0 0 24 24" {...p}><rect x="2" y="7" width="20" height="10" rx="1"/><path d="M6 7V5M10 7V5M14 7V5M18 7V5"/></svg>
+  if (type === 'downloads') return <DownIcon />
+  return <svg className="w-3 h-3" viewBox="0 0 24 24" {...p}><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+}
+
+function DownIcon(): React.ReactElement {
+  return <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+}
+
+function CheckIcon(): React.ReactElement {
+  return <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+}
+
+function WarnIcon(): React.ReactElement {
+  return <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
 }
 
 function InfoTab({ model, selectedGguf, onSelectGguf, vramFreeGb }: {
@@ -211,7 +236,7 @@ function InfoTab({ model, selectedGguf, onSelectGguf, vramFreeGb }: {
                   <div className="text-right ml-4 flex-shrink-0">
                     <div className="text-sm font-mono text-text-secondary">{f.size_gb} GB</div>
                     <div className={`text-xs mt-0.5 font-medium ${fits ? 'text-green' : 'text-yellow'}`}>
-                      ~{vramEst.toFixed(1)} GB {fits ? '✓' : '⚠'}
+                      {fits ? <><CheckIcon />{vramEst.toFixed(1)} GB</> : <><WarnIcon />{vramEst.toFixed(1)} GB</>}
                     </div>
                   </div>
                 </button>
@@ -235,7 +260,7 @@ function InfoTab({ model, selectedGguf, onSelectGguf, vramFreeGb }: {
                 className="flex justify-between items-center py-1.5 border-b border-border/40 last:border-0 hover:text-text-primary transition-colors cursor-pointer">
                 <span className="text-sm text-text-secondary truncate">{m.id.split('/').pop()}</span>
                 {m.downloads != null && (
-                  <span className="text-xs text-text-muted ml-2 flex-shrink-0">{fmtNum(m.downloads)} ↓</span>
+                  <span className="text-xs text-text-muted ml-2 flex-shrink-0"><span className="flex items-center gap-1"><DownIcon />{fmtNum(m.downloads)}</span></span>
                 )}
               </a>
             ))}
