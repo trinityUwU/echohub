@@ -278,6 +278,10 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
             "--limit-mm-per-prompt", '{"image": 4, "video": 0}',
             "--skip-mm-profiling",  # skip vision encoder profile_run — main OOM source
         ]
+    # Force text generation task — avoids image processor lookup on models
+    # that have pipeline_tag=image-text-to-text but no preprocessor_config.json
+    if not is_vision:
+        cmd += ["--task", "generate"]
     # Disable FlashInfer JIT sampling — requires nvcc which is not installed
     cmd += ["--no-enable-flashinfer-autotune"]
 
