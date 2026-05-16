@@ -1,81 +1,64 @@
-# EchoHub — TODO
+# TODO — EchoHub
+*Dernière mise à jour : 2026-05-16*
 
-## 🔴 Priorité 1 — À faire maintenant
+## En cours
+- [ ] **REFAIRE TOUT LE DESIGN** — nouvelle identité visuelle, nouvelle session dédiée
 
-- [ ] **Vérifier la recompilation llama-cpp-python CUDA** après install :
-  ```bash
-  backend/.venv/bin/python -c "import llama_cpp, os; print([f for f in os.listdir(os.path.dirname(llama_cpp.__file__)+'/lib') if 'cuda' in f.lower()])"
-  ```
-  Doit retourner `['libggml-cuda.so']` ou similaire.
-- [ ] **Tester les perfs GGUF GPU** : charger un modèle 8B Q4_K_M, vérifier ~40-60 tok/s
-- [ ] **Mettre à jour start.sh** : détecter NVIDIA + compiler llama-cpp avec CUDA automatiquement
-- [ ] **GPU backend dans SettingsPage** : afficher le backend actif (cuda/cpu/metal) avec statut
+## À faire (priorité)
 
----
+### Design (P1 — prochaine session)
+- [ ] Définir nouvelle identité visuelle (pas de recycler l'existant)
+- [ ] Scaffolder tous les composants avec le vrai design
+- [ ] Tous les composants branchés sur MSW et fonctionnels
 
-## 🟡 Priorité 2 — UX Onboarding & Setup
+### Tauri v2 (P1)
+- [ ] `cargo tauri init` dans le repo
+- [ ] CSP strict (connect-src 127.0.0.1 uniquement, pas de réseau externe)
+- [ ] Frontend React dans la webview Tauri (identique)
+- [ ] Python sidecar FastAPI WebSocket (remplacer SSE)
+- [ ] Port aléatoire sidecar injecté via stdout → `window.__ECHOHUB_WS_PORT__`
+- [ ] Packaging binaire .exe / .dmg / .AppImage
 
-- [ ] Page Setup dans l'UI qui gère toute l'installation des dépendances
-  - Détection hardware automatique au premier lancement
-  - Installation llama-cpp-python depuis l'UI avec le bon backend
-  - Logs d'installation en temps réel via SSE
-  - Progress bar globale
-- [ ] Onboarding tutoriel au premier lancement (fausses données, walkthrough)
-- [ ] Endpoints backend : `/setup/status`, `/setup/install`, `/setup/hardware`
-
----
-
-## 🟡 Priorité 3 — Features en attente
-
-- [ ] Chat history persistence (SQLite au lieu de localStorage)
-- [ ] Chat export (markdown)
-- [ ] Real download progress from HF (tqdm callback)
-- [ ] HF_TOKEN support UI → déjà fait, mais pas de feedback si token invalide
-- [ ] Multi-GPU support vLLM (tensor_parallel_size)
-- [ ] Model card README preview dans ModelBrowser
+### Backend (P2)
+- [ ] Test load GGUF réel avec llama-cpp CUDA (après restart backend)
+- [ ] Badge engine dans l'UI (llama/vLLM visible sur modèle chargé)
+- [ ] LoadConfigModal : afficher engine détecté (GGUF→llama, AWQ→vLLM)
 - [ ] GPU service : fallback AMD (rocm-smi) et Mac (powermetrics)
 - [ ] Context window depuis metadata GGUF (gguf-reader)
-- [ ] Badge engine (llama/vLLM) visible sur le modèle chargé dans le header
-- [ ] LoadConfigModal : afficher engine détecté (GGUF→llama, AWQ→vLLM)
 
----
+### UX/Setup (P2)
+- [ ] Page Setup dans l'UI — installation deps depuis interface
+  - Détection hardware auto
+  - Installation llama-cpp avec bon backend (CUDA/ROCm/Metal/CPU)
+  - Logs temps réel + progress bar
+- [ ] Onboarding tutoriel premier lancement (fausses données, walkthrough)
 
-## 🟢 Priorité 4 — App de bureau Tauri v2
+### Features (P3)
+- [ ] HF_TOKEN : feedback si token invalide
+- [ ] Chat export (markdown)
+- [ ] Multi-GPU support vLLM (tensor_parallel_size)
+- [ ] Model card README preview dans ModelBrowser
+- [ ] Port conflict detection avant de lancer un engine
 
-- [ ] Shell Rust + frontend React + sidecar Python FastAPI
-- [ ] Packager en binaire natif : .exe / .dmg / .AppImage
-- [ ] Le binaire embarque Python + venv → zero install pour l'utilisateur final
-- [ ] Auto-update via Tauri updater
+## Backlog
+- [ ] MCP server EchoHub → Claude Code pilote les modèles locaux
+- [ ] EchoForge ↔ EchoHub API locale
+- [ ] Orchestrateur cloud (Groq/Mistral) qui pilote agents locaux
 
----
-
-## ✅ Fait
-
+## Terminé ✅
 - [x] Scaffold complet backend + frontend
 - [x] vLLM subprocess manager (eject, VRAM cleanup, OOM auto-retry)
 - [x] engine_router + llama_service (dual-engine GGUF/vLLM)
-- [x] Download manager avec progress SSE + gguf_file spécifique
-- [x] fix total_gb : calcule taille du fichier GGUF sélectionné uniquement
-- [x] fix selectedGguf : dépend de gguf_files length, défaut Q4_K_M
-- [x] ModelBrowser split-panel LM Studio style
-- [x] VRAM bars inline dans les items (style LM Studio : "7B · ~47%")
-- [x] Pagination scroll infini
-- [x] Filtres format multi-sélection (GGUF/AWQ/GPTQ/FP8/EXL2)
-- [x] Badge format dans les items de liste
-- [x] Panel droit enrichi : description, gguf_files dropdown, more_from_author cliquable
-- [x] Recherche par author/model-id direct
-- [x] ModelPickerModal redesign (arch tags, toggle manual config, Framer Motion)
-- [x] CapabilityBadges (vision, thinking, code, tools, multilingual)
-- [x] Boutons Vision/Thinking inline dans input chat
-- [x] Attachments images + fichiers texte dans le chat
+- [x] llama-cpp-python compilé CUDA 13 + gcc-15 (RTX 3060 arch 86)
+- [x] Download manager + gguf_file spécifique + fix total_gb
+- [x] SQLite user data dir (conversations + messages + stats)
+- [x] useConversations migré localStorage → API REST
+- [x] useChat persist messages + stats via addMessage
+- [x] Stop génération (AbortController + bouton stop)
+- [x] Auto-unload avant load nouveau modèle
+- [x] Thinking toggle universel (Qwen3 /think, autres natif)
+- [x] MSW installé et fonctionnel
 - [x] HF Token settings + check gated avant download
-- [x] Badge 🔒 gated + message clair 401
-- [x] Auto-unload avant load d'un nouveau modèle
-- [x] Bannière CPU-only avec instructions fix par plateforme
-- [x] Page Settings (HF Token, Models Dir, About)
-- [x] fix refresh loop (DownloadPanel + App.tsx)
-- [x] fix max_model_len : cap 4096 supprimé pour valeurs explicites
+- [x] fix refresh loop SSE downloads
 - [x] CUDA graph overhead (+1.1GB) dans LoadConfigModal
-- [x] Modal save profil stylisée
-- [x] tools capability détection
-- [x] llama-cpp-python installé Python 3.11 (wheel CPU, recompilation CUDA en cours)
+- [x] GitHub public : https://github.com/trinityUwU/echohub

@@ -1,30 +1,28 @@
-# STATE — EchoHub Design System
+# STATE — EchoHub Brainstorm
 *Dernière mise à jour : 2026-05-16*
 
 ## Sujet actuel
-Refonte complète du design d'EchoHub + migration Tauri v2.
-Étape immédiate : MSW + nouveau design system avant tout branchement.
+Refonte complète du design + migration Tauri v2.
 
-## Arborescence
-- `STATE.md` — ce fichier
-- `design-system.md` — identité visuelle, couleurs, typo, composants
-- `tauri-architecture.md` — migration Tauri v2 + sidecar Python WebSocket
+## Ce qui a été fait
+- MSW en place et fonctionnel (VITE_MSW=true dans .env.development)
+- Scaffold frontend existant (composants fonctionnels branchés sur MSW)
+- App fonctionnelle avec données mockées
+- GitHub : https://github.com/trinityUwU/echohub
 
-## Thèmes abordés
-- Design "echo / goutte d'eau dans un océan" — translucent dark
-- Layout LM Studio conservé mais repensé
-- MSW comme couche de mock pour développer sans backend
-- Migration Tauri v2 + Python sidecar + WebSocket streaming
+## Décisions actées
 
-## Décisions prises
-- Nom conservé : **EchoHub**
-- Dark theme obligatoire
-- Translucidité comme signature visuelle (glassmorphism subtil, pas excessif)
-- MSW en place avant tout redesign
-- Tauri v2 après que le design soit validé
-- API Python en WebSocket (pas SSE) pour le streaming IA
+### Design
+- Tous les documents de design system existants ont été supprimés — ils produisaient des résultats inacceptables
+- **Prochaine session** : refaire le design de zéro, nouvelle identité visuelle, nouveau système de composants
 
-## Points en suspens
-- Palette de couleurs exacte à valider (propositions dans design-system.md)
-- Composants prioritaires à redesigner (sidebar, chat, browser)
-- Validation du design system avant implémentation
+### Architecture
+- Migration vers Tauri v2 en cours
+- Python sidecar FastAPI en WebSocket (voir tauri-architecture.md)
+
+## Fichiers restants
+- `tauri-architecture.md` — architecture Tauri v2 + sidecar Python WebSocket
+
+## Prochaines étapes (dans l'ordre)
+1. **REFAIRE TOUT LE DESIGN** — nouvelle identité, nouveaux composants, nouveau système visuel
+2. **Continuer la migration Tauri v2** — init Tauri, sidecar Python, WebSocket streaming

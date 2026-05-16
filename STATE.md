@@ -1,101 +1,73 @@
-# EchoHub — STATE
+# STATE — EchoHub
+*Dernière mise à jour : 2026-05-16*
 
-**Status:** Fonctionnel — dual-engine GGUF+vLLM — llama-cpp CUDA recompilation en cours
-**Last session:** 2026-05-16
-**License cible:** MIT open source — cross-platform (NVIDIA, AMD, Mac, CPU)
+## Résumé de l'état actuel
 
-## What is this
+App fonctionnelle en mode dev (Vite + FastAPI). Backend dual-engine opérationnel (llama-cpp CUDA + vLLM). Conversations persistées en SQLite. MSW en place. Scaffold frontend existant mais design à refaire complètement. GitHub public créé.
 
-Local LM Studio replacement. Manage locally-served LLMs via HuggingFace search + download + load/unload UI. Pure local stack, no cloud. Objectif perfs : niveau LM Studio (~60 tok/s sur 4B), pas Ollama.
+## Ce qui a été fait — session du 2026-05-16
 
-## Stack
+**Backend**
+- `engine_router.py` — détection format/GPU, dispatch llama/vLLM
+- `llama_service.py` — GGUF cross-platform, params LM Studio (n_gpu_layers=-1, n_batch=512, flash_attn=True)
+- llama-cpp-python recompilé avec CUDA 13 + gcc-15 (arch 86, RTX 3060) → libggml-cuda.so confirmé
+- `user_data.py` + `db.py` — SQLite dans ~/.local/share/echohub/echohub.db
+- `routers/conversations.py` — CRUD complet (8 endpoints)
+- `routers/settings.py` — HF Token + GPU backend detection
+- Fix uvicorn --reload : supprimé (watchfiles boucle sur .venv)
 
-| Layer | Tech |
-|---|---|
-| Backend | Python FastAPI + uvicorn, port **37821** |
-| Frontend | React 18 + TypeScript + Tailwind + Vite + Bun, port **37822** |
-| Inference défaut | llama-cpp-python (GGUF, cross-platform) |
-| Inference optionnel | vLLM subprocess, port **37823** (AWQ/GPTQ, NVIDIA only) |
-| Models dir | `/mnt/models/echohub/` |
-| Backend venv | `backend/.venv` (Python 3.11) |
-| vLLM venv | `/mnt/projects/echohub/.venv-vllm` (NVIDIA uniquement) |
+**Frontend**
+- MSW installé et fonctionnel (VITE_MSW=true dans .env.development)
+- `useConversations` migré localStorage → API REST
+- `useChat` — persist messages + stats (tokens, tok/s, temps) via addMessage API
+- Stop génération (AbortController + bouton carré rouge)
+- Auto-unload avant load d'un nouveau modèle
+- Bouton Thinking universel (Qwen3 → /think prefix, autres → natif)
+- Scaffold design nouveau (composants ui/, discover/, chat/, settings/) — **à refaire**
+- GitHub : https://github.com/trinityUwU/echohub (public, MIT)
 
-## Architecture dual-engine
+## Décisions prises
 
-```
-hf_service → détecte format (GGUF/AWQ/GPTQ/FP8/EXL2)
-                  ↓
-          engine_router.py
-         /              \
-llama_service.py    vllm_service.py
-(GGUF — défaut)     (AWQ/GPTQ — NVIDIA opt.)
-```
+| Décision | Raison | Date |
+|----------|--------|------|
+| Migration Tauri v2 | Binaire natif, zero-install, cross-platform | 2026-05-16 |
+| MSW avant design | Développer le design sans dépendre du backend | 2026-05-16 |
+| Design refusé × 2 | Résultats inacceptables (même design recycled) | 2026-05-16 |
+| Docs design supprimés | Repartir de zéro, nouvelle session dédiée | 2026-05-16 |
+| llama-cpp > vLLM comme défaut | vLLM exclut Mac/AMD, llama.cpp cross-platform | 2026-05-16 |
+| SQLite user data dir | Données persistées entre sessions, cross-platform | 2026-05-16 |
 
-Paramètres llama.cpp performance-critiques :
-- `n_gpu_layers=-1` (full GPU offload)
-- `n_batch=512`
-- `flash_attn=True`
-- `n_threads=auto`
+## Contexte non-évident
 
-## Fonctionnalités implémentées
+- **llama-cpp CUDA** : compiler avec `gcc-15` (pas gcc 16 — incompatible CUDA 13). Commande exacte dans TODO.md.
+- **uvicorn sans --reload** : watchfiles surveille .venv et boucle — utiliser uvicorn sans --reload en dev.
+- **Thinking universel** : Qwen3 = /think prefix. Autres modèles = pensent nativement, pas de prefix. Le toggle UI est toujours disponible.
+- **vLLM venv hardcodé** : `/mnt/projects/echohub/.venv-vllm/bin/python` dans vllm_service.py.
+- **Ports critiques** : 37821 backend, 37822 frontend, 37823 vLLM — ne jamais changer.
 
-- HF search avec filtres GGUF/AWQ/GPTQ/FP8/EXL2 + scroll infini
-- Download fichier GGUF spécifique (pas snapshot complet)
-- Sélection variante Q4_K_M/Q5_K_M/etc. dans dropdown
-- HF Token dans Settings → accès gated models
-- Check accès avant download → badge 🔒 + lien HF si gated
-- Auto-unload si modèle déjà chargé lors d'un nouveau load
-- Bannière CPU-only si llama-cpp sans support GPU
-- ModelBrowser split-panel (liste gauche + détail droit) style LM Studio
-- VRAM bars inline dans les items de liste
-- "More from author" cliquable
-- ChatPanel : Vision/Thinking toggles, attachments images+fichiers
-- Profils de chat avec modal save stylisée
-- Page Settings : HF Token + GPU backend status
+## Prochaines étapes
 
-## Fichiers clés
+1. **REFAIRE TOUT LE DESIGN** — nouvelle identité visuelle from scratch, nouvelle session dédiée
+2. **Init Tauri v2** — `cargo tauri init`, CSP strict, webview autour du frontend existant
+3. **Python sidecar WebSocket** — remplacer SSE par WS, sidecar 127.0.0.1 only
+4. **Page Setup/Onboarding** — installation deps depuis l'UI, tutoriel premier lancement
 
-- `backend/services/engine_router.py` — détection format/GPU, dispatch
-- `backend/services/llama_service.py` — GGUF via llama-cpp-python
-- `backend/services/vllm_service.py` — AWQ/GPTQ via vLLM subprocess
-- `backend/services/hf_service.py` — HF search/download, GGUF variants, gated detection
-- `backend/services/download_manager.py` — download queue, gguf_file spécifique
-- `backend/routers/settings.py` — HF token, GPU backend detection
-- `frontend/src/components/ModelBrowser.tsx` — split panel complet
-- `frontend/src/components/SettingsPage.tsx` — settings UI
-- `frontend/src/components/CpuOnlyBanner.tsx` — bannière CPU-only
-- `frontend/src/hooks/useModels.ts` — auto-unload avant load
+## Points en suspens
 
-## API endpoints notables
+- Design : deux tentatives ratées — approche à revoir complètement en prochaine session
+- Test load GGUF réel (llama-cpp CUDA) : à valider après restart backend
+- Badge engine dans l'UI (llama/vLLM) : pas encore implémenté
+- HF_TOKEN : pas de feedback si token invalide
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/models/search?q=...&filters=gguf,awq,gptq&page=0` | HF search paginé |
-| POST | `/models/check-access` | Vérifie accès gated |
-| POST | `/models/download` | Start download (gguf_file optionnel) |
-| POST | `/inference/load` | Load model (auto-unload si besoin) |
-| GET | `/inference/engine` | Engine actif (llama/vllm) |
-| GET | `/settings/gpu-backend` | Backend GPU + CPU-only detection |
-| GET/POST | `/settings/hf-token` | HF Token management |
+## Historique
 
-## Install llama-cpp-python avec CUDA (Arch Linux)
+### Session 2026-05-15 (session 1-2)
+- Scaffold complet backend + frontend
+- vLLM subprocess manager avec eject, VRAM cleanup, OOM auto-retry
+- Download manager avec progress SSE + gguf_file spécifique
+- ModelBrowser split-panel LM Studio style
+- HF Token + check gated
+- Conversations localStorage (remplacé SQLite en session 2)
 
-```bash
-# 1. CUDA toolkit
-sudo pacman -S cuda
-
-# 2. Compiler llama-cpp-python
-cd /mnt/projects/echohub/backend
-CUDA_PATH=/opt/cuda PATH="/opt/cuda/bin:$PATH" NVCC_CCBIN=/usr/bin/gcc-15 \
-CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=86 -DCMAKE_CUDA_FLAGS=--allow-unsupported-compiler -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/gcc-15" \
-.venv/bin/pip install llama-cpp-python --force-reinstall --no-cache-dir
-```
-
-RTX 3060 = architecture 86 (Ampere). GCC 16 incompatible avec CUDA 13 → utiliser gcc-15.
-
-## Known constraints
-
-- vLLM venv hardcodé à `/mnt/projects/echohub/.venv-vllm`
-- Conversation history en localStorage (pas SQLite)
-- HF_TOKEN dans `.env` + runtime env
-- Context par défaut 4096 si non spécifié
+### Session 2026-05-16 (session 3-4)
+Voir "Ce qui a été fait" ci-dessus.
