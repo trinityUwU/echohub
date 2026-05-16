@@ -278,8 +278,12 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
         cmd += [
             "--enforce-eager",
             "--limit-mm-per-prompt", '{"image": 4, "video": 0}',
-            "--skip-mm-profiling",  # skip vision encoder profile_run — main OOM source
+            "--skip-mm-profiling",
         ]
+    else:
+        # Force language-only mode — prevents vLLM from trying to load an image processor
+        # on models with ForConditionalGeneration architecture but no vision components
+        cmd += ["--language-model-only"]
     # Disable FlashInfer JIT sampling — requires nvcc which is not installed
     cmd += ["--no-enable-flashinfer-autotune"]
 
