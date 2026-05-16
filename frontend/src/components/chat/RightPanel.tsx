@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Accordion } from '@/components/shared/Accordion'
 import { Slider } from '@/components/shared/Slider'
 import { Toggle } from '@/components/shared/Toggle'
@@ -78,22 +78,7 @@ function ProfileSection({ params, onChange, profiles }: ProfileSectionProps): Re
 
   return (
     <div className="flex flex-col gap-2.5">
-      {/* Dropdown selector */}
-      <div className="relative">
-        <select
-          value={activeId}
-          onChange={e => handleSelect(e.target.value)}
-          className="w-full bg-elevated border border-border hover:border-border-hover rounded-sm px-2.5 py-2 text-sm text-text-primary outline-none cursor-pointer appearance-none transition-colors"
-        >
-          {list.map(p => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-        <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 stroke-text-muted pointer-events-none"
-          viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="6 9 12 15 18 9"/>
-        </svg>
-      </div>
+      <ProfileDropdown list={list} activeId={activeId} onSelect={handleSelect} />
 
       {/* Action buttons */}
       {!saving ? (
@@ -150,6 +135,63 @@ function ProfileSection({ params, onChange, profiles }: ProfileSectionProps): Re
               Cancel
             </button>
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ProfileDropdown({ list, activeId, onSelect }: {
+  list: import('@/types').ChatProfile[]
+  activeId: string
+  onSelect: (id: string) => void
+}): React.ReactElement {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const active = list.find(p => p.id === activeId) ?? list[0]
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between gap-2 bg-elevated border border-border hover:border-border-hover rounded-sm px-2.5 py-2 text-sm text-text-primary cursor-pointer transition-colors"
+      >
+        <span>{active.name}</span>
+        <svg className={`w-3.5 h-3.5 stroke-text-muted transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+          viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute top-full left-0 right-0 mt-1 bg-elevated border border-border-hover rounded-md shadow-[0_8px_24px_rgba(0,0,0,0.4)] z-50 overflow-hidden">
+          {list.map(p => (
+            <button
+              key={p.id}
+              onClick={() => { onSelect(p.id); setOpen(false) }}
+              className={`w-full text-left px-3 py-2 text-sm cursor-pointer transition-colors flex items-center justify-between gap-2 ${
+                p.id === activeId
+                  ? 'bg-accent-dim text-accent'
+                  : 'text-text-secondary hover:bg-overlay hover:text-text-primary'
+              }`}
+            >
+              <span>{p.name}</span>
+              {p.id === activeId && (
+                <svg className="w-3 h-3 stroke-accent flex-shrink-0" viewBox="0 0 24 24" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              )}
+            </button>
+          ))}
         </div>
       )}
     </div>
