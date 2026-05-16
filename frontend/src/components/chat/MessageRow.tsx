@@ -12,6 +12,9 @@ export function MessageRow({ message, genStats }: MessageRowProps): React.ReactE
   const text = typeof message.content === 'string'
     ? message.content
     : message.content.find(p => p.type === 'text')?.text ?? ''
+  const images = typeof message.content !== 'string'
+    ? message.content.filter(p => p.type === 'image_url').map(p => (p as { type: 'image_url'; image_url: { url: string } }).image_url.url)
+    : []
 
   const thinkMatch   = text.match(/^<think>([\s\S]*?)<\/think>([\s\S]*)$/s)
   const thinkOpen    = !thinkMatch && text.startsWith('<think>')  // still streaming inside <think>
@@ -25,6 +28,13 @@ export function MessageRow({ message, genStats }: MessageRowProps): React.ReactE
     <div className={`flex px-5 py-1.5 gap-3 hover:bg-white/[0.02] transition-colors ${isUser ? 'flex-row-reverse' : ''}`}>
       <Avatar role={message.role} />
       <div className={`max-w-[680px] flex flex-col gap-1 ${isUser ? 'items-end' : ''}`}>
+        {images.length > 0 && (
+          <div className="flex gap-2 flex-wrap mb-1">
+            {images.map((url, i) => (
+              <img key={i} src={url} alt="" className="max-h-48 max-w-xs rounded-sm border border-border object-contain" />
+            ))}
+          </div>
+        )}
         {(thinkMatch || thinkOpen) && !isUser && (
           <ThinkingBlock content={thinkMatch ? thinkMatch[1] : text.slice(7)} streaming={thinkOpen} />
         )}

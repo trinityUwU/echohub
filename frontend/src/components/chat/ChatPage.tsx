@@ -97,9 +97,10 @@ export function ChatPage({
         </div>
         <InputBar
           modelLoaded={!!loadedModel}
+          visionEnabled={!!loadedModel?.capabilities?.vision}
           streaming={streaming}
           params={params}
-          onSend={text => send(text, !!loadedModel)}
+          onSend={(text, attachments) => send(text, !!loadedModel, attachments)}
           onStop={stop}
         />
       </div>
