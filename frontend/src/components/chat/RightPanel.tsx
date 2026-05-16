@@ -51,26 +51,21 @@ interface ProfileSectionProps {
 
 function ProfileSection({ params, profiles }: ProfileSectionProps): React.ReactElement {
   const { profiles: list, activeId, selectProfile, saveProfile, deleteProfile } = profiles
-  const [saving, setSaving] = useState(false)
+  const [naming, setNaming] = useState(false)
   const [newName, setNewName] = useState('')
 
-  const handleSelect = (id: string): void => {
-    selectProfile(id)
-    // activeProfile.params updates automatically via hook state — no need to call onChange
-  }
+  const handleSelect = (id: string): void => { selectProfile(id) }
 
   const handleSaveCurrent = (): void => {
     saveProfile(activeId, list.find(p => p.id === activeId)?.name ?? 'Profile', params)
-    setSaving(false)
   }
 
   const handleSaveNew = (): void => {
     const name = newName.trim()
     if (!name) return
-    const id = `custom-${Date.now()}`
-    saveProfile(id, name, params)
+    saveProfile(`custom-${Date.now()}`, name, params)
     setNewName('')
-    setSaving(false)
+    setNaming(false)
   }
 
   const isBuiltin = ['default', 'coder', 'creative'].includes(activeId)
@@ -79,23 +74,20 @@ function ProfileSection({ params, profiles }: ProfileSectionProps): React.ReactE
     <div className="flex flex-col gap-2.5">
       <ProfileDropdown list={list} activeId={activeId} onSelect={handleSelect} />
 
-      {/* Action buttons */}
-      {!saving ? (
+      {!naming ? (
         <div className="flex gap-1.5">
           <button
-            onClick={() => setSaving(true)}
+            onClick={handleSaveCurrent}
+            className="flex-1 text-xs px-2.5 py-1.5 rounded-sm border border-accent/35 bg-accent-dim text-accent hover:bg-accent/20 cursor-pointer transition-colors"
+          >
+            Save
+          </button>
+          <button
+            onClick={() => { setNaming(true); setNewName('') }}
             className="flex-1 text-xs px-2.5 py-1.5 rounded-sm border border-border hover:border-border-hover bg-elevated text-text-secondary hover:text-text-primary cursor-pointer transition-colors"
           >
-            Save as…
+            New
           </button>
-          {!isBuiltin && (
-            <button
-              onClick={handleSaveCurrent}
-              className="flex-1 text-xs px-2.5 py-1.5 rounded-sm border border-accent/35 bg-accent-dim text-accent hover:bg-accent/20 cursor-pointer transition-colors"
-            >
-              Save
-            </button>
-          )}
           {!isBuiltin && (
             <button
               onClick={() => deleteProfile(activeId)}
@@ -115,7 +107,7 @@ function ProfileSection({ params, profiles }: ProfileSectionProps): React.ReactE
             type="text"
             value={newName}
             onChange={e => setNewName(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') handleSaveNew(); if (e.key === 'Escape') setSaving(false) }}
+            onKeyDown={e => { if (e.key === 'Enter') handleSaveNew(); if (e.key === 'Escape') setNaming(false) }}
             placeholder="Profile name…"
             className="w-full bg-elevated border border-accent/40 rounded-sm px-2.5 py-1.5 text-sm text-text-primary placeholder-text-muted outline-none"
           />
@@ -128,7 +120,7 @@ function ProfileSection({ params, profiles }: ProfileSectionProps): React.ReactE
               Save new
             </button>
             <button
-              onClick={() => { setSaving(false); setNewName('') }}
+              onClick={() => { setNaming(false); setNewName('') }}
               className="flex-1 text-xs px-2.5 py-1.5 rounded-sm border border-border text-text-muted hover:text-text-secondary cursor-pointer transition-colors"
             >
               Cancel
