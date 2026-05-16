@@ -235,7 +235,9 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
         gpu_memory_utilization, _, _ = compute_safe_gpu_utilization()
 
     model_lower = model_path.lower()
-    is_vision = any(k in model_lower for k in ("-vl", "vl-", "vision", "qwen2-vl", "qwen2vl"))
+    # Detect vision by name pattern AND by presence of preprocessor_config.json
+    _has_mm_config = (Path(model_path) / "preprocessor_config.json").exists()
+    is_vision = _has_mm_config or any(k in model_lower for k in ("-vl", "vl-", "vision", "qwen2-vl", "qwen2vl"))
 
     if is_vision:
         # Vision encoder adds heavy overhead — default to 4096 if not specified
@@ -278,10 +280,6 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
             "--limit-mm-per-prompt", '{"image": 4, "video": 0}',
             "--skip-mm-profiling",  # skip vision encoder profile_run — main OOM source
         ]
-    # Force text generation task — avoids image processor lookup on models
-    # that have pipeline_tag=image-text-to-text but no preprocessor_config.json
-    if not is_vision:
-        cmd += ["--task", "generate"]
     # Disable FlashInfer JIT sampling — requires nvcc which is not installed
     cmd += ["--no-enable-flashinfer-autotune"]
 
