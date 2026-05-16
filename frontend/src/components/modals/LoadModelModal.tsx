@@ -48,7 +48,8 @@ function computeVllmBudget(vramTotalGb: number, vramUsedGb: number, gpuUtil: num
 
 export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCancel }: LoadModelModalProps): React.ReactElement {
   const defaultCtx = Math.min(model.max_context_window ?? 16384, 16384)
-  const [gpuUtil, setGpuUtil] = useState(0.80)
+  const [gpuUtilPct, setGpuUtilPct] = useState(80)
+  const gpuUtil = gpuUtilPct / 100
   const [ctxLen, setCtxLen] = useState(defaultCtx)
   const [check, setCheck] = useState<CanLoadResult | null>(null)
   const [checking, setChecking] = useState(true)
@@ -131,7 +132,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCa
       <div>
         <div className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-2.5">Parameters</div>
         {engine === 'vllm' && (
-          <Slider label="GPU memory utilization" value={gpuUtil} min={0.5} max={0.95} step={0.01} onChange={setGpuUtil} />
+          <Slider label="GPU memory utilization" value={gpuUtilPct} min={50} max={95} step={1} onChange={setGpuUtilPct} formatValue={v => `${v}%`} />
         )}
         <Slider
           label="Context length"
@@ -144,7 +145,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCa
         />
         {engine === 'vllm' && ctxMax < (model.max_context_window ?? 131072) && (
           <div className="text-xs text-yellow mt-1">
-            Max safe context at {(gpuUtil * 100).toFixed(0)}% utilization: {ctxMax.toLocaleString('en')} tokens
+            Max safe context at {gpuUtilPct}% utilization: {ctxMax.toLocaleString('en')} tokens
           </div>
         )}
         {engine === 'llama' && (
