@@ -13,17 +13,25 @@ export function MessageRow({ message, genStats }: MessageRowProps): React.ReactE
     ? message.content
     : message.content.find(p => p.type === 'text')?.text ?? ''
 
-  const thinkMatch = text.match(/^<think>([\s\S]*?)<\/think>([\s\S]*)$/s)
+  const thinkMatch   = text.match(/^<think>([\s\S]*?)<\/think>([\s\S]*)$/s)
+  const thinkOpen    = !thinkMatch && text.startsWith('<think>')  // still streaming inside <think>
+  const visibleText  = thinkMatch
+    ? thinkMatch[2].trim()
+    : thinkOpen
+      ? ''   // hide raw <think> content while streaming
+      : text
 
   return (
     <div className={`flex px-5 py-1.5 gap-3 hover:bg-white/[0.02] transition-colors ${isUser ? 'flex-row-reverse' : ''}`}>
       <Avatar role={message.role} />
       <div className={`max-w-[680px] flex flex-col gap-1 ${isUser ? 'items-end' : ''}`}>
-        {thinkMatch && !isUser && <ThinkingBlock content={thinkMatch[1]} />}
+        {(thinkMatch || thinkOpen) && !isUser && (
+          <ThinkingBlock content={thinkMatch ? thinkMatch[1] : text.slice(7)} streaming={thinkOpen} />
+        )}
         <div className={`rounded-md px-3.5 py-2.5 text-md leading-relaxed border ${
           isUser ? 'bg-accent-dim border-accent/20' : 'bg-elevated border-border'
         } text-text-primary`}>
-          <MarkdownContent content={thinkMatch ? thinkMatch[2].trim() : text} />
+          {visibleText ? <MarkdownContent content={visibleText} /> : <span className="text-text-muted animate-pulse">…</span>}
         </div>
         {genStats && !isUser && <GenStatsRow stats={genStats} />}
         {!genStats && message.stats && !isUser && <MsgStatsRow stats={message.stats} />}
