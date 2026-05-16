@@ -14,12 +14,15 @@ interface ModelDetailPanelProps {
   vramTotalGb: number
   vramFreeGb: number
   job?: DownloadJob
+  isFavorite?: boolean
   onClose: () => void
   onLoad: () => void
   onDownloaded: () => void
+  onToggleFavorite?: (model: ModelInfo) => void
+  onSelectRelated?: (id: string) => void
 }
 
-export function ModelDetailPanel({ model, loading, vramFreeGb, job, onClose, onLoad, onDownloaded }: ModelDetailPanelProps): React.ReactElement {
+export function ModelDetailPanel({ model, loading, vramFreeGb, job, isFavorite, onClose, onLoad, onDownloaded, onToggleFavorite, onSelectRelated }: ModelDetailPanelProps): React.ReactElement {
   const [tab, setTab] = useState<Tab>('info')
   const [selectedGguf, setSelectedGguf] = useState<GgufFile | null>(
     model.gguf_files?.find(f => f.variant.includes('Q4_K_M')) ?? model.gguf_files?.[0] ?? null
@@ -64,6 +67,14 @@ export function ModelDetailPanel({ model, loading, vramFreeGb, job, onClose, onL
             <span className="text-xs text-text-muted">{model.author}</span>
           </div>
           <div className="flex gap-1 flex-shrink-0 mt-0.5">
+            {onToggleFavorite && (
+              <button onClick={() => onToggleFavorite(model)} title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                className={`w-7 h-7 flex items-center justify-center rounded-sm hover:bg-overlay transition-colors cursor-pointer ${isFavorite ? 'text-yellow' : 'text-text-muted hover:text-yellow'}`}>
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill={isFavorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                </svg>
+              </button>
+            )}
             <a href={`https://huggingface.co/${model.id}`} target="_blank" rel="noopener noreferrer"
               title="Open on Hugging Face"
               className="w-7 h-7 flex items-center justify-center rounded-sm hover:bg-overlay text-text-muted hover:text-text-secondary transition-colors">
@@ -120,7 +131,7 @@ export function ModelDetailPanel({ model, loading, vramFreeGb, job, onClose, onL
         {tab === 'info' && (
           loading
             ? <div className="flex items-center justify-center h-24 text-text-muted text-sm animate-pulse">Loading details…</div>
-            : <InfoTab model={model} selectedGguf={selectedGguf} onSelectGguf={setSelectedGguf} vramFreeGb={vramFreeGb} />
+            : <InfoTab model={model} selectedGguf={selectedGguf} onSelectGguf={setSelectedGguf} vramFreeGb={vramFreeGb} onSelectRelated={onSelectRelated} />
         )}
         {tab === 'readme' && <ReadmeTab content={readme} loading={readmeLoading} />}
       </div>
@@ -197,15 +208,16 @@ function WarnIcon(): React.ReactElement {
   return <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
 }
 
-function InfoTab({ model, selectedGguf, onSelectGguf, vramFreeGb }: {
+function InfoTab({ model, selectedGguf, onSelectGguf, vramFreeGb, onSelectRelated }: {
   model: ModelInfo; selectedGguf: GgufFile | null
   onSelectGguf: (f: GgufFile) => void; vramFreeGb: number
+  onSelectRelated?: (id: string) => void
 }): React.ReactElement {
   return (
     <div className="p-4 flex flex-col gap-5">
 
       {model.description && (
-        <p className="text-sm text-text-secondary leading-relaxed">{model.description}</p>
+        <p className="text-sm text-text-secondary leading-relaxed line-clamp-4 overflow-hidden">{model.description}</p>
       )}
 
       {/* Meta grid */}
@@ -259,15 +271,14 @@ function InfoTab({ model, selectedGguf, onSelectGguf, vramFreeGb }: {
           </div>
           <div className="flex flex-col">
             {model.more_from_author.map(m => (
-              <a key={m.id}
-                href={`https://huggingface.co/${m.id}`}
-                target="_blank" rel="noopener noreferrer"
-                className="flex justify-between items-center py-1.5 border-b border-border/40 last:border-0 hover:text-text-primary transition-colors cursor-pointer">
+              <button key={m.id}
+                onClick={() => onSelectRelated ? onSelectRelated(m.id) : undefined}
+                className="flex justify-between items-center py-1.5 border-b border-border/40 last:border-0 hover:text-text-primary transition-colors cursor-pointer text-left w-full">
                 <span className="text-sm text-text-secondary truncate">{m.id.split('/').pop()}</span>
                 {m.downloads != null && (
                   <span className="text-xs text-text-muted ml-2 flex-shrink-0"><span className="flex items-center gap-1"><DownIcon />{fmtNum(m.downloads)}</span></span>
                 )}
-              </a>
+              </button>
             ))}
           </div>
         </div>
