@@ -93,7 +93,7 @@ fn locate_project_root(app: &AppHandle) -> String {
     if cfg!(debug_assertions) {
         std::env::current_exe()
             .ok()
-            .and_then(|p| p.ancestors().nth(4).map(|a| a.to_string_lossy().into_owned()))
+            .and_then(|p| p.ancestors().nth(5).map(|a| a.to_string_lossy().into_owned()))
             .unwrap_or_else(|| "/mnt/projects/echohub".to_string())
     } else {
         app.path().resource_dir()
