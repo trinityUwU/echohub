@@ -2,8 +2,8 @@
 *Dernière mise à jour : 2026-05-17*
 
 ## En cours
-- [ ] **Onboarding wizard** — premier lancement, wizard multi-étapes
-- [ ] **start.sh universel** — depuis clone, détection OS, build complet
+- [x] **Onboarding wizard** — livré (OnboardingWizard 6 étapes, DB flag, Settings > About)
+- [x] **start.sh universel** — livré (Arch/Debian/Fedora/macOS, Rust/Bun, llama-cpp, migration vllm)
 
 ## Terminé cette session ✅ (v0.2 en cours)
 - [x] vllm_manager.py — scan, taille, validation, install SSE, delete guard
@@ -21,20 +21,20 @@
 ## À faire (priorité)
 
 ### Onboarding (P1 — en cours)
-- [ ] DB flag `onboarding_complete` — premier lancement détecté
-- [ ] Wizard 6 étapes : Welcome → Storage → Hardware → Engines → Compatibility → Done
-- [ ] Transparent sur espace disque (~5-8 GB par vLLM env, ~2-70 GB par modèle)
-- [ ] Opt-in install vLLM supplémentaires depuis l'onboarding
-- [ ] Backend `/settings/onboarding` GET/POST
+- [x] DB flag `onboarding_complete` — premier lancement détecté
+- [x] Wizard 6 étapes : Welcome → Storage → Hardware → Engines → Compatibility → Done
+- [x] Transparent sur espace disque (~5-8 GB par vLLM env, ~2-70 GB par modèle)
+- [x] Opt-in install vLLM supplémentaires depuis l'onboarding
+- [x] Backend `/settings/onboarding` GET/POST
 
 ### start.sh universel (P1 — en cours)
-- [ ] Détection OS : Debian/Ubuntu, Arch, Fedora, macOS
-- [ ] Install deps système par OS (webkit2gtk, gcc, cmake, python3, etc.)
-- [ ] Vérifie/installe Rust (rustup) + Bun
-- [ ] Crée backend/.venv + compile llama-cpp selon GPU (CUDA/ROCm/Metal/CPU)
-- [ ] Init vllm-envs/0.21.0 ou migration depuis legacy .venv-vllm
-- [ ] `cargo tauri build` ou `tauri dev` selon flag
-- [ ] Ouvre l'app → premier lancement = onboarding automatique
+- [x] Détection OS : Debian/Ubuntu, Arch, Fedora, macOS
+- [x] Install deps système par OS (webkit2gtk, gcc, cmake, python3, etc.)
+- [x] Vérifie/installe Rust (rustup) + Bun
+- [x] Crée backend/.venv + compile llama-cpp selon GPU (CUDA/ROCm/Metal/CPU)
+- [x] Init vllm-envs/0.21.0 ou migration depuis legacy .venv-vllm
+- [x] `cargo tauri build` ou `tauri dev` selon flag
+- [x] Ouvre l'app → premier lancement = onboarding automatique
 
 ### Backend (P2)
 - [x] DB : vllm_version + engine persistés par modèle chargé
