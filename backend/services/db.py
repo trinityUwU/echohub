@@ -538,34 +538,20 @@ _BUILTIN_PROFILES = [
         "name": "Conversation Long",
         "description": "Dense context — memory and coherence across complex multi-fact scenario.",
         "prompt": (
-            "Context from our previous conversation:
-"
-            "Project: EchoNet — a distributed message broker written in Go.
-"
-            "Architecture: 5 nodes in a Raft consensus cluster. Leader election timeout: 150ms.
-"
-            "Storage: RocksDB with WAL enabled, 8GB memory budget per node.
-"
-            "Network: nodes communicate over gRPC, TLS 1.3 mandatory.
-"
-            "Performance targets: p99 latency < 2ms, throughput > 50k msg/s per node.
-"
-            "Current issues: node 3 has 40% higher latency, suspected cause is disk I/O contention.
-"
-            "Team: Alice (Go), Bob (infrastructure), Carol (monitoring), Dave (QA).
-"
-            "Deployment: Kubernetes, 3 regions (EU, US-East, AP-South).
-"
-            "Based on all of the above, answer these questions:
-"
-            "1. What is the consensus algorithm used?
-"
-            "2. What storage engine is used and what feature is enabled?
-"
-            "3. Which node has performance issues and what is the suspected cause?
-"
-            "4. What are the two performance targets?
-"
+            "Context from our previous conversation: "
+            "Project: EchoNet — a distributed message broker written in Go. "
+            "Architecture: 5 nodes in a Raft consensus cluster. Leader election timeout: 150ms. "
+            "Storage: RocksDB with WAL enabled, 8GB memory budget per node. "
+            "Network: nodes communicate over gRPC, TLS 1.3 mandatory. "
+            "Performance targets: p99 latency < 2ms, throughput > 50k msg/s per node. "
+            "Current issues: node 3 has 40% higher latency, suspected cause is disk I/O contention. "
+            "Team: Alice (Go), Bob (infrastructure), Carol (monitoring), Dave (QA). "
+            "Deployment: Kubernetes, 3 regions (EU, US-East, AP-South). "
+            "Based on all of the above, answer these questions: "
+            "1. What is the consensus algorithm used? "
+            "2. What storage engine is used and what feature is enabled? "
+            "3. Which node has performance issues and what is the suspected cause? "
+            "4. What are the two performance targets? "
             "5. Name all team members and their roles."
         ),
         "max_tokens": 300,
