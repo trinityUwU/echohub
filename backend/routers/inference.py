@@ -100,7 +100,20 @@ async def chat(req: ChatRequest):
     if engine_router.get_status() is None:
         raise HTTPException(status_code=404, detail="No model loaded.")
 
-    messages = [{"role": m.role, "content": m.content} for m in req.messages]
+    # Build messages — filter out empty content that causes vLLM 400
+    messages = []
+    for m in req.messages:
+        content = m.content
+        # Skip messages with empty string content
+        if isinstance(content, str) and not content.strip():
+            continue
+        # Skip empty list content
+        if isinstance(content, list) and not content:
+            continue
+        messages.append({"role": m.role, "content": content})
+
+    if not messages:
+        raise HTTPException(status_code=400, detail="No valid messages to send.")
 
     if req.system_prompt and req.system_prompt.strip():
         messages = [{"role": "system", "content": req.system_prompt}] + messages
