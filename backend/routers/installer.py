@@ -174,19 +174,33 @@ async def _compile_llama_async(pip: Path):
         yield _sse("No GPU detected — CPU backend")
 
     yield _sse("Compiling llama-cpp-python (3–10 min)…")
-    yield _sse("This is the longest step — the terminal is working, please wait.")
+    yield _sse("CUDA compilation is the longest step — do not close this window.", "warn")
 
-    # Run as sync in thread since this is a generator (can't be async here easily)
     import asyncio as _aio
     proc2 = await _aio.create_subprocess_exec(
         str(pip), "install", "llama-cpp-python", "--no-cache-dir",
         stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.STDOUT,
         env=env,
     )
+
+    still_running_count = 0
+    start_ts = time.time()
+
     async for line in proc2.stdout:
         decoded = line.decode().rstrip()
-        if decoded:
+        if not decoded:
+            continue
+        # Collapse repetitive "still running" into a timed progress line
+        if "still running" in decoded:
+            still_running_count += 1
+            elapsed = int(time.time() - start_ts)
+            if still_running_count % 5 == 1:  # emit every 5th occurrence
+                mins, secs = divmod(elapsed, 60)
+                yield _sse(f"  Compiling… {mins}m{secs:02d}s elapsed (still working, this is normal)")
+        else:
+            still_running_count = 0
             yield _sse(decoded)
+
     rc = await proc2.wait()
     if rc == 0:
         yield _sse("llama-cpp-python compiled successfully", "ok")
