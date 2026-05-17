@@ -19,6 +19,15 @@ from loguru import logger
 
 from backend.models.schemas import ModelInfo
 
+def _flash_attn_enabled() -> bool:
+    try:
+        from backend.services.config_service import get_inference_settings
+        return get_inference_settings().get("flash_attn", True)
+    except Exception:
+        return True
+
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # State
 # ──────────────────────────────────────────────────────────────────────────────
@@ -112,7 +121,7 @@ def load_model(
 
     _log(f"[llama] Loading {model_id}")
     _log(f"[llama] File: {gguf_path}")
-    _log(f"[llama] n_gpu_layers={n_gpu} | n_ctx={n_ctx} | n_batch=512 | flash_attn=True | n_threads={n_threads}")
+    _log(f"[llama] n_gpu_layers={n_gpu} | n_ctx={n_ctx} | n_batch=512 | flash_attn={_flash_attn_enabled()} | n_threads={n_threads}")
 
     if _eject_requested:
         raise RuntimeError("Ejected by user")
@@ -124,7 +133,7 @@ def load_model(
         n_ctx=n_ctx,
         n_batch=512,           # throughput critique — NE PAS baisser
         n_gpu_layers=n_gpu,    # -1 = full GPU offload
-        flash_attn=True,       # FlashAttention pour VRAM + vitesse
+        flash_attn=_flash_attn_enabled(),  # configurable in Settings
         n_threads=n_threads,   # prefill CPU
         verbose=False,         # pas de spam stderr
         use_mmap=True,         # mapping mémoire pour chargement rapide

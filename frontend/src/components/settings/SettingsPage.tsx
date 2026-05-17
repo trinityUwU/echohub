@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { getInferenceSettings, setInferenceSetting } from '@/api/client'
 import { Toggle } from '@/components/shared/Toggle'
-import { Btn } from '@/components/shared/Btn'
 import { EnginesTab } from './EnginesTab'
 import { PathsTab } from './PathsTab'
 
@@ -69,30 +69,44 @@ function SetupSection(): React.ReactElement {
 }
 
 function HardwareSection(): React.ReactElement {
+  const [settings, setSettings] = useState<{ flash_attn: boolean; keep_model_in_memory: boolean; gpu: { name: string; vram_gb: number } } | null>(null)
+
+  useEffect(() => {
+    getInferenceSettings().then(setSettings).catch(() => {})
+  }, [])
+
+  const toggle = async (key: string, val: boolean): Promise<void> => {
+    setSettings(prev => prev ? { ...prev, [key]: val } : prev)
+    await setInferenceSetting(key, val).catch(() => {})
+  }
+
   return (
-    <SettingsGroup title="GPU" desc="Detected hardware configuration.">
-      <SettingsRow label="GPU" desc="Primary inference device">
-        <span className="text-sm font-mono text-text-secondary">NVIDIA RTX 3060</span>
-      </SettingsRow>
-      <SettingsRow label="VRAM" desc="Total GPU memory">
-        <span className="text-sm font-mono text-text-secondary">12 GB</span>
-      </SettingsRow>
-      <SettingsRow label="Flash Attention" desc="Requires compatible GPU">
-        <Toggle on={true} onChange={() => {}} />
-      </SettingsRow>
-    </SettingsGroup>
+    <>
+      <SettingsGroup title="GPU" desc="Detected hardware.">
+        <SettingsRow label="GPU" desc="Primary inference device">
+          <span className="text-sm font-mono text-text-secondary">{settings?.gpu.name ?? '—'}</span>
+        </SettingsRow>
+        <SettingsRow label="VRAM" desc="Total GPU memory">
+          <span className="text-sm font-mono text-text-secondary">{settings ? `${settings.gpu.vram_gb} GB` : '—'}</span>
+        </SettingsRow>
+      </SettingsGroup>
+      <SettingsGroup title="Inference" desc="Applied at next model load.">
+        <SettingsRow label="Flash Attention" desc="Faster inference, slightly less VRAM. Requires NVIDIA Ampere+.">
+          <Toggle on={settings?.flash_attn ?? true} onChange={v => toggle('flash_attn', v)} />
+        </SettingsRow>
+        <SettingsRow label="Keep model in memory" desc="Don't unload when starting a new chat.">
+          <Toggle on={settings?.keep_model_in_memory ?? false} onChange={v => toggle('keep_model_in_memory', v)} />
+        </SettingsRow>
+      </SettingsGroup>
+    </>
   )
 }
 
 function ModelsSection(): React.ReactElement {
   return (
-    <SettingsGroup title="Model Storage" desc="Where downloaded models are stored.">
-      <SettingsRow label="Models directory" desc="Default: /mnt/models/echohub">
-        <input type="text" defaultValue="/mnt/models/echohub" className="w-[200px] bg-elevated border border-border rounded-sm px-2.5 py-1.5 text-sm font-mono text-text-primary outline-none focus:border-border-hover transition-colors" />
-        <Btn>Browse</Btn>
-      </SettingsRow>
-      <SettingsRow label="Keep model in memory" desc="Prevent auto-unload on new chat">
-        <Toggle on={false} onChange={() => {}} />
+    <SettingsGroup title="Model Storage" desc="Managed in Settings → Paths.">
+      <SettingsRow label="Models directory" desc="">
+        <span className="text-sm text-text-muted text-xs">See Paths tab</span>
       </SettingsRow>
     </SettingsGroup>
   )

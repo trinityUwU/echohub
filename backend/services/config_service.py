@@ -86,3 +86,26 @@ def reset_to_default(key: str) -> None:
     raw = _load_raw()
     raw.pop(key, None)
     _save_raw(raw)
+
+
+# ── Inference settings ────────────────────────────────────────────────────
+
+INFERENCE_DEFAULTS = {
+    "flash_attn": True,
+    "keep_model_in_memory": False,
+}
+
+
+def get_inference_settings() -> dict:
+    raw = _load_raw()
+    settings = raw.get("inference", {})
+    return {**INFERENCE_DEFAULTS, **settings}
+
+
+def set_inference_setting(key: str, value: object) -> None:
+    if key not in INFERENCE_DEFAULTS:
+        raise ValueError(f"Unknown inference setting: {key}")
+    raw = _load_raw()
+    raw.setdefault("inference", {})[key] = value
+    _save_raw(raw)
+    logger.info(f"inference.{key} = {value}")

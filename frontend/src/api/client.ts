@@ -335,3 +335,11 @@ export function runMigrationStream(
   })
   return () => { cancelled = true }
 }
+
+export const getInferenceSettings = (): Promise<{
+  flash_attn: boolean; keep_model_in_memory: boolean
+  gpu: { name: string; vram_gb: number; type: string }
+}> => apiRequest('/settings/inference')
+
+export const setInferenceSetting = (key: string, value: boolean | number | string): Promise<{ status: string }> =>
+  apiRequest(`/settings/inference/${key}`, { method: 'POST', body: JSON.stringify({ value }) })

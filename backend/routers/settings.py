@@ -231,3 +231,41 @@ async def run_migration():
 def cleanup_migration() -> dict:
     migration_service.cleanup_completed()
     return {"status": "cleaned"}
+
+
+# ── Inference settings ─────────────────────────────────────────────────────
+
+@router.get("/inference")
+def get_inference_settings() -> dict:
+    from backend.services.config_service import get_inference_settings, detect_gpu_info
+    settings = get_inference_settings()
+    try:
+        gpu = _get_gpu_info()
+    except Exception:
+        gpu = {"name": "Unknown", "vram_gb": 0, "type": "cpu"}
+    return {**settings, "gpu": gpu}
+
+
+@router.post("/inference/{key}")
+def set_inference_setting(key: str, body: dict) -> dict:
+    from backend.services.config_service import set_inference_setting
+    value = body.get("value")
+    if value is None:
+        raise HTTPException(status_code=400, detail="value required")
+    try:
+        set_inference_setting(key, value)
+        return {"status": "ok", "key": key, "value": value}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def _get_gpu_info() -> dict:
+    import subprocess
+    result = subprocess.run(
+        ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+        capture_output=True, text=True, timeout=5
+    )
+    if result.returncode == 0:
+        parts = result.stdout.strip().split(", ")
+        return {"name": parts[0], "vram_gb": round(int(parts[1]) / 1024, 1), "type": "nvidia"}
+    return {"name": "No GPU", "vram_gb": 0, "type": "cpu"}
