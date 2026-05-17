@@ -331,7 +331,7 @@ _APP_ROOT = _P(__file__).resolve().parents[2]
 def check_for_updates() -> dict:
     """Check if the local git repo is behind origin/master."""
     try:
-        _sp.run(["git", "fetch", "origin"], cwd=str(_APP_ROOT), capture_output=True, timeout=15)
+        _sp.run(["git", "fetch", "origin"], cwd=str(_APP_ROOT), capture_output=True, timeout=8)
         result = _sp.run(
             ["git", "rev-list", "HEAD..origin/master", "--count"],
             cwd=str(_APP_ROOT), capture_output=True, text=True, timeout=10
@@ -384,12 +384,19 @@ async def _update_stream():
         cwd=str(_APP_ROOT),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
+        env={**__import__("os").environ, "GIT_TERMINAL_PROMPT": "0"},
     )
-    async for line in proc.stdout:
-        decoded = line.decode().rstrip()
-        if decoded:
-            yield sse(decoded)
-    rc = await proc.wait()
+    try:
+        async for line in proc.stdout:
+            decoded = line.decode().rstrip()
+            if decoded:
+                yield sse(decoded)
+        rc = await asyncio.wait_for(proc.wait(), timeout=60)
+    except asyncio.TimeoutError:
+        proc.kill()
+        yield sse("git pull timed out after 60s — check your connection.", "error")
+        yield f"data: {json.dumps({'done': True, 'success': False})}\n\n"
+        return
 
     if rc != 0:
         yield sse("git pull failed — check your connection or resolve conflicts manually.", "error")

@@ -389,7 +389,7 @@ export const getArchivedConversations = (): Promise<ConversationSummary[]> =>
 export const checkForUpdates = (): Promise<{
   up_to_date: boolean; commits_behind: number
   local_sha: string; remote_sha: string; changelog: string[]; error?: string
-}> => apiRequest('/settings/update/check')
+}> => apiRequest('/settings/update/check', { signal: AbortSignal.timeout(15_000) })
 
 export function runUpdate(
   onLine: (data: { level: string; msg: string }) => void,
