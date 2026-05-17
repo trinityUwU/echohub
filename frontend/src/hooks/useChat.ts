@@ -247,11 +247,10 @@ export function useChat(
   const sendFromHistory = useCallback(async (history: ChatMessage[]) => {
     setError(null)
     setStats(null)
-    setMessages(history)
+    setStreaming(true)  // set BEFORE any state that triggers useEffect sync
 
     const assistantMsg: ChatMessage = { role: 'assistant', content: '' }
-    setMessages(prev => [...prev, assistantMsg])
-    setStreaming(true)
+    setMessages([...history, assistantMsg])
 
     const controller = new AbortController()
     abortRef.current = controller

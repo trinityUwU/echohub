@@ -82,7 +82,8 @@ export function ChatPage({
     if (lastAssistant === -1 || !loadedModel) return
     const idx = messages.length - 1 - lastAssistant
     const history = messages.slice(0, idx)
-    setActiveMessages(history)
+    // Don't setActiveMessages here — it triggers the sync useEffect which would override messages
+    // sendFromHistory sets streaming=true first, preventing the useEffect from firing
     sendFromHistory(history)
   }
 
@@ -90,7 +91,6 @@ export function ChatPage({
     if (!loadedModel) return
     const updated = { ...messages[index], content: newText }
     const history = [...messages.slice(0, index), updated]
-    setActiveMessages(history)
     sendFromHistory(history)
   }
 
