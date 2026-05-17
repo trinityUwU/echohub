@@ -309,6 +309,7 @@ async def run_benchmark() -> dict:
     start = time.perf_counter()
     first_token_time = None
     decode_tokens = 0
+    generated_text = ""
 
     try:
         async for chunk in engine_router.generate(
@@ -333,6 +334,7 @@ async def run_benchmark() -> dict:
             if first_token_time is None:
                 first_token_time = time.perf_counter()
             decode_tokens += 1
+            generated_text += content
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Benchmark failed: {e}")
 
@@ -410,6 +412,7 @@ async def run_benchmark() -> dict:
         "bench_prompt": BENCH_PROMPT,
         "bench_max_tokens": MAX_TOKENS,
         "bench_temperature": 0.0,
+        "generated_text": generated_text,
         "timestamp": int(time.time()),
         "share_text": "\n".join(share_lines),
     }
@@ -484,6 +487,7 @@ async def run_benchmark_profiles(body: dict):
             start = _time.perf_counter()
             first_token_time = None
             decode_tokens = 0
+            generated_text = ""
             vram_used_mb = gpu.vram_used_mb if gpu else None
 
             try:
@@ -506,6 +510,7 @@ async def run_benchmark_profiles(body: dict):
                     if first_token_time is None:
                         first_token_time = _time.perf_counter()
                     decode_tokens += 1
+                    generated_text += content
             except Exception as e:
                 yield f"data: {_json.dumps({'type': 'error', 'profile_id': pid, 'error': str(e)})}\n\n"
                 continue
@@ -546,6 +551,7 @@ async def run_benchmark_profiles(body: dict):
                 "bench_prompt": profile["prompt"],
                 "bench_max_tokens": profile["max_tokens"],
                 "bench_temperature": profile["temperature"],
+                "generated_text": generated_text,
                 "timestamp": int(_time.time()),
                 "share_text": "\n".join(share_lines),
             }

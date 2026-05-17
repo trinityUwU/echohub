@@ -17,6 +17,7 @@ interface BenchResult {
   vram_used_gb: number | null; gpu_util_pct: number | null
   engine_params: EngineParams
   bench_prompt: string; bench_max_tokens: number; bench_temperature: number
+  generated_text?: string
   timestamp: number; share_text: string; _db_id?: number
 }
 
@@ -293,6 +294,15 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
               </div>
             )}
           </InfoCard>
+
+          {/* Generated response */}
+          {r.generated_text && (
+            <InfoCard title="Model response">
+              <div className="text-xs text-white/75 leading-relaxed whitespace-pre-wrap font-mono bg-black/20 rounded-lg px-3 py-3 max-h-64 overflow-y-auto">
+                {r.generated_text}
+              </div>
+            </InfoCard>
+          )}
 
           {/* Copy */}
           <button onClick={onCopy}
