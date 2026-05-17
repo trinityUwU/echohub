@@ -41,10 +41,18 @@ function loadProfiles(): ChatProfile[] {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return BUILTIN_PROFILES
     const saved: ChatProfile[] = JSON.parse(raw)
-    // Builtins always use code definition (source of truth) — only custom profiles come from localStorage
     const builtinIds = new Set(BUILTIN_PROFILES.map(p => p.id))
     const custom = saved.filter(p => !builtinIds.has(p.id))
-    return [...BUILTIN_PROFILES, ...custom]
+    // Builtins: use saved version if user explicitly saved it (has userModified flag),
+    // otherwise fall back to code defaults (picks up new defaults on update)
+    const mergedBuiltins = BUILTIN_PROFILES.map(builtin => {
+      const savedVersion = saved.find(s => s.id === builtin.id)
+      if (savedVersion && (savedVersion as ChatProfile & { userModified?: boolean }).userModified) {
+        return savedVersion
+      }
+      return builtin
+    })
+    return [...mergedBuiltins, ...custom]
   } catch {
     return BUILTIN_PROFILES
   }
@@ -71,9 +79,11 @@ export function useProfiles() {
   const saveProfile = useCallback((id: string, name: string, params: ChatParams): void => {
     setProfiles(prev => {
       const exists = prev.find(p => p.id === id)
+      // Mark userModified so loadProfiles() knows this builtin was intentionally changed
+      const profile = { id, name, params, userModified: true } as ChatProfile & { userModified: boolean }
       const updated = exists
-        ? prev.map(p => p.id === id ? { ...p, name, params } : p)
-        : [...prev, { id, name, params }]
+        ? prev.map(p => p.id === id ? profile : p)
+        : [...prev, profile]
       persistProfiles(updated)
       return updated
     })
