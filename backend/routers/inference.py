@@ -359,7 +359,7 @@ async def run_benchmark() -> dict:
     # tok/s based on all tokens (thinking included) — reflects true throughput
     tok_per_sec = round(all_tokens / max(decode_ms / 1000, 0.001), 1) if all_tokens else 0.0
     prefill_tok_per_sec = None
-    decode_tokens = output_tokens  # expose output-only count separately
+    decode_tokens = all_tokens  # total tokens for display
 
     # Engine-specific params
     engine_params: dict = {}
@@ -549,7 +549,7 @@ async def run_benchmark_profiles(body: dict):
             ttft_ms = round((first_token_time - start) * 1000) if first_token_time else None
             decode_ms = round((end - (first_token_time or start)) * 1000)
             tok_per_sec = round(all_tokens / max(decode_ms / 1000, 0.001), 1) if all_tokens else 0.0
-            decode_tokens = output_tokens
+            decode_tokens = all_tokens
 
             share_lines = [
                 f"[{profile['name']}] {model.name}",
