@@ -395,15 +395,22 @@ def search_models(
 
         results: list[ModelInfo] = []
         for quant in quant_filters:
-            models = _api.list_models(
+            list_kwargs: dict = dict(
                 search=query,
                 filter=quant,
                 limit=fetch_limit,
                 sort=hf_sort,
-                direction=-1 if direction == "desc" else 1,
                 full=True,
                 token=_get_hf_token(),
             )
+            # `direction` param added in huggingface_hub>=0.20 — pass only if supported
+            try:
+                import inspect as _inspect
+                if "direction" in _inspect.signature(_api.list_models).parameters:
+                    list_kwargs["direction"] = -1 if direction == "desc" else 1
+            except Exception:
+                pass
+            models = _api.list_models(**list_kwargs)
             for m in models:
                 tags = list(m.tags or [])
                 quant_type = _detect_quantization(tags, m.modelId)
