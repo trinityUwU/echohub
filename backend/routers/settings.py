@@ -237,7 +237,7 @@ def cleanup_migration() -> dict:
 
 @router.get("/inference")
 def get_inference_settings() -> dict:
-    from backend.services.config_service import get_inference_settings, detect_gpu_info
+    from backend.services.config_service import get_inference_settings
     settings = get_inference_settings()
     try:
         gpu = _get_gpu_info()
