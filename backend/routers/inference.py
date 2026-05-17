@@ -319,18 +319,19 @@ async def run_benchmark() -> dict:
         ):
             if not chunk:
                 continue
-            # Detect first token — works with both SSE strings and raw dicts
+            # Extract content from SSE string: data: {"choices":[{"delta":{"content":"X"}}]}
+            content = ""
+            if isinstance(chunk, str) and '"content"' in chunk:
+                m = _re.search(r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', chunk)
+                content = m.group(1) if m else ""
+            elif isinstance(chunk, dict):
+                content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "") or ""
+
+            if not content:
+                continue  # skip empty deltas, usage chunks, etc.
+
             if first_token_time is None:
-                has_content = False
-                if isinstance(chunk, str):
-                    # SSE format: data: {"choices":[{"delta":{"content":"..."}}]}
-                    m = _re.search(r'"content"\s*:\s*"([^"]+)"', chunk)
-                    has_content = bool(m and m.group(1).strip())
-                elif isinstance(chunk, dict):
-                    delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                    has_content = bool(delta and delta.strip())
-                if has_content:
-                    first_token_time = time.perf_counter()
+                first_token_time = time.perf_counter()
             decode_tokens += 1
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Benchmark failed: {e}")
@@ -372,7 +373,7 @@ async def run_benchmark() -> dict:
         except Exception:
             pass
 
-    gpu_short = gpu.name.replace("NVIDIA GeForce ", "").replace("AMD Radeon ", "").replace("Apple ", "") if gpu else "CPU"
+    gpu_short = (gpu.name.replace("NVIDIA GeForce ", "").replace("AMD Radeon ", "").replace("Apple ", "")) if gpu else "CPU"
 
     share_lines = [
         f"🔥 {model.name}",
@@ -382,7 +383,7 @@ async def run_benchmark() -> dict:
         f"   EchoHub — github.com/trinityUwU/echohub",
     ]
 
-    return {
+    result = {
         # Identity
         "model_id": model.id,
         "model_name": model.name,
@@ -412,3 +413,7 @@ async def run_benchmark() -> dict:
         "timestamp": int(time.time()),
         "share_text": "\n".join(share_lines),
     }
+    # Auto-save to DB
+    from backend.services.db import save_benchmark
+    result["_db_id"] = save_benchmark(result)
+    return result

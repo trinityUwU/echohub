@@ -81,6 +81,12 @@ def init_db() -> None:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS benchmarks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
         """)
         conn.commit()
         # Migrations — add columns that may be missing from older DBs
@@ -244,4 +250,49 @@ def set_app_state(key: str, value: str) -> None:
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value)
         )
+        conn.commit()
+
+
+def save_benchmark(data: dict) -> int:
+    import json as _json
+    from datetime import datetime
+    with _lock:
+        conn = _get_conn()
+        cur = conn.execute(
+            "INSERT INTO benchmarks (data, created_at) VALUES (?, ?)",
+            (_json.dumps(data), datetime.utcnow().isoformat())
+        )
+        conn.commit()
+    return cur.lastrowid
+
+
+def get_benchmarks(limit: int = 50) -> list[dict]:
+    import json as _json
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT id, data, created_at FROM benchmarks ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+    results = []
+    for row in rows:
+        try:
+            d = _json.loads(row["data"])
+            d["_db_id"] = row["id"]
+            results.append(d)
+        except Exception:
+            pass
+    return results
+
+
+def delete_benchmark(bench_id: int) -> None:
+    with _lock:
+        conn = _get_conn()
+        conn.execute("DELETE FROM benchmarks WHERE id = ?", (bench_id,))
+        conn.commit()
+
+
+def clear_benchmarks() -> None:
+    with _lock:
+        conn = _get_conn()
+        conn.execute("DELETE FROM benchmarks")
         conn.commit()

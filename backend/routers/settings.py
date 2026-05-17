@@ -445,3 +445,32 @@ def clear_changelog() -> dict:
     from backend.services.db import set_app_state
     set_app_state("pending_changelog", "")
     return {"status": "ok"}
+
+
+# ── Benchmarks persistence ──────────────────────────────────────────────────
+
+@router.get("/benchmarks")
+def list_benchmarks() -> list:
+    from backend.services.db import get_benchmarks
+    return get_benchmarks(50)
+
+
+@router.post("/benchmarks")
+def store_benchmark(body: dict) -> dict:
+    from backend.services.db import save_benchmark
+    bench_id = save_benchmark(body)
+    return {"id": bench_id, "status": "saved"}
+
+
+@router.delete("/benchmarks/{bench_id}")
+def remove_benchmark(bench_id: int) -> dict:
+    from backend.services.db import delete_benchmark
+    delete_benchmark(bench_id)
+    return {"status": "deleted"}
+
+
+@router.delete("/benchmarks")
+def wipe_benchmarks() -> dict:
+    from backend.services.db import clear_benchmarks
+    clear_benchmarks()
+    return {"status": "cleared"}

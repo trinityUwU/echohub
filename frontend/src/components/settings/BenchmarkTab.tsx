@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { runBenchmark } from '@/api/client'
+import { apiRequest } from '@/api/base'
 
 interface EngineParams {
   n_ctx?: number; n_batch?: number; n_gpu_layers?: number; flash_attn?: boolean
@@ -18,21 +19,8 @@ interface BenchResult {
   timestamp: number; share_text: string
 }
 
-const STORAGE_KEY = 'echohub:benchmarks_v3'
-
-function loadHistory(): BenchResult[] {
-  // Clear old keys from previous formats
-  localStorage.removeItem('echohub:benchmarks')
-  localStorage.removeItem('echohub:benchmarks_v2')
-  try {
-    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
-    // Filter out entries missing required v3 fields
-    return raw.filter((r: BenchResult) => r.engine_version !== undefined && r.decode_ms !== undefined)
-  } catch { return [] }
-}
-function saveHistory(h: BenchResult[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(h.slice(0, 20)))
-}
+// Clear legacy localStorage keys
+;['echohub:benchmarks', 'echohub:benchmarks_v2', 'echohub:benchmarks_v3'].forEach(k => localStorage.removeItem(k))
 
 function speedColor(tps: number): string {
   if (tps >= 60) return 'text-green'
@@ -50,19 +38,25 @@ function speedLabel(tps: number): string {
 
 export function BenchmarkTab(): React.ReactElement {
   const [running, setRunning] = useState(false)
-  const [history, setHistory] = useState<BenchResult[]>(loadHistory)
+  const [history, setHistory] = useState<BenchResult[]>([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [detail, setDetail] = useState<BenchResult | null>(null)
   const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    apiRequest<BenchResult[]>('/settings/benchmarks')
+      .then(setHistory)
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
 
   const run = async (): Promise<void> => {
     setRunning(true)
     setError(null)
     try {
       const result = await runBenchmark() as unknown as BenchResult
-      const updated = [result, ...history]
-      setHistory(updated)
-      saveHistory(updated)
+      setHistory(prev => [result, ...prev])
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -70,7 +64,10 @@ export function BenchmarkTab(): React.ReactElement {
     }
   }
 
-  const clear = (): void => { setHistory([]); saveHistory([]) }
+  const clear = async (): Promise<void> => {
+    await apiRequest('/settings/benchmarks', { method: 'DELETE' }).catch(() => {})
+    setHistory([])
+  }
 
   const copy = (r: BenchResult): void => {
     navigator.clipboard.writeText(r.share_text)
@@ -124,7 +121,8 @@ export function BenchmarkTab(): React.ReactElement {
         </div>
       )}
 
-      {history.length === 0 && !running && !error && (
+      {loading && <div className="text-sm text-text-muted animate-pulse">Loading…</div>}
+      {!loading && history.length === 0 && !running && !error && (
         <div className="text-center text-text-muted py-12 text-sm">
           No results yet — load a model and run your first benchmark.
         </div>
