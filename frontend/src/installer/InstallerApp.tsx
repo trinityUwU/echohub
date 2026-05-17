@@ -42,26 +42,32 @@ export function InstallerApp(): React.ReactElement {
       await apiRequest('/settings/paths/models-dir', { method: 'POST', body: JSON.stringify({ path: config.models_dir }) })
     } catch {}
 
-    // Stream installation logs
+    // Stream installation logs via fetch ReadableStream (more reliable in Tauri webview)
     const url = await apiUrl('/installer/run')
-    const es = new EventSource(url)
-    es.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data)
-        if (data.done) {
-          es.close()
-          setInstalling(false)
-          
-          setStep('done')
-        } else if (data.msg) {
-          setLogs(prev => [...prev, { level: data.level ?? 'info', msg: data.msg }])
+    try {
+      const res = await fetch(url)
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (value) buf += decoder.decode(value, { stream: !done })
+        const blocks = buf.split('\n\n')
+        buf = done ? '' : (blocks.pop() ?? '')
+        for (const block of blocks) {
+          if (!block.startsWith('data: ')) continue
+          try {
+            const data = JSON.parse(block.slice(6).trim())
+            if (data.done) { setInstalling(false); setStep('done'); return }
+            if (data.msg) setLogs(prev => [...prev, { level: data.level ?? 'info', msg: data.msg }])
+          } catch {}
         }
-      } catch {}
-    }
-    es.onerror = () => {
-      es.close()
+        if (done) { setInstalling(false); setStep('done'); break }
+      }
+    } catch (err) {
       setInstalling(false)
-      setLogs(prev => [...prev, { level: 'error', msg: 'Installation stream disconnected.' }])
+      setLogs(prev => [...prev, { level: 'error', msg: String(err) }])
     }
   }
 
