@@ -2,7 +2,7 @@
 
 **Run AI models on your own machine. No cloud. No subscription. No data leaving your computer.**
 
-EchoHub is a local AI interface — think ChatGPT, but everything runs on your GPU, completely offline. Search and download models from Hugging Face, load them in one click, and chat. That's it.
+EchoHub is a local AI interface — think ChatGPT, but everything runs on your GPU, completely offline. Search and download models from Hugging Face, load them in one click, and chat.
 
 ---
 
@@ -27,7 +27,8 @@ cd echohub
 - **Search** — browse thousands of open-source AI models from Hugging Face
 - **Download** — pick the version that fits your GPU memory, download in the background
 - **Load** — one click to load a model into memory, with a live VRAM preview so you know it'll fit
-- **Chat** — streaming responses, conversation history, attachments for vision models
+- **Chat** — streaming responses, conversation history, image attachments for vision models
+- **Export** — export any conversation as Markdown
 - **Works offline** — once a model is downloaded, no internet needed
 
 ---
@@ -43,17 +44,26 @@ No Python knowledge. No configuration files. No command line after the first ins
 
 ---
 
+## Multiple vLLM versions
+
+Different AI models require different versions of the inference engine. EchoHub handles this automatically — each version lives in an isolated environment, the right one is selected per model. You can install new versions from Settings → Engines if a model needs one you don't have yet.
+
+---
+
 ## Under the hood (for the curious)
 
 EchoHub handles a lot of complexity so you don't have to:
 
 - **Two inference engines** — llama-cpp for GGUF models (works everywhere), vLLM for AWQ/GPTQ (NVIDIA, higher performance)
 - **Automatic engine selection** — the app picks the right engine for each model
+- **Multiple vLLM versions** — isolated environments per version, automatic routing, one-click install
 - **VRAM management** — real-time preview before loading, automatic retry if allocation fails
 - **Model compatibility checking** — warns you before downloading if a model needs a newer engine version
-- **Isolated environments** — each vLLM version lives in its own environment, nothing interferes
+- **Configurable paths** — move model storage anywhere, migration handled automatically
 
-See [docs/v0.1-foundation.md](docs/v0.1-foundation.md) for the full technical breakdown.
+See the full technical breakdown:
+- [v0.1 — Foundation](docs/v0.1-foundation.md)
+- [v0.2 — Multi-engine vLLM](docs/v0.2-multi-vllm.md)
 
 ---
 
@@ -62,7 +72,7 @@ See [docs/v0.1-foundation.md](docs/v0.1-foundation.md) for the full technical br
 | Version | Status | What's in it |
 |---|---|---|
 | [v0.1 — Foundation](docs/v0.1-foundation.md) | ✅ Stable | Core app, dual-engine inference, VRAM management, model discovery |
-| [v0.2 — Multi-engine](docs/v0.2-multi-vllm.md) | 🔧 In progress | Multiple vLLM versions, automatic compatibility routing, one-click engine install |
+| [v0.2 — Multi-engine](docs/v0.2-multi-vllm.md) | ✅ Stable | Multiple vLLM versions, automatic compatibility routing, onboarding, configurable paths |
 
 ---
 
