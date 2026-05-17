@@ -68,7 +68,7 @@ function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRe
       transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
       className={`group flex px-5 py-1.5 gap-3 hover:bg-white/[0.02] transition-colors ${isUser ? 'flex-row-reverse' : ''}`}>
       <Avatar role={message.role} />
-      <div className={`max-w-[680px] flex flex-col gap-1 ${isUser ? 'items-end' : ''}`}>
+      <div className={`max-w-[680px] min-w-0 flex flex-col gap-1 overflow-hidden ${isUser ? 'items-end' : ''}`}>
         {images.length > 0 && (
           <div className="flex gap-2 flex-wrap mb-1">
             {images.map((url, i) => (

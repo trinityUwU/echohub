@@ -44,7 +44,7 @@ const components: Components = {
     }
 
     return (
-      <div className="my-3 rounded-md overflow-hidden border border-border/40">
+      <div className="my-3 rounded-md overflow-x-auto border border-border/40">
         {lang && (
           <div className="px-3.5 py-1.5 bg-[#21252b] border-b border-black/20">
             <span className="text-xs font-mono text-[#abb2bf]/70">{lang}</span>
