@@ -54,20 +54,44 @@ function ConvItem({ conv, active, onClick }: { conv: ConversationSummary; active
 }
 
 function GpuBar({ gpu }: { gpu: GpuStats }): React.ReactElement {
-  const pct = gpu.vram_used_mb / gpu.vram_total_mb
-  const usedGb = (gpu.vram_used_mb / 1024).toFixed(1)
-  const totalGb = (gpu.vram_total_mb / 1024).toFixed(0)
+  const vramPct  = gpu.vram_total_mb > 0 ? gpu.vram_used_mb / gpu.vram_total_mb : 0
+  const gpuPct   = gpu.gpu_utilization_pct ?? 0
+  const usedGb   = (gpu.vram_used_mb / 1024).toFixed(1)
+  const totalGb  = (gpu.vram_total_mb / 1024).toFixed(0)
+  const shortName = gpu.name.replace('NVIDIA GeForce ', '').replace('AMD Radeon ', '')
 
   return (
-    <div className="px-2.5 py-2.5 border-t border-border">
-      <div className="flex items-center gap-2 bg-elevated border border-border rounded-[20px] px-2.5 py-1.5 text-xs text-text-secondary">
+    <div className="px-3 py-3 border-t border-border flex flex-col gap-2">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-text-secondary">
         <span className="w-1.5 h-1.5 rounded-full bg-green flex-shrink-0" />
-        <span className="truncate">{gpu.name.replace('NVIDIA GeForce ', '')}</span>
-        <div className="w-[60px] h-1 bg-overlay rounded-sm overflow-hidden flex-shrink-0">
-          <div className="h-full bg-accent rounded-sm transition-all" style={{ width: `${pct * 100}%` }} />
-        </div>
-        <span className="text-text-muted flex-shrink-0">{usedGb}/{totalGb}G</span>
+        {shortName}
       </div>
+      <div>
+        <div className="flex justify-between text-2xs text-text-muted mb-1">
+          <span>VRAM</span>
+          <span className="font-mono">{usedGb} / {totalGb} GB</span>
+        </div>
+        <div className="h-1 bg-overlay rounded-sm overflow-hidden">
+          <div className="h-full bg-accent rounded-sm transition-all duration-500"
+            style={{ width: `${Math.min(vramPct * 100, 100)}%` }} />
+        </div>
+      </div>
+      {gpu.vram_total_mb > 0 && (
+        <div>
+          <div className="flex justify-between text-2xs text-text-muted mb-1">
+            <span>GPU</span>
+            <span className="font-mono">{gpuPct}%</span>
+          </div>
+          <div className="h-1 bg-overlay rounded-sm overflow-hidden">
+            <div
+              className={`h-full rounded-sm transition-all duration-500 ${
+                gpuPct > 90 ? 'bg-red' : gpuPct > 70 ? 'bg-yellow' : 'bg-green'
+              }`}
+              style={{ width: `${gpuPct}%` }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
