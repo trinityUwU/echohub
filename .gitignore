@@ -13,3 +13,5 @@ frontend/.env.development
 .venv-vllm/
 *.db
 frontend/.env.development
+docs/private/
+docs/market-research.md
