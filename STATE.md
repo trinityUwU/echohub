@@ -1,101 +1,106 @@
 # STATE — EchoHub
-*Dernière mise à jour : 2026-05-17 (session 9)*
+*Dernière mise à jour : 2026-05-17 (session 10)*
 
 ## Résumé de l'état actuel
 
-Application Tauri v2 native pleinement fonctionnelle. Dual-engine llama-cpp-python (GGUF, cross-platform) + vLLM (AWQ/GPTQ, NVIDIA). Multi-venv vLLM avec routing automatique par version. InstalleurApp natif, système de mise à jour git pull SSE. Chat streaming avec markdown riche, actions messages (copy/edit/regenerate), context menu conversations (rename/archive/delete). Tests E2E réalisés depuis un clone frais — majorité des bugs de fresh install corrigés.
+Application Tauri v2 native pleinement fonctionnelle. Dual-engine llama-cpp (GGUF) + vLLM (AWQ/GPTQ). Benchmark complet avec 10 profils, scoring qualité algorithmique (6 scorers sans LLM juge), leaderboard par profil/onglet. Discover avec multi-filtres toggle + sort + pagination. Modal chargement avec hardware live CPU+GPU, slider compute split GPU/CPU, CPU overflow. Chat vLLM stable (fallback chat template, filtre messages vides).
 
-## Ce qui a été fait — session du 2026-05-17 (session 9)
+## Ce qui a été fait — session du 2026-05-17 (session 10)
 
-### Fresh install E2E — bugs corrigés
-- `locate_project_root` en release utilisait `resource_dir()` → corrigé avec `current_exe().nth(5)`
-- `start.sh` faisait `cargo tauri build` (AppImage, nécessitait linuxdeploy) → remplacé par `cargo tauri dev`
-- `start.sh` compilait llama-cpp en CLI → délégué à l'InstallerApp
-- `main.tsx` : splash screen + retry loop 30×1s avant d'attendre le backend (évite l'app principale si backend pas prêt)
-- `InstallerApp` : log box `min-h-0` pour scroll interne dans flex column
-- Compilation llama-cpp : "still running..." spam → timer elapsed toutes 5 occurrences
-- Installer vLLM par défaut si NVIDIA détecté (fresh clone = pas de .venv-vllm)
-- Tous les paths hardcodés `/mnt/projects/echohub` supprimés des services backend
-- `import datetime` manquant dans conversations.py → archive 500 fixé
-- Migration DB `archived` column : `ALTER TABLE IF MISSING` au démarrage
-- CORS headers sur les 500 (global exception handler + logging)
+### Benchmark — qualité algorithmique
+- `quality_scorer.py` : 6 scorers sans LLM juge
+  - `score_code` : AST parse + sandbox exec Python 5s + éléments structurels
+  - `score_reasoning` : step-by-step markers + extraction réponse numérique
+  - `score_instruction` : format liste numérotée, comptage items exact, filler
+  - `score_summary` : keyword coverage depuis contexte source
+  - `score_general` : densité info, topic overlap, filler ratio
+  - `score_conversation` : extraction auto faits depuis prompt, cohérence, contradictions
+- Score 0-100, grade A/B/C/D/F affiché dans cards + modal + leaderboard
 
-### UX Chat
-- Footer messages toujours visible (plus au hover uniquement) — stats hydratées en mémoire après stream
-- Actions footer : **Copy** (check vert 1.5s), **Edit** (user, textarea inline Enter/Esc), **Regenerate**
-- `sendFromHistory()` dans useChat — stream sans ajouter de user message (pour regenerate/edit)
-- Toast erreur load : croix dismiss + auto-close 60s
+### Benchmark — nouveaux profils
+- 3 profils conversation builtins : Short/Medium/Long context (hallucination, mémorisation)
+- 3 profils additionnels : Long Context (code review ~1500 tokens), Reasoning (math), Instruction
+- Seed incrémental : ajoute les profils manquants au restart sans recréer
 
-### Markdown
-- `atom-one-dark` highlight.js importé — syntax highlighting couleurs par langage
-- Badge langue corrigé (retiré préfixe `hljs `)
-- Texte 0.92rem, line-height 1.7, borders réduites
-- Code blocks fond `#282c34` assorti au thème
+### Benchmark — leaderboard par profil
+- Onglets : Overall + un onglet par profil avec classement dédié
+- Colonne Quality score dans le leaderboard
+- Nommage auto benchmarks : `model-profil-17 May 09:51`
+- Persistance DB confirmée (table benchmarks + migrations)
 
-### Conversations sidebar
-- Context menu clic droit : Rename / Archive / Delete (menu positionné, ajustement auto bord d'écran)
-- Rename inline (input dans la sidebar, Enter=confirm, blur=confirm, Esc=cancel)
-- Boutons hover : rename + archive + delete
+### Benchmark — thinking models
+- `tok/s` compte tous les tokens (thinking inclus) → plus de 0 tok/s sur DeepSeek-R1
+- `/no_think` envoyé en system_prompt pour Qwen3/QwQ
+- `thinking_tokens` stocké séparément, affiché dans modal si > 0
 
-### Context menu global
-- `ContextMenuProvider` au root : bloque le menu natif partout
-- Clic droit hors zone configurée → "No actions available"
-- Fichiers séparés pour compatibilité Vite Fast Refresh (useContextMenu.ts séparé)
-- `createRoot` unique au module level (plus de recréation au HMR)
+### Discover refonte
+- Multi-filtres toggle (GGUF, AWQ, GPTQ, FP8, EXL2 + Vision, Thinking en jaune)
+- Sort Downloads/Likes/Date avec flèche haut/bas
+- Pagination vraie : Next/Prev/First, 20/page, scroll to top, replace (pas append)
+- `direction` param conditionnel selon version huggingface_hub (fix crash)
 
-### Settings > About
-- Bouton "Update now" intégré directement (plus de dépendance au UpdateBanner)
-- Logs git pull inline dans la section About
-- Bouton "Restart now" après succès
+### Modal chargement
+- Section Hardware live : GPU (VRAM bar, temp, util%) + CPU (RAM bar, cores, temp)
+- Slider Compute Split CPU←→GPU (llama.cpp uniquement)
+- Checkbox "Overflow to CPU if VRAM exceeded" → split_mode ROW dans llama.cpp
+- `psutil` ajouté aux requirements pour CPU stats
+- OOM warning adapté : llama suggère overflow, vLLM bloque
 
-### Engines tab
-- Badge "default" sur le venv legacy/builtin (non supprimable)
-- `LEGACY_VENV` chemin relatif au projet (était hardcodé)
-- Cache `_is_operational` TTL 120s (import vLLM prenait 30-60s)
-- Bouton Refresh dans le header de la liste
-- `is_builtin: True` sur le venv par défaut, suppression bloquée
+### Bugs vLLM
+- 400 Bad Request : fallback chatml si tokenizer sans chat_template (dolphin-mistral etc.)
+- 400 messages vides : filtrage des messages content="" avant envoi
+- Body vLLM 400 maintenant loggé avec détails
 
-### Migration paths
-- Cancel & rollback pendant la copie (flag `_cancel_requested`, suppression des fichiers copiés, restauration config)
-- Bouton "Cancel & rollback" rouge visible pendant `in_progress`
+### Leaderboard Settings
+- Onglet "Models" Settings supprimé (inutile, redirect vers Paths)
+- Nom du modèle persisté dans `message.stats.model_name` → visible après restart
+
+### Divers
+- LICENSE MIT ajouté
+- `score_conversation` extraction faits depuis prompt corrigée
+- `\n` littéraux dans generated_text normalisés avant extraction code
+- `_vllm_version()` via subprocess dans venv vLLM (plus "UNKNOWN")
 
 ## Décisions prises
 
 | Décision | Raison | Date |
 |---|---|---|
-| `cargo tauri dev` dans start.sh (pas build) | `cargo tauri build` nécessite linuxdeploy pour AppImage — absent sur fresh install | 2026-05-17 |
-| InstallerApp installe vLLM par défaut si NVIDIA | Sans ça, modèles AWQ/GPTQ impossibles sur fresh clone | 2026-05-17 |
-| Cache _is_operational 120s | Import vLLM en subprocess = 30-60s bloquant, inacceptable au refresh | 2026-05-17 |
-| ContextMenuProvider global + "No actions" | Menu natif bloqué partout — cohérence UX, pas de comportement surprenant | 2026-05-17 |
-| sendFromHistory() dans useChat | Regenerate/edit nécessite stream sans ajouter user message — send() ne couvre pas ce cas | 2026-05-17 |
-| LoadingSplash fichier séparé | Vite Fast Refresh interdit composant + hook/fonction dans le même fichier | 2026-05-17 |
+| LLM-as-judge rejeté | Boucle d'erreurs : mauvais modèle juge amplifie le bruit. Reprendre quand modèle juge fiable identifié | 2026-05-17 |
+| Scoring algorithmique sans LLM | Déterministe, reproductible, zéro dépendance externe | 2026-05-17 |
+| tok/s = tous tokens (thinking inclus) | DeepSeek-R1 ne sort que du thinking → 0 tok/s sinon. Thinking séparé pour info | 2026-05-17 |
+| Pagination replace (pas append) | UX standard — pagination = switch de page, pas scroll infini | 2026-05-17 |
+| psutil pour CPU stats | Seule lib cross-platform pour RAM, cores, CPU usage, température | 2026-05-17 |
+| Fine-tuning manuel avant automatisation | Impossible de créer un modèle juge sans fine-tuner d'abord | 2026-05-17 |
 
 ## Contexte non-évident
 
-- `start.sh` lance `cargo tauri dev` → frontend Vite HMR actif. Pour un binaire release : `cargo tauri build --no-bundle` dans `frontend/`.
-- Installer flag : `sqlite3 ~/.local/share/echohub/echohub.db "UPDATE app_state SET value='false' WHERE key='install_complete';"` pour re-tester l'installer.
-- `_is_operational` cache : invalider avec `invalidate_operational_cache(version)` après install vLLM.
-- Context menu : `useContextMenu` doit être importé depuis `@/components/shared/useContextMenu` (fichier séparé), pas depuis `ContextMenu.tsx`.
-- `sendFromHistory(history)` envoie l'historique directement sans ajouter de user message — utilisé pour regenerate et edit user.
-- CORS 500 : le middleware Starlette n'ajoute pas les headers CORS sur les exceptions non catchées → global_exception_handler dans main.py les ajoute manuellement.
-- Vieux composants dans `src/components/*.tsx` (héritage pré-refactor) : encore présents, inoffensifs, à nettoyer.
+- `quality_scorer.py` : `score_code` exécute le code en sandbox (timeout 5s, subprocess). Si ImportError → partial credit 60 (module absent mais code structurellement correct).
+- `_extract_conversation_facts()` : regex sur phrases avec nombres/noms techniques — skip les phrases avec "tell me/based on/answer/question" pour ne pas capturer les questions elles-mêmes.
+- `direction` param dans `hf_api.list_models()` : ajouté en huggingface_hub>=0.20 — vérification runtime via `inspect.signature`. Sur versions antérieures, sort ASC/DESC inactif mais pas crashé.
+- `cpu_overflow` dans llama.cpp : utilise `LLAMA_SPLIT_MODE_ROW` — disponible seulement dans llama-cpp-python récent (≥0.3.x). Silencieusement ignoré si absent.
+- Chat template vLLM : détecté via `tokenizer_config.json` dans le répertoire modèle avant spawn vLLM. Si absent → chatml injecté via `--chat-template`.
+- Fine-tuning : roadmap validée → fine-tune manuel d'abord (Unsloth/LoRA), puis automatisation, puis modèle juge. psutil doit être installé dans `backend/.venv` (ajouté requirements.txt mais pas auto-installé sur clones existants).
 
 ## Prochaines étapes
 
-1. **Stratégie marché** : créer compte Reddit, construction karma r/LocalLLaMA (participation genuïne, 3-4 semaines avant toute promo)
-2. **Assets lancement** : screenshot benchmark EchoHub vs Ollama, GIF VRAM preview, GIF Engine install
-3. **Nettoyer old components** : `src/components/*.tsx` héritage pré-refactor (ChatPanel.tsx, LoadConfigModal.tsx, etc.)
-4. **Packaging** : valider `.AppImage` et `.deb` sur machine propre (linuxdeploy à installer)
-5. **MCP server** : Phase 2 roadmap — Claude Code pilote modèles locaux via EchoHub
+1. **Fine-tuning** : prochaine grosse feature — UI dans EchoHub, Unsloth/LoRA/QLoRA, import dataset, export GGUF
+2. **Quality scoring** : Throughput/Latency → retirer le quality score (pas de critère objectif), garder seulement pour Code/Reasoning/Instruction/Conversation
+3. **Nettoyage** : supprimer vieux composants héritage `src/components/*.tsx`
+4. **Tool call eval** : profil benchmark pour tester compatibilité tool calling natif
+5. **Stratégie marché** : karma Reddit r/LocalLLaMA + assets lancement
 
 ## Points en suspens
 
-- Vieux composants `src/components/*.tsx` : encore présents, inoffensifs mais à nettoyer
-- AMD ROCm et Apple Silicon : code présent, non testé sur vrai hardware
-- Installer race condition : si backend pas encore démarré lors du clic "Install Now"
-- `.AppImage` : nécessite `linuxdeploy` — pas testé depuis ce refactoring start.sh
+- `psutil` pas auto-installé sur clones existants → `pip install psutil` dans backend/.venv
+- Sort ASC/DESC inactif sur les vieilles versions de huggingface_hub (pas de crash, juste ignoré)
+- AppImage non validé (linuxdeploy requis)
+- AMD ROCm + Apple Silicon CPU stats non testés sur vrai hardware
+- Vieux composants héritage `src/components/*.tsx` toujours présents
 
 ## Historique
+
+### Session 9 (2026-05-17) — Fresh install E2E + UX actions + context menu
+locate_project_root, start.sh cargo tauri dev, InstallerApp log scroll, installer vLLM par défaut, paths hardcodés supprimés, archive conversations (import datetime + migration DB), CORS 500 headers, footer messages stats persistées, actions copy/edit/regenerate, sendFromHistory(), toast erreur dismiss, markdown atom-one-dark, context menu global, HMR fix.
 
 ### Session 8 (2026-05-17) — UX polish, installeur natif, système MAJ
 Conversations archivables, GPU sidebar, ThinkingBlock, Framer Motion, InstallerApp, UpdateBanner, benchmark, resource limits, HF token, export markdown, badge engine.
@@ -103,11 +108,5 @@ Conversations archivables, GPU sidebar, ThinkingBlock, Framer Motion, InstallerA
 ### Session 7 (2026-05-17) — Multi-venv vLLM, paths, migration, docs
 vllm_manager.py, Settings/Engines, config_service, migration_service, PathsTab, MigrationBanner, engine_router routing par version, CompatBanner, Dialog.tsx, start.sh universel, OnboardingWizard.
 
-### Session 6 (2026-05-16) — Sidecar Python fonctionnel
-Sidecar Python spawné par Rust, port dynamique, kill à fermeture. base.ts invoke. CORS dynamique.
-
-### Session 5 (2026-05-16) — Tauri init + componentisation React
-cargo tauri init, composants React complets depuis mockup, tailwind tokens.
-
-### Sessions 1-4 (2026-05-15/16)
-Design, dual-engine GGUF/AWQ, SQLite, MSW, scaffold frontend, llama-cpp CUDA compilation.
+### Sessions 1-6 (2026-05-15/16)
+Design, dual-engine GGUF/AWQ, SQLite, MSW, scaffold frontend, llama-cpp CUDA, Tauri init, sidecar Python.
