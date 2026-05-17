@@ -343,7 +343,7 @@ async def run_benchmark() -> dict:
     prefill_ms = ttft_ms  # prefill = time to first token
     decode_ms = round((end - (first_token_time or start)) * 1000)
     tok_per_sec = round(decode_tokens / max(decode_ms / 1000, 0.001), 1)
-    prefill_tok_per_sec = round(PROMPT_TOKENS / max((prefill_ms or 1) / 1000, 0.001), 1) if prefill_ms else None
+    prefill_tok_per_sec = None  # not meaningful with short benchmark prompt
 
     # Engine-specific params
     engine_params: dict = {}

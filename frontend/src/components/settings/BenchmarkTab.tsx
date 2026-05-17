@@ -248,9 +248,8 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
           <div className="grid grid-cols-2 gap-3">
             <InfoCard title="Throughput">
               <InfoRow label="Decode" value={`${r.tok_per_sec} tok/s`} highlight />
-              {r.prefill_tok_per_sec && <InfoRow label="Prefill" value={`${r.prefill_tok_per_sec} tok/s`} />}
-              <InfoRow label="Out" value={String(r.tokens_generated)} />
-              <InfoRow label="In" value={`~${r.prompt_tokens}`} muted />
+              <InfoRow label="Out tokens" value={String(r.tokens_generated)} />
+              <InfoRow label="In tokens" value={`~${r.prompt_tokens}`} muted />
             </InfoCard>
             <InfoCard title="Hardware">
               <InfoRow label="GPU" value={r.gpu_short || r.gpu_name} />
