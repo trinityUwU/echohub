@@ -89,10 +89,20 @@ def init_db() -> None:
             );
         """)
         conn.commit()
-        # Migrations — add columns that may be missing from older DBs
-        existing = {row[1] for row in conn.execute("PRAGMA table_info(conversations)")}
-        if "archived" not in existing:
+        # Migrations — add columns/tables missing from older DBs
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)")}
+        if "archived" not in existing_cols:
             conn.execute("ALTER TABLE conversations ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        existing_tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "benchmarks" not in existing_tables:
+            conn.execute("""
+                CREATE TABLE benchmarks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    data TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            """)
             conn.commit()
     logger.info("DB initialized at {}", get_db_path())
 
