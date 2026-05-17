@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getInferenceSettings, setInferenceSetting } from '@/api/client'
+import { apiRequest } from '@/api/base'
 import { Toggle } from '@/components/shared/Toggle'
 import { EnginesTab } from './EnginesTab'
 import { PathsTab } from './PathsTab'
@@ -113,12 +114,33 @@ function ModelsSection(): React.ReactElement {
 }
 
 function AboutSection(): React.ReactElement {
+  const [resetting, setResetting] = useState(false)
+  const [done, setDone] = useState(false)
+
+  const resetOnboarding = async (): Promise<void> => {
+    setResetting(true)
+    try {
+      await apiRequest('/settings/onboarding/reset', { method: 'POST' })
+      setDone(true)
+      setTimeout(() => window.location.reload(), 1200)
+    } catch { /* ignore */ }
+    finally { setResetting(false) }
+  }
+
   return (
     <SettingsGroup title="EchoHub" desc="">
-      <SettingsRow label="Version" desc=""><span className="text-sm font-mono text-text-secondary">0.1.0</span></SettingsRow>
+      <SettingsRow label="Version" desc=""><span className="text-sm font-mono text-text-secondary">0.2.0</span></SettingsRow>
       <SettingsRow label="License" desc=""><span className="text-sm text-text-secondary">MIT</span></SettingsRow>
       <SettingsRow label="GitHub" desc="">
-        <span className="text-sm text-accent">github.com/trinityUwU/echohub</span>
+        <a href="https://github.com/trinityUwU/echohub" target="_blank" rel="noopener noreferrer" className="text-sm text-accent hover:underline cursor-pointer">
+          github.com/trinityUwU/echohub
+        </a>
+      </SettingsRow>
+      <SettingsRow label="Onboarding tutorial" desc="Replay the setup guide">
+        <button onClick={resetOnboarding} disabled={resetting || done}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-sm border border-border hover:bg-overlay text-text-secondary cursor-pointer transition-colors disabled:opacity-50">
+          {done ? '✓ Reloading…' : resetting ? 'Resetting…' : 'Replay tutorial'}
+        </button>
       </SettingsRow>
     </SettingsGroup>
   )
