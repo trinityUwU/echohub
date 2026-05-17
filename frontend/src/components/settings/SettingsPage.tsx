@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getInferenceSettings, setInferenceSetting, checkForUpdates } from '@/api/client'
+import { getInferenceSettings, setInferenceSetting, checkForUpdates, runUpdate, saveChangelog } from '@/api/client'
 import { apiRequest } from '@/api/base'
 import { Toggle } from '@/components/shared/Toggle'
 import { EnginesTab } from './EnginesTab'
@@ -207,7 +207,12 @@ function ModelsSection(): React.ReactElement {
 
 function AboutSection(): React.ReactElement {
   const [resetting, setResetting] = useState(false)
-  const [updateState, setUpdateState] = useState<{checking: boolean; result: string | null}>({ checking: false, result: null })
+  const [updateState, setUpdateState] = useState<{
+    checking: boolean; result: string | null
+    available: boolean; commitsBehind: number; changelog: string[]
+    updating: boolean; done: boolean; success: boolean
+    logs: Array<{ level: string; msg: string }>
+  }>({ checking: false, result: null, available: false, commitsBehind: 0, changelog: [], updating: false, done: false, success: false, logs: [] })
 
   const resetOnboarding = async (): Promise<void> => {
     setResetting(true)
@@ -218,19 +223,30 @@ function AboutSection(): React.ReactElement {
   }
 
   const checkUpdates = async (): Promise<void> => {
-    setUpdateState({ checking: true, result: null })
+    setUpdateState(s => ({ ...s, checking: true, result: null }))
     try {
       const r = await checkForUpdates()
       if (r.error) {
-        setUpdateState({ checking: false, result: 'Could not check — verify your internet connection.' })
+        setUpdateState(s => ({ ...s, checking: false, result: 'Could not check — verify your internet connection.' }))
       } else if (r.up_to_date) {
-        setUpdateState({ checking: false, result: `Up to date (${r.local_sha})` })
+        setUpdateState(s => ({ ...s, checking: false, result: `Up to date (${r.local_sha})`, available: false }))
       } else {
-        setUpdateState({ checking: false, result: `${r.commits_behind} update${r.commits_behind > 1 ? 's' : ''} available — check the notification bar.` })
+        setUpdateState(s => ({ ...s, checking: false, available: true, commitsBehind: r.commits_behind, changelog: r.changelog, result: null }))
       }
     } catch {
-      setUpdateState({ checking: false, result: 'Check failed.' })
+      setUpdateState(s => ({ ...s, checking: false, result: 'Check failed.' }))
     }
+  }
+
+  const applyUpdate = (): void => {
+    setUpdateState(s => ({ ...s, updating: true, logs: [] }))
+    runUpdate(
+      line => setUpdateState(s => ({ ...s, logs: [...s.logs, line] })),
+      result => {
+        setUpdateState(s => ({ ...s, updating: false, done: true, success: result.success }))
+        if (result.success) saveChangelog(updateState.changelog).catch(() => {})
+      }
+    )
   }
 
   return (
@@ -242,14 +258,44 @@ function AboutSection(): React.ReactElement {
           github.com/trinityUwU/echohub
         </a>
       </SettingsRow>
-      <SettingsRow label="Updates" desc={updateState.result ?? "Check for new commits on GitHub"}>
-        <button onClick={checkUpdates} disabled={updateState.checking}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-sm border border-border hover:bg-overlay text-text-secondary cursor-pointer transition-colors disabled:opacity-50">
-          {updateState.checking ? (
-            <><span className="w-3 h-3 border-2 border-text-muted/30 border-t-text-muted rounded-full animate-spin" />Checking…</>
-          ) : 'Check for updates'}
-        </button>
+      <SettingsRow label="Updates" desc={updateState.result ?? (updateState.available ? `${updateState.commitsBehind} update${updateState.commitsBehind > 1 ? 's' : ''} available` : 'Check for new commits on GitHub')}>
+        <div className="flex items-center gap-2">
+          {updateState.available && !updateState.updating && !updateState.done && (
+            <button onClick={applyUpdate}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-sm bg-accent hover:bg-accent-hover text-white cursor-pointer transition-colors font-medium">
+              Update now
+            </button>
+          )}
+          {updateState.updating && (
+            <span className="flex items-center gap-1.5 text-xs text-accent">
+              <span className="w-3 h-3 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />Updating…
+            </span>
+          )}
+          {updateState.done && updateState.success && (
+            <button onClick={() => window.location.reload()}
+              className="px-3 py-1.5 text-xs rounded-sm bg-green/15 border border-green/30 text-green cursor-pointer transition-colors font-medium">
+              Restart now →
+            </button>
+          )}
+          <button onClick={checkUpdates} disabled={updateState.checking || updateState.updating}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-sm border border-border hover:bg-overlay text-text-secondary cursor-pointer transition-colors disabled:opacity-50">
+            {updateState.checking ? (
+              <><span className="w-3 h-3 border-2 border-text-muted/30 border-t-text-muted rounded-full animate-spin" />Checking…</>
+            ) : 'Check for updates'}
+          </button>
+        </div>
       </SettingsRow>
+      {(updateState.updating || updateState.done) && updateState.logs.length > 0 && (
+        <div className="px-4 pb-3">
+          <div className="bg-[#0a0a0d] border border-border rounded-sm p-2.5 font-mono text-xs leading-relaxed max-h-32 overflow-y-auto">
+            {updateState.logs.map((line, i) => (
+              <div key={i} className={line.level === 'ok' ? 'text-green' : line.level === 'error' ? 'text-red' : line.level === 'step' ? 'text-accent font-semibold' : 'text-[#6b7280]'}>
+                {line.level === 'step' ? `▶ ${line.msg}` : line.msg}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <SettingsRow label="Onboarding tutorial" desc="Replay the setup guide">
         <button onClick={resetOnboarding} disabled={resetting}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-sm border border-border hover:bg-overlay text-text-secondary cursor-pointer transition-colors disabled:opacity-50">
