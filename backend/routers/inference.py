@@ -417,3 +417,141 @@ async def run_benchmark() -> dict:
     from backend.services.db import save_benchmark
     result["_db_id"] = save_benchmark(result)
     return result
+
+
+@router.post("/benchmark/run-profiles")
+async def run_benchmark_profiles(body: dict):
+    """SSE stream — runs multiple benchmark profiles sequentially."""
+    import re as _re
+    import time as _time
+    import importlib.metadata
+    from fastapi.responses import StreamingResponse
+    from backend.services import engine_router as _er, gpu_service as _gpu_svc
+    from backend.services.db import get_benchmark_profile, save_benchmark
+
+    profile_ids: list[int] = body.get("profile_ids", [])
+    if not profile_ids:
+        raise HTTPException(status_code=400, detail="profile_ids is required")
+
+    if _er.get_status() is None:
+        raise HTTPException(status_code=404, detail="No model loaded")
+
+    async def _stream():
+        model = _er.get_status()
+        active_engine = _er.get_active_engine()
+
+        try:
+            gpu = _gpu_svc.get_gpu_stats()
+        except Exception:
+            gpu = None
+
+        # Engine version + params
+        engine_version = "unknown"
+        engine_params = {}
+        if active_engine == "llama":
+            try:
+                from backend.services import llama_service
+                engine_version = importlib.metadata.version("llama_cpp_python")
+                engine_params = {
+                    "n_ctx": model.max_context_window,
+                    "n_batch": 512,
+                    "n_gpu_layers": -1,
+                    "flash_attn": llama_service._flash_attn_enabled(),
+                }
+            except Exception:
+                pass
+        elif active_engine == "vllm":
+            try:
+                from backend.services import vllm_service
+                engine_version = vllm_service._vllm_version()
+                engine_params = {"max_model_len": model.max_context_window}
+            except Exception:
+                pass
+
+        gpu_short = (gpu.name.replace("NVIDIA GeForce ", "").replace("AMD Radeon ", "").replace("Apple ", "")) if gpu else "CPU"
+
+        total = len(profile_ids)
+        for idx, pid in enumerate(profile_ids):
+            profile = get_benchmark_profile(pid)
+            if not profile:
+                yield f"data: {json.dumps({'type': 'skip', 'profile_id': pid, 'reason': 'not found'})}\n\n"
+                continue
+
+            yield f"data: {json.dumps({'type': 'start', 'profile_id': pid, 'profile_name': profile['name'], 'index': idx, 'total': total})}\n\n"
+
+            messages = [{"role": "user", "content": profile["prompt"]}]
+            start = _time.perf_counter()
+            first_token_time = None
+            decode_tokens = 0
+            vram_used_mb = gpu.vram_used_mb if gpu else None
+
+            try:
+                async for chunk in _er.generate(
+                    messages=messages,
+                    stream=True,
+                    temperature=float(profile["temperature"]),
+                    max_tokens=int(profile["max_tokens"]),
+                ):
+                    if not chunk:
+                        continue
+                    content = ""
+                    if isinstance(chunk, str) and '"content"' in chunk:
+                        m = _re.search(r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', chunk)
+                        content = m.group(1) if m else ""
+                    elif isinstance(chunk, dict):
+                        content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "") or ""
+                    if not content:
+                        continue
+                    if first_token_time is None:
+                        first_token_time = _time.perf_counter()
+                    decode_tokens += 1
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'profile_id': pid, 'error': str(e)})}\n\n"
+                continue
+
+            end = _time.perf_counter()
+            total_ms = round((end - start) * 1000)
+            ttft_ms = round((first_token_time - start) * 1000) if first_token_time else None
+            decode_ms = round((end - (first_token_time or start)) * 1000)
+            tok_per_sec = round(decode_tokens / max(decode_ms / 1000, 0.001), 1)
+
+            share_lines = [
+                f"[{profile['name']}] {model.name}",
+                f"   {tok_per_sec} tok/s · {ttft_ms}ms TTFT · {decode_tokens} tokens",
+                f"   {gpu_short} · {active_engine} {engine_version}",
+                f"   EchoHub — github.com/trinityUwU/echohub",
+            ]
+
+            result = {
+                "model_id": model.id,
+                "model_name": model.name,
+                "engine": active_engine,
+                "engine_version": engine_version,
+                "profile_id": pid,
+                "profile_name": profile["name"],
+                "profile_description": profile["description"],
+                "tokens_generated": decode_tokens,
+                "prompt_tokens": len(profile["prompt"].split()),
+                "tok_per_sec": tok_per_sec,
+                "ttft_ms": ttft_ms,
+                "decode_ms": decode_ms,
+                "total_ms": total_ms,
+                "gpu_name": gpu.name if gpu else "CPU",
+                "gpu_short": gpu_short,
+                "vram_total_gb": round(gpu.vram_total_mb / 1024, 1) if gpu else 0,
+                "vram_used_gb": round(vram_used_mb / 1024, 1) if vram_used_mb else None,
+                "gpu_util_pct": gpu.gpu_utilization_pct if gpu else None,
+                "engine_params": engine_params,
+                "bench_prompt": profile["prompt"],
+                "bench_max_tokens": profile["max_tokens"],
+                "bench_temperature": profile["temperature"],
+                "timestamp": int(_time.time()),
+                "share_text": "\n".join(share_lines),
+            }
+            result["_db_id"] = save_benchmark(result)
+            yield f"data: {json.dumps({'type': 'result', 'profile_id': pid, 'profile_name': profile['name'], 'index': idx, 'total': total, 'result': result})}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done', 'total': total})}\n\n"
+
+    return StreamingResponse(_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

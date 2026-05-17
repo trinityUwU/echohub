@@ -87,6 +87,17 @@ def init_db() -> None:
                 data TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS benchmark_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                prompt TEXT NOT NULL,
+                max_tokens INTEGER NOT NULL DEFAULT 200,
+                temperature REAL NOT NULL DEFAULT 0.0,
+                builtin INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
         """)
         conn.commit()
         # Migrations — add columns/tables missing from older DBs
@@ -104,6 +115,24 @@ def init_db() -> None:
                 )
             """)
             conn.commit()
+        if "benchmark_profiles" not in existing_tables:
+            conn.execute("""
+                CREATE TABLE benchmark_profiles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    prompt TEXT NOT NULL,
+                    max_tokens INTEGER NOT NULL DEFAULT 200,
+                    temperature REAL NOT NULL DEFAULT 0.0,
+                    builtin INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            conn.commit()
+        # Seed builtin profiles if none exist
+        count = conn.execute("SELECT COUNT(*) FROM benchmark_profiles WHERE builtin=1").fetchone()[0]
+        if count == 0:
+            _seed_builtin_profiles(conn)
     logger.info("DB initialized at {}", get_db_path())
 
 
@@ -306,3 +335,109 @@ def clear_benchmarks() -> None:
         conn = _get_conn()
         conn.execute("DELETE FROM benchmarks")
         conn.commit()
+
+
+_BUILTIN_PROFILES = [
+    {
+        "name": "Latency",
+        "description": "Short prompt, few tokens — measures TTFT and perceived responsiveness.",
+        "prompt": "What is the capital of France? Answer in one sentence.",
+        "max_tokens": 50,
+        "temperature": 0.0,
+    },
+    {
+        "name": "Throughput",
+        "description": "Medium prompt, long output — measures sustained decode speed.",
+        "prompt": (
+            "Write a detailed explanation of how transformers work in machine learning, "
+            "including attention mechanisms, positional encoding, and training objectives. "
+            "Be thorough and technical."
+        ),
+        "max_tokens": 500,
+        "temperature": 0.0,
+    },
+    {
+        "name": "Prefill",
+        "description": "Long prompt, short output — measures context ingestion speed.",
+        "prompt": (
+            "The following is a passage about the history of computing: "
+            "The history of computing begins with mechanical calculators in the 17th century. "
+            "Blaise Pascal invented the Pascaline in 1642, followed by Leibniz's step reckoner in 1672. "
+            "Charles Babbage designed the Difference Engine in 1822 and the Analytical Engine in 1837, "
+            "which contained the essential elements of a modern computer. Ada Lovelace wrote what is "
+            "considered the first algorithm intended for processing on the Analytical Engine. "
+            "The 20th century saw the development of vacuum tube computers, transistors, integrated "
+            "circuits, and microprocessors. Alan Turing's theoretical work laid the foundation for "
+            "computer science. The first general-purpose electronic computer, ENIAC, was completed in 1945. "
+            "The invention of the transistor in 1947 at Bell Labs revolutionized computing. "
+            "Summarize the key milestones mentioned above in three bullet points."
+        ),
+        "max_tokens": 80,
+        "temperature": 0.0,
+    },
+    {
+        "name": "Code",
+        "description": "Realistic coding prompt — measures generation speed on code tasks.",
+        "prompt": (
+            "Write a Python function that implements a binary search tree with insert, "
+            "search, and inorder traversal methods. Include type hints and docstrings."
+        ),
+        "max_tokens": 400,
+        "temperature": 0.0,
+    },
+]
+
+
+def _seed_builtin_profiles(conn) -> None:
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+    for p in _BUILTIN_PROFILES:
+        conn.execute(
+            "INSERT INTO benchmark_profiles (name, description, prompt, max_tokens, temperature, builtin, created_at) "
+            "VALUES (?, ?, ?, ?, ?, 1, ?)",
+            (p["name"], p["description"], p["prompt"], p["max_tokens"], p["temperature"], now)
+        )
+    conn.commit()
+
+
+def get_benchmark_profiles() -> list[dict]:
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT * FROM benchmark_profiles ORDER BY builtin DESC, id ASC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_benchmark_profile(profile_id: int) -> dict | None:
+    with _lock:
+        conn = _get_conn()
+        row = conn.execute("SELECT * FROM benchmark_profiles WHERE id=?", (profile_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def create_benchmark_profile(name: str, description: str, prompt: str, max_tokens: int, temperature: float) -> dict:
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+    with _lock:
+        conn = _get_conn()
+        cur = conn.execute(
+            "INSERT INTO benchmark_profiles (name, description, prompt, max_tokens, temperature, builtin, created_at) "
+            "VALUES (?, ?, ?, ?, ?, 0, ?)",
+            (name, description, prompt, max_tokens, temperature, now)
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM benchmark_profiles WHERE id=?", (cur.lastrowid,)).fetchone()
+    return dict(row)
+
+
+def delete_benchmark_profile(profile_id: int) -> bool:
+    with _lock:
+        conn = _get_conn()
+        # Can't delete builtins
+        row = conn.execute("SELECT builtin FROM benchmark_profiles WHERE id=?", (profile_id,)).fetchone()
+        if not row or row["builtin"]:
+            return False
+        conn.execute("DELETE FROM benchmark_profiles WHERE id=?", (profile_id,))
+        conn.commit()
+    return True

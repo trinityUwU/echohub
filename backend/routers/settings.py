@@ -474,3 +474,35 @@ def wipe_benchmarks() -> dict:
     from backend.services.db import clear_benchmarks
     clear_benchmarks()
     return {"status": "cleared"}
+
+
+# ── Benchmark Profiles ──────────────────────────────────────────────────────
+
+@router.get("/benchmark-profiles")
+def list_benchmark_profiles() -> list:
+    from backend.services.db import get_benchmark_profiles
+    return get_benchmark_profiles()
+
+
+@router.post("/benchmark-profiles")
+def create_benchmark_profile(body: dict) -> dict:
+    from backend.services.db import create_benchmark_profile as _create
+    name = body.get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    return _create(
+        name=name,
+        description=body.get("description", ""),
+        prompt=body.get("prompt", "").strip(),
+        max_tokens=int(body.get("max_tokens", 200)),
+        temperature=float(body.get("temperature", 0.0)),
+    )
+
+
+@router.delete("/benchmark-profiles/{profile_id}")
+def delete_benchmark_profile(profile_id: int) -> dict:
+    from backend.services.db import delete_benchmark_profile as _delete
+    ok = _delete(profile_id)
+    if not ok:
+        raise HTTPException(status_code=403, detail="Cannot delete builtin profile or profile not found")
+    return {"status": "deleted"}

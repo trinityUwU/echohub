@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
-import { runBenchmark } from '@/api/client'
+import { useState, useEffect, useMemo } from 'react'
 import { apiRequest } from '@/api/base'
+import { RunBenchmarkModal } from './RunBenchmarkModal'
 
 interface EngineParams {
   n_ctx?: number; n_batch?: number; n_gpu_layers?: number; flash_attn?: boolean
@@ -9,6 +9,7 @@ interface EngineParams {
 
 interface BenchResult {
   model_id: string; model_name: string; engine: string | null; engine_version: string
+  profile_id?: number; profile_name?: string
   tokens_generated: number; prompt_tokens: number
   tok_per_sec: number; prefill_tok_per_sec: number | null
   ttft_ms: number | null; prefill_ms: number | null; decode_ms: number; total_ms: number
@@ -16,7 +17,7 @@ interface BenchResult {
   vram_used_gb: number | null; gpu_util_pct: number | null
   engine_params: EngineParams
   bench_prompt: string; bench_max_tokens: number; bench_temperature: number
-  timestamp: number; share_text: string
+  timestamp: number; share_text: string; _db_id?: number
 }
 
 // Clear legacy localStorage keys
@@ -37,12 +38,13 @@ function speedLabel(tps: number): string {
 }
 
 export function BenchmarkTab(): React.ReactElement {
-  const [running, setRunning] = useState(false)
   const [history, setHistory] = useState<BenchResult[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [detail, setDetail] = useState<BenchResult | null>(null)
   const [copied, setCopied] = useState(false)
+  const [showRun, setShowRun] = useState(false)
+  const [filterModel, setFilterModel] = useState<string>('all')
+  const [filterProfile, setFilterProfile] = useState<string>('all')
 
   useEffect(() => {
     apiRequest<BenchResult[]>('/settings/benchmarks')
@@ -51,18 +53,14 @@ export function BenchmarkTab(): React.ReactElement {
       .finally(() => setLoading(false))
   }, [])
 
-  const run = async (): Promise<void> => {
-    setRunning(true)
-    setError(null)
-    try {
-      const result = await runBenchmark() as unknown as BenchResult
-      setHistory(prev => [result, ...prev])
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setRunning(false)
-    }
-  }
+  const models = useMemo(() => Array.from(new Set(history.map(r => r.model_name))), [history])
+  const profiles = useMemo(() => Array.from(new Set(history.map(r => r.profile_name).filter(Boolean))), [history])
+
+  const filtered = useMemo(() => history.filter(r => {
+    if (filterModel !== 'all' && r.model_name !== filterModel) return false
+    if (filterProfile !== 'all' && r.profile_name !== filterProfile) return false
+    return true
+  }), [history, filterModel, filterProfile])
 
   const clear = async (): Promise<void> => {
     await apiRequest('/settings/benchmarks', { method: 'DELETE' }).catch(() => {})
@@ -79,53 +77,56 @@ export function BenchmarkTab(): React.ReactElement {
     <div className="flex flex-col gap-6">
 
       {/* Header */}
-      <div>
-        <p className="text-sm text-text-muted mb-4 leading-relaxed">
-          Standardized benchmark — greedy decoding, {200} tokens, temperature 0. Click any result for full details.
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-text-muted leading-relaxed">
+          Select profiles and run. Click any result for full details.
         </p>
-        <div className="flex items-center gap-3">
-          <button onClick={run} disabled={running}
-            className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-sm font-medium rounded-sm cursor-pointer transition-colors">
-            {running ? (
-              <><span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />Running…</>
-            ) : (
-              <><svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>Run benchmark</>
-            )}
-          </button>
-          {running && <span className="text-xs text-text-muted animate-pulse">Generating ~200 tokens…</span>}
-        </div>
-        {error && (
-          <div className="mt-3 text-xs text-red bg-red/8 border border-red/20 rounded-sm px-3 py-2">
-            {error.includes('No model loaded') ? 'Load a model first.' : error}
-          </div>
-        )}
+        <button onClick={() => setShowRun(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-md cursor-pointer transition-colors flex-shrink-0">
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run benchmark
+        </button>
       </div>
 
-      {/* Results list */}
+      {/* Filters */}
       {history.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold uppercase tracking-widest text-text-muted">
-              Results ({history.length})
-            </span>
-            <button onClick={clear} className="text-xs text-text-muted hover:text-red cursor-pointer transition-colors">
-              Clear history
-            </button>
-          </div>
-          <div className="flex flex-col gap-2">
-            {history.map((r, i) => (
-              <ResultCard key={r.timestamp} result={r} isLatest={i === 0}
-                onClick={() => setDetail(r)} />
-            ))}
-          </div>
+        <div className="flex items-center gap-2">
+          <select value={filterModel} onChange={e => setFilterModel(e.target.value)}
+            className="bg-elevated border border-border rounded-sm px-2.5 py-1.5 text-xs text-text-secondary outline-none cursor-pointer">
+            <option value="all">All models</option>
+            {models.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+          <select value={filterProfile} onChange={e => setFilterProfile(e.target.value)}
+            className="bg-elevated border border-border rounded-sm px-2.5 py-1.5 text-xs text-text-secondary outline-none cursor-pointer">
+            <option value="all">All profiles</option>
+            {profiles.map(p => <option key={p} value={p as string}>{p}</option>)}
+          </select>
+          <span className="text-xs text-text-muted ml-auto">{filtered.length} result{filtered.length !== 1 ? 's' : ''}</span>
+          <button onClick={clear} className="text-xs text-text-muted hover:text-red cursor-pointer transition-colors">Clear all</button>
         </div>
       )}
 
+      {/* Results list */}
       {loading && <div className="text-sm text-text-muted animate-pulse">Loading…</div>}
-      {!loading && history.length === 0 && !running && !error && (
+      {!loading && filtered.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {filtered.map((r, i) => (
+            <ResultCard key={`${r.timestamp}-${r.profile_id ?? i}`} result={r} isLatest={i === 0 && filterModel === 'all' && filterProfile === 'all'}
+              onClick={() => setDetail(r)} />
+          ))}
+        </div>
+      )}
+      {!loading && history.length === 0 && (
         <div className="text-center text-text-muted py-12 text-sm">
           No results yet — load a model and run your first benchmark.
         </div>
+      )}
+
+      {showRun && (
+        <RunBenchmarkModal
+          onClose={() => setShowRun(false)}
+          onResults={results => setHistory(prev => [...(results as unknown as BenchResult[]), ...prev])}
+        />
       )}
 
       {/* Detail modal */}
@@ -153,6 +154,7 @@ function ResultCard({ result: r, isLatest, onClick }: {
           <div className="flex items-center gap-2 mb-0.5">
             {isLatest && <span className="text-2xs text-accent font-semibold uppercase tracking-widest">latest</span>}
             <span className="text-sm font-medium text-text-primary truncate">{r.model_name}</span>
+            {r.profile_name && <span className="text-2xs text-text-muted bg-overlay px-1.5 py-px rounded flex-shrink-0">{r.profile_name}</span>}
           </div>
           <div className="flex items-center gap-2 text-xs text-text-muted">
             <span>{r.gpu_short}</span>
