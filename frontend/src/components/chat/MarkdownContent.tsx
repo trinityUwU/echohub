@@ -29,8 +29,8 @@ const components: Components = {
 
   // ── Code ──────────────────────────────────────────────────────────────────
   code({ className, children, ...props }) {
-    const lang = className?.replace('language-', '') ?? ''
     const isBlock = !!className?.includes('language-')
+    const lang = className?.replace(/language-/, '').replace(/\s*hljs\s*/g, '').trim() ?? ''
 
     if (!isBlock) {
       return (
@@ -46,11 +46,11 @@ const components: Components = {
     return (
       <div className="my-3 rounded-md overflow-hidden border border-border/40">
         {lang && (
-          <div className="px-3.5 py-1.5 bg-white/4 border-b border-border/30">
-            <span className="text-xs font-mono text-text-muted/70">{lang}</span>
+          <div className="px-3.5 py-1.5 bg-[#21252b] border-b border-black/20">
+            <span className="text-xs font-mono text-[#abb2bf]/70">{lang}</span>
           </div>
         )}
-        <pre className="bg-[#0a0a0d] p-4 font-mono text-[0.82rem] leading-relaxed overflow-x-auto m-0">
+        <pre className="bg-[#282c34] p-4 font-mono text-[0.82rem] leading-relaxed overflow-x-auto m-0 [&_.hljs]:bg-transparent [&_.hljs]:p-0">
           <code className={className} {...props}>{children}</code>
         </pre>
       </div>

@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import { InstallerApp } from './installer/InstallerApp'
 import './index.css'
+import 'highlight.js/styles/atom-one-dark.css'
 
 // Retry until backend responds, with a loading splash
 async function waitForBackend(maxAttempts = 30, intervalMs = 1000): Promise<boolean> {
