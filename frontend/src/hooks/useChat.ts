@@ -186,7 +186,17 @@ export function useChat(
       (generationStats) => {
         setStats(generationStats)
         setStreaming(false)
-        const final = [...currentMessages, { role: 'assistant' as const, content: accumulated, id: assistantMsgId }]
+        const assistantFinal: ChatMessage = {
+          role: 'assistant', content: accumulated, id: assistantMsgId,
+          stats: {
+            tokens: generationStats.tokensGenerated,
+            tok_per_sec: generationStats.tokensPerSecond,
+            time_ms: generationStats.timeMs,
+            prompt_tokens: generationStats.promptTokens,
+          },
+        }
+        const final = [...currentMessages, assistantFinal]
+        setMessages(prev => { const u = [...prev]; u[u.length - 1] = assistantFinal; return u })
         onMessagesChange?.(final)
 
         // Persist assistant message with stats
@@ -262,7 +272,12 @@ export function useChat(
       (generationStats) => {
         setStats(generationStats)
         setStreaming(false)
-        const final = [...history, { role: 'assistant' as const, content: accumulated, id: assistantMsgId }]
+        const assistantFinal2: ChatMessage = {
+          role: 'assistant', content: accumulated, id: assistantMsgId,
+          stats: { tokens: generationStats.tokensGenerated, tok_per_sec: generationStats.tokensPerSecond, time_ms: generationStats.timeMs, prompt_tokens: generationStats.promptTokens },
+        }
+        setMessages(prev => { const u = [...prev]; u[u.length - 1] = assistantFinal2; return u })
+        const final = [...history, assistantFinal2]
         onMessagesChange?.(final)
         if (convId) {
           addMessage(convId, {

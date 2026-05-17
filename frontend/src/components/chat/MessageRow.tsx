@@ -118,7 +118,7 @@ export function MessageRow({ message, isLast, genStats, modelName, streaming, on
 
         {/* Footer */}
         {!editing && !streaming && (
-          <div className={`flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${isUser ? 'flex-row-reverse' : ''}`}>
+          <div className={`flex items-center gap-0.5 transition-opacity ${isUser ? 'flex-row-reverse' : ''}`}>
             {/* Stats — left side for assistant */}
             {!isUser && (genStats || message.stats) && (
               <span className="text-xs text-text-muted mr-2">
