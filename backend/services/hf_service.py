@@ -365,9 +365,13 @@ def search_models(
     filters: Optional[list[str]] = None,
     page: int = 0,
     page_size: int = 20,
+    sort: str = "downloads",
+    sort_dir: str = "desc",
 ) -> list[ModelInfo]:
-    """Search HuggingFace Hub for models. Filtres : awq, gptq, gguf, fp8, exl2.
-    If query looks like author/model-id (contains / and no spaces), fetches directly."""
+    """Search HuggingFace Hub for models.
+    filters: list of awq, gptq, gguf, fp8, exl2, vision, thinking (multi-select).
+    sort: downloads | likes | created_at. sort_dir: asc | desc.
+    """
     try:
         # Direct lookup for author/model-id queries
         if "/" in query and " " not in query.strip():
@@ -377,17 +381,26 @@ def search_models(
             except Exception:
                 return []
 
-        filter_tags = filters or ["awq", "gptq", "gguf"]
-        # Fetch enough to fill the page after dedup + offset
-        fetch_limit = page_size + (page * page_size)
+        # Separate quant filters from capability filters
+        _QUANT_TAGS = {"awq", "gptq", "gguf", "fp8", "exl2"}
+        _CAP_FILTERS = {"vision", "thinking"}
+
+        active_filters = [f.lower() for f in (filters or ["awq", "gptq", "gguf"])]
+        quant_filters = [f for f in active_filters if f in _QUANT_TAGS] or ["awq", "gptq", "gguf"]
+        cap_filters = {f for f in active_filters if f in _CAP_FILTERS}
+
+        hf_sort = sort if sort in ("downloads", "likes", "created_at") else "downloads"
+        direction = "asc" if sort_dir == "asc" else "desc"
+        fetch_limit = (page + 1) * page_size + 20  # extra buffer for dedup
 
         results: list[ModelInfo] = []
-        for quant in filter_tags:
+        for quant in quant_filters:
             models = _api.list_models(
                 search=query,
                 filter=quant,
                 limit=fetch_limit,
-                sort="downloads",
+                sort=hf_sort,
+                direction=-1 if direction == "desc" else 1,
                 full=True,
                 token=_get_hf_token(),
             )
@@ -395,6 +408,12 @@ def search_models(
                 tags = list(m.tags or [])
                 quant_type = _detect_quantization(tags, m.modelId)
                 if quant_type is None:
+                    continue
+                caps = _detect_capabilities(tags, m.modelId)
+                # Apply capability filters
+                if "vision" in cap_filters and not caps.vision:
+                    continue
+                if "thinking" in cap_filters and not caps.thinking:
                     continue
                 params_b = _extract_params_billion(m.modelId, tags)
                 vram_est = _estimate_vram_gb(params_b, quant_type) if params_b else None
@@ -404,7 +423,7 @@ def search_models(
                     name=m.modelId.split("/")[-1],
                     author=m.modelId.split("/")[0] if "/" in m.modelId else None,
                     size_gb=None,
-                    capabilities=_detect_capabilities(tags, m.modelId),
+                    capabilities=caps,
                     downloaded=_is_downloaded(m.modelId),
                     loaded=False,
                     quantization=quant_type,
@@ -416,18 +435,29 @@ def search_models(
                 )
                 results.append(info)
 
-        # deduplicate by id
+        # Deduplicate
         seen: set[str] = set()
         deduped: list[ModelInfo] = []
         for r in results:
             if r.id not in seen:
                 seen.add(r.id)
                 deduped.append(r)
+
+        # Client-side sort (HF already sorts but dedup may mix)
+        reverse = direction == "desc"
+        if sort == "likes":
+            deduped.sort(key=lambda r: r.likes or 0, reverse=reverse)
+        elif sort == "created_at":
+            deduped.sort(key=lambda r: r.last_modified or "", reverse=reverse)
+        else:
+            deduped.sort(key=lambda r: r.downloads or 0, reverse=reverse)
+
         start = page * page_size
         return deduped[start:start + page_size]
 
     except Exception as e:
         logger.error(f"hf_service.search_models error: {e}")
+        return []
         raise
 
 

@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { searchModels, getModelInfo } from '@/api/client'
 import { useFavorites } from '@/hooks/useFavorites'
 import type { DownloadJob, ModelInfo } from '@/types'
 import { ModelCard } from './ModelCard'
 import { ModelDetailPanel } from './ModelDetailPanel'
 
-const FILTERS = ['All', 'GGUF', 'AWQ', 'GPTQ', 'Vision', 'Thinking']
+const FORMAT_FILTERS = ['GGUF', 'AWQ', 'GPTQ', 'FP8', 'EXL2']
+const CAP_FILTERS    = ['Vision', 'Thinking']
+const PAGE_SIZE      = 20
+
+type SortKey = 'downloads' | 'likes' | 'created_at'
 
 interface DiscoverPageProps {
   loadedModelId: string | null
@@ -18,23 +22,70 @@ interface DiscoverPageProps {
 }
 
 export function DiscoverPage({ onLoad, onDownloaded, downloadJobs, vramTotalGb, vramFreeGb, onGoToEngines }: DiscoverPageProps): React.ReactElement {
-  const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState('All')
-  const [showFavs, setShowFavs] = useState(false)
-  const [results, setResults] = useState<ModelInfo[]>([])
-  const [selected, setSelected] = useState<ModelInfo | null>(null)
+  const [query, setQuery]         = useState('')
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set(['GGUF', 'AWQ', 'GPTQ']))
+  const [sortKey, setSortKey]     = useState<SortKey>('downloads')
+  const [sortDir, setSortDir]     = useState<'asc' | 'desc'>('desc')
+  const [showFavs, setShowFavs]   = useState(false)
+  const [results, setResults]     = useState<ModelInfo[]>([])
+  const [page, setPage]           = useState(0)
+  const [hasMore, setHasMore]     = useState(true)
+  const [loading, setLoading]     = useState(false)
+  const [selected, setSelected]   = useState<ModelInfo | null>(null)
   const [selectedFull, setSelectedFull] = useState<ModelInfo | null>(null)
   const { favorites, isFavorite, toggleFavorite } = useFavorites()
+  const searchRef = useRef(0)
 
-  const doSearch = useCallback(async (q: string): Promise<void> => {
-    if (!q.trim() && filter === 'All') return  // don't search on empty query with no filter
+  const toggleFilter = (f: string): void => {
+    setActiveFilters(prev => {
+      const next = new Set(prev)
+      next.has(f) ? next.delete(f) : next.add(f)
+      return next
+    })
+    setPage(0)
+  }
+
+  const toggleSort = (key: SortKey): void => {
+    if (sortKey === key) {
+      setSortDir(d => d === 'desc' ? 'asc' : 'desc')
+    } else {
+      setSortKey(key)
+      setSortDir('desc')
+    }
+    setPage(0)
+  }
+
+  const doSearch = useCallback(async (q: string, filters: Set<string>, sk: SortKey, sd: 'asc' | 'desc', pg: number): Promise<void> => {
+    if (!q.trim() && filters.size === 0) return
+    const ticket = ++searchRef.current
+    setLoading(true)
     try {
-      const data = await searchModels(q, filter === 'All' ? undefined : filter.toLowerCase())
-      setResults(data)
-    } catch { /* keep previous */ }
-  }, [filter])
+      const filterArr = Array.from(filters).map(f => f.toLowerCase())
+      const data = await searchModels(q, filterArr, pg, sk, sd)
+      if (ticket !== searchRef.current) return  // stale
+      if (pg === 0) {
+        setResults(data)
+      } else {
+        setResults(prev => [...prev, ...data])
+      }
+      setHasMore(data.length === PAGE_SIZE)
+    } catch {
+      if (ticket === searchRef.current) setHasMore(false)
+    } finally {
+      if (ticket === searchRef.current) setLoading(false)
+    }
+  }, [])
 
-  useEffect(() => { doSearch(query) }, [query, filter, doSearch])
+  // Re-search when query/filters/sort change (reset page)
+  useEffect(() => {
+    setPage(0)
+    doSearch(query, activeFilters, sortKey, sortDir, 0)
+  }, [query, activeFilters, sortKey, sortDir, doSearch])
+
+  // Load more when page increments
+  useEffect(() => {
+    if (page > 0) doSearch(query, activeFilters, sortKey, sortDir, page)
+  }, [page]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectModel = useCallback(async (m: ModelInfo): Promise<void> => {
     setSelected(m)
@@ -48,44 +99,107 @@ export function DiscoverPage({ onLoad, onDownloaded, downloadJobs, vramTotalGb, 
   }, [])
 
   const closePanel = (): void => { setSelected(null); setSelectedFull(null) }
-
   const displayModels = showFavs ? favorites : results
 
   return (
     <div className="flex flex-1 overflow-hidden">
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="h-[54px] bg-surface border-b border-border flex items-center px-5 gap-3 flex-shrink-0">
-          <SearchBox value={query} onChange={setQuery} disabled={showFavs} />
-          <div className="flex items-center gap-1.5">
-            {!showFavs && <FilterTabs active={filter} onChange={setFilter} />}
-            <button
-              onClick={() => setShowFavs(v => !v)}
-              title={showFavs ? 'Show search' : 'Show favorites'}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-[20px] text-xs border cursor-pointer transition-colors ${
-                showFavs ? 'bg-yellow/12 border-yellow/35 text-yellow' : 'border-border text-text-muted hover:text-text-secondary hover:border-border-hover'
-              }`}
-            >
+
+        {/* Toolbar */}
+        <div className="bg-surface border-b border-border flex-shrink-0">
+          {/* Row 1 — search + fav */}
+          <div className="flex items-center gap-3 px-5 py-2.5 border-b border-border/50">
+            <SearchBox value={query} onChange={v => { setQuery(v); setPage(0) }} disabled={showFavs} />
+            <button onClick={() => setShowFavs(v => !v)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs border cursor-pointer transition-colors flex-shrink-0 ${
+                showFavs ? 'bg-yellow/12 border-yellow/35 text-yellow' : 'border-border text-text-muted hover:text-text-secondary'
+              }`}>
               <svg className="w-3 h-3" viewBox="0 0 24 24" fill={showFavs ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
               </svg>
               {showFavs ? `Favorites (${favorites.length})` : 'Favorites'}
             </button>
           </div>
-        </div>
 
-        <div className="flex-1 overflow-y-auto p-5 grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-2.5 content-start">
-          {showFavs && favorites.length === 0 && (
-            <div className="col-span-full text-center text-text-muted py-16 text-sm">
-              No favorites yet — click ★ on any model
+          {/* Row 2 — filters + sort */}
+          {!showFavs && (
+            <div className="flex items-center gap-3 px-5 py-2 overflow-x-auto">
+              {/* Format toggles */}
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <span className="text-2xs text-text-muted/60 mr-1 uppercase tracking-widest">Format</span>
+                {FORMAT_FILTERS.map(f => (
+                  <FilterToggle key={f} label={f} active={activeFilters.has(f)} onClick={() => toggleFilter(f)} />
+                ))}
+              </div>
+              <div className="w-px h-4 bg-border/60 flex-shrink-0" />
+              {/* Capability toggles */}
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <span className="text-2xs text-text-muted/60 mr-1 uppercase tracking-widest">Cap</span>
+                {CAP_FILTERS.map(f => (
+                  <FilterToggle key={f} label={f} active={activeFilters.has(f)} onClick={() => toggleFilter(f)} accent="yellow" />
+                ))}
+              </div>
+              <div className="flex-1" />
+              {/* Sort */}
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <span className="text-2xs text-text-muted/60 mr-1 uppercase tracking-widest">Sort</span>
+                {(['downloads', 'likes', 'created_at'] as SortKey[]).map(k => (
+                  <SortBtn key={k} label={k === 'created_at' ? 'Date' : k === 'downloads' ? 'DL' : 'Likes'}
+                    active={sortKey === k} dir={sortKey === k ? sortDir : null}
+                    onClick={() => toggleSort(k)} />
+                ))}
+              </div>
             </div>
           )}
-          {displayModels.map(m => (
-            <ModelCard key={m.id} model={m} job={downloadJobs[m.id]}
-              onClick={() => selectModel(m)}
-              isFavorite={isFavorite(m.id)}
-              onToggleFavorite={() => toggleFavorite(m)}
-            />
-          ))}
+        </div>
+
+        {/* Grid */}
+        <div className="flex-1 overflow-y-auto p-5">
+          {showFavs && favorites.length === 0 && (
+            <div className="text-center text-text-muted py-16 text-sm">No favorites yet — click ★ on any model</div>
+          )}
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-2.5 content-start">
+            {displayModels.map(m => (
+              <ModelCard key={m.id} model={m} job={downloadJobs[m.id]}
+                onClick={() => selectModel(m)}
+                isFavorite={isFavorite(m.id)}
+                onToggleFavorite={() => toggleFavorite(m)}
+              />
+            ))}
+          </div>
+
+          {/* Pagination footer */}
+          {!showFavs && (
+            <div className="flex items-center justify-between mt-6 pt-4 border-t border-border/50">
+              <span className="text-xs text-text-muted">
+                {results.length} models · page {page + 1}
+              </span>
+              <div className="flex items-center gap-2">
+                {page > 0 && (
+                  <button onClick={() => setPage(0)}
+                    className="px-3 py-1.5 text-xs border border-border rounded-sm text-text-muted hover:text-text-primary hover:bg-overlay cursor-pointer transition-colors">
+                    ← First
+                  </button>
+                )}
+                {page > 0 && (
+                  <button onClick={() => setPage(p => Math.max(0, p - 1))}
+                    className="px-3 py-1.5 text-xs border border-border rounded-sm text-text-muted hover:text-text-primary hover:bg-overlay cursor-pointer transition-colors">
+                    ← Prev
+                  </button>
+                )}
+                {hasMore && (
+                  <button onClick={() => setPage(p => p + 1)} disabled={loading}
+                    className="flex items-center gap-1.5 px-4 py-1.5 text-xs bg-accent hover:bg-accent-hover disabled:opacity-50 text-white rounded-sm cursor-pointer transition-colors">
+                    {loading && <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                    Next {loading ? '…' : '→'}
+                  </button>
+                )}
+                {!hasMore && results.length > 0 && (
+                  <span className="text-xs text-text-muted/50">End of results</span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -126,15 +240,37 @@ function SearchBox({ value, onChange, disabled }: { value: string; onChange: (v:
   )
 }
 
-function FilterTabs({ active, onChange }: { active: string; onChange: (v: string) => void }): React.ReactElement {
+function FilterToggle({ label, active, onClick, accent = 'accent' }: {
+  label: string; active: boolean; onClick: () => void; accent?: 'accent' | 'yellow'
+}): React.ReactElement {
+  const activeClass = accent === 'yellow'
+    ? 'bg-yellow/12 border-yellow/40 text-yellow'
+    : 'bg-accent/12 border-accent/40 text-accent'
   return (
-    <div className="flex gap-1">
-      {FILTERS.map(f => (
-        <button key={f} onClick={() => onChange(f)}
-          className={`px-3 py-1 rounded-[20px] text-xs border cursor-pointer transition-colors ${
-            active === f ? 'bg-accent-dim border-accent/35 text-accent' : 'border-border text-text-muted hover:text-text-secondary hover:border-border-hover'
-          }`}>{f}</button>
-      ))}
-    </div>
+    <button onClick={onClick}
+      className={`px-2.5 py-1 rounded-md text-xs border cursor-pointer transition-colors ${
+        active ? activeClass : 'border-border text-text-muted hover:text-text-secondary hover:border-border'
+      }`}>
+      {label}
+    </button>
+  )
+}
+
+function SortBtn({ label, active, dir, onClick }: {
+  label: string; active: boolean; dir: 'asc' | 'desc' | null; onClick: () => void
+}): React.ReactElement {
+  return (
+    <button onClick={onClick}
+      className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs border cursor-pointer transition-colors ${
+        active ? 'bg-accent/12 border-accent/40 text-accent' : 'border-border text-text-muted hover:text-text-secondary'
+      }`}>
+      {label}
+      {active && dir && (
+        <svg className={`w-2.5 h-2.5 transition-transform ${dir === 'asc' ? 'rotate-180' : ''}`}
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      )}
+    </button>
   )
 }

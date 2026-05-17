@@ -19,13 +19,15 @@ router = APIRouter(prefix="/models", tags=["models"])
 @router.get("/search", response_model=list[ModelInfo])
 def search_models(
     q: str = Query("", min_length=0),
-    filters: Optional[str] = Query(None, description="Comma-separated: awq,gptq,gguf"),
+    filters: Optional[str] = Query(None, description="Comma-separated: awq,gptq,gguf,vision,thinking"),
     page: int = Query(0, ge=0),
     page_size: int = Query(20, ge=5, le=50),
+    sort: str = Query("downloads", description="downloads|likes|created_at"),
+    sort_dir: str = Query("desc", description="asc|desc"),
 ) -> list[ModelInfo]:
     filter_list = [f.strip() for f in filters.split(",")] if filters else None
     try:
-        return hf_service.search_models(q, filter_list, page=page, page_size=page_size)
+        return hf_service.search_models(q, filter_list, page=page, page_size=page_size, sort=sort, sort_dir=sort_dir)
     except Exception as e:
         logger.error(f"Search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

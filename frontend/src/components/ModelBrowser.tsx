@@ -680,7 +680,7 @@ export function ModelBrowser({ loadedModelId, onLoad, onDownloaded: _onDownloade
       setError(null)
       setPage(0)
       try {
-        const data = await searchModels(query, formats.join(','), 0)
+        const data = await searchModels(query, formats, 0)
         let sorted = [...data]
         if (sort === 'downloads') sorted.sort((a, b) => (b.downloads ?? 0) - (a.downloads ?? 0))
         else if (sort === 'likes') sorted.sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0))
@@ -699,7 +699,7 @@ export function ModelBrowser({ loadedModelId, onLoad, onDownloaded: _onDownloade
     setLoadingMore(true)
     const nextPage = page + 1
     try {
-      const data = await searchModels(query, formats.join(','), nextPage)
+      const data = await searchModels(query, formats, nextPage)
       let sorted = [...data]
       if (sort === 'downloads') sorted.sort((a, b) => (b.downloads ?? 0) - (a.downloads ?? 0))
       else if (sort === 'likes') sorted.sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0))

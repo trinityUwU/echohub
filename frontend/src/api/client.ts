@@ -32,8 +32,17 @@ export const clearMessages = (convId: string): Promise<void> =>
 
 // ── Models ─────────────────────────────────────────────────────────────────
 
-export const searchModels = (q: string, filters?: string, page = 0): Promise<ModelInfo[]> =>
-  apiRequest(`/models/search?q=${encodeURIComponent(q)}${filters ? `&filters=${filters}` : ''}&page=${page}`)
+export const searchModels = (
+  q: string,
+  filters?: string[],
+  page = 0,
+  sort = 'downloads',
+  sortDir = 'desc',
+): Promise<ModelInfo[]> => {
+  const params = new URLSearchParams({ q, page: String(page), sort, sort_dir: sortDir })
+  if (filters?.length) params.set('filters', filters.join(','))
+  return apiRequest(`/models/search?${params}`)
+}
 
 export const listDownloaded = (): Promise<ModelInfo[]> =>
   apiRequest('/models/downloaded')
