@@ -5,7 +5,7 @@ interface ConvSidebarProps {
   conversations: ConversationSummary[]
   activeId: string | null
   onSelect: (id: string) => void
-  onNew: () => void
+  onNew: () => void | Promise<void>
   gpu: GpuStats | null
 }
 

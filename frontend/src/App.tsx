@@ -111,7 +111,7 @@ export default function App(): React.ReactElement {
             conversations={conversations}
             activeId={activeId}
             activeMessages={activeMessages}
-            onNewConversation={newConversation}
+            onNewConversation={() => { newConversation().catch(console.error) }}
             onSelectConversation={selectConversation}
             onOpenPicker={() => setShowPicker(true)}
             onEject={unloadModel}

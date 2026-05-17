@@ -19,7 +19,7 @@ interface ChatPageProps {
   conversations: ConversationSummary[]
   activeId: string | null
   activeMessages: ChatMessage[]
-  onNewConversation: () => void
+  onNewConversation: () => void | Promise<void>
   onSelectConversation: (id: string) => void
   onOpenPicker: () => void
   onEject: () => void
