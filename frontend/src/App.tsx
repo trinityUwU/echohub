@@ -114,7 +114,6 @@ export default function App(): React.ReactElement {
             onNewConversation={newConversation}
             onSelectConversation={selectConversation}
             onOpenPicker={() => setShowPicker(true)}
-            onOpenLoad={() => loadedModel && setPendingLoad(loadedModel)}
             onEject={unloadModel}
             onGoToSettings={() => setPage('settings')}
             setActiveMessages={setActiveMessages}

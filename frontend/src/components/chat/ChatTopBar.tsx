@@ -5,18 +5,17 @@ interface ChatTopBarProps {
   loading: boolean
   loadingPct: number
   onOpenPicker: () => void
-  onOpenLoad: () => void
   onClear: () => void
   onEject: () => void
   onExport: () => void
 }
 
-export function ChatTopBar({ loadedModel, loading, loadingPct, onOpenPicker, onOpenLoad, onClear, onEject, onExport }: ChatTopBarProps): React.ReactElement {
+export function ChatTopBar({ loadedModel, loading, loadingPct, onOpenPicker, onClear, onEject, onExport }: ChatTopBarProps): React.ReactElement {
   if (loading) return <LoadingBar pct={loadingPct} modelName={loadedModel?.name ?? '…'} onEject={onEject} />
-  return <NormalBar loadedModel={loadedModel} onOpenPicker={onOpenPicker} onOpenLoad={onOpenLoad} onClear={onClear} onEject={onEject} onExport={onExport} />
+  return <NormalBar loadedModel={loadedModel} onOpenPicker={onOpenPicker} onClear={onClear} onEject={onEject} onExport={onExport} />
 }
 
-function NormalBar({ loadedModel, onOpenPicker, onOpenLoad, onClear, onEject, onExport }: Pick<ChatTopBarProps, 'loadedModel' | 'onOpenPicker' | 'onOpenLoad' | 'onClear' | 'onEject' | 'onExport'>): React.ReactElement {
+function NormalBar({ loadedModel, onOpenPicker, onClear, onEject, onExport }: Pick<ChatTopBarProps, 'loadedModel' | 'onOpenPicker' | 'onClear' | 'onEject' | 'onExport'>): React.ReactElement {
   return (
     <div className="h-[50px] bg-surface border-b border-border flex items-center px-4 gap-2.5 flex-shrink-0">
       <button

@@ -22,7 +22,6 @@ interface ChatPageProps {
   onNewConversation: () => void
   onSelectConversation: (id: string) => void
   onOpenPicker: () => void
-  onOpenLoad: () => void
   onEject: () => void
   onGoToSettings: () => void
   setActiveMessages: (msgs: ChatMessage[]) => void
@@ -32,7 +31,7 @@ export function ChatPage({
   loadedModel, loading, loadingPct, gpu, hasCuda,
   conversations, activeId, activeMessages,
   onNewConversation, onSelectConversation,
-  onOpenPicker, onOpenLoad, onEject, onGoToSettings,
+  onOpenPicker, onEject, onGoToSettings,
   setActiveMessages,
 }: ChatPageProps): React.ReactElement {
   const profilesHook = useProfiles()
@@ -100,7 +99,6 @@ export function ChatPage({
           loading={loading}
           loadingPct={loadingPct}
           onOpenPicker={onOpenPicker}
-          onOpenLoad={onOpenLoad}
           onClear={handleClear}
           onEject={onEject}
           onExport={handleExport}
