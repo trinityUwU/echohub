@@ -256,4 +256,39 @@ def check_compatibility(model_id: str) -> dict:
         "llama_issues": llama_issues,
         "recommendation": recommendation,
         "vllm_version": "0.21.0",
+        "installed_vllm_versions": _get_installed_vllm_versions(),
+        "required_vllm_version": _get_required_vllm_version(architectures, quant_method, config),
     }
+
+
+def _get_installed_vllm_versions() -> list[str]:
+    try:
+        from backend.services.vllm_manager import list_versions
+        return [v["version"] for v in list_versions() if v["operational"]]
+    except Exception:
+        return []
+
+
+def _get_required_vllm_version(architectures: list, quant_method: str, config: dict) -> str | None:
+    """
+    Return the minimum vLLM version string required for this model, or None if current is fine.
+    Based on known compatibility matrix.
+    """
+    arch = (architectures or [""])[0]
+    has_vision = "vision_config" in config or "ForConditionalGeneration" in arch
+
+    # Models known to require newer vLLM
+    NEW_ARCH_PATTERNS = {
+        "Qwen3_5": "0.22.0",
+        "Gemma3": "0.22.0",
+        "LlamaForCausalLM4": "0.19.0",
+    }
+    for pattern, version in NEW_ARCH_PATTERNS.items():
+        if pattern in arch:
+            return version
+
+    # AWQ on multimodal — current vLLM 0.21 has alignment issues
+    if quant_method == "awq" and has_vision:
+        return "future"  # no known working version for this combo
+
+    return None  # current version is fine

@@ -42,6 +42,7 @@ def load_model(req: LoadRequest) -> dict:
             max_model_len=req.max_model_len,
             enforce_eager=req.enforce_eager,
             max_cudagraph_capture_size=req.max_cudagraph_capture_size,
+            vllm_version=req.vllm_version,
         )
         return {"status": "loading", "model_id": req.model_id}
     except FileNotFoundError as e:

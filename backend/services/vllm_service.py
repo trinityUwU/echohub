@@ -218,7 +218,8 @@ def load_model_async(model_path: str, model_id: str,
                      gpu_memory_utilization: Optional[float] = None,
                      max_model_len: Optional[int] = None,
                      enforce_eager: bool = False,
-                     max_cudagraph_capture_size: Optional[int] = None) -> None:
+                     max_cudagraph_capture_size: Optional[int] = None,
+                     python_override: Optional[str] = None) -> None:
     """Launch vLLM in a background thread — returns immediately."""
     import threading
     global _loading_model_id, _load_error, _eject_requested
@@ -230,7 +231,7 @@ def load_model_async(model_path: str, model_id: str,
         global _loading_model_id, _load_error
         try:
             load_model(model_path, model_id, gpu_memory_utilization, max_model_len,
-                       enforce_eager, max_cudagraph_capture_size)
+                       enforce_eager, max_cudagraph_capture_size, python_override)
         except Exception as e:
             if not _eject_requested:
                 _load_error = str(e)
@@ -244,7 +245,8 @@ def load_model_async(model_path: str, model_id: str,
 def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[float] = None,
                max_model_len: Optional[int] = None,
                enforce_eager: bool = False,
-               max_cudagraph_capture_size: Optional[int] = None) -> None:
+               max_cudagraph_capture_size: Optional[int] = None,
+               python_override: Optional[str] = None) -> None:
     """Launch vLLM subprocess serving model_path on VLLM_PORT."""
     global _current_model, _vllm_proc, _eject_requested
 
@@ -287,7 +289,7 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
     }
 
     cmd = [
-        str(_get_vllm_python()), "-m", "vllm.entrypoints.openai.api_server",
+        str(Path(python_override) if python_override else _get_vllm_python()), "-m", "vllm.entrypoints.openai.api_server",
         "--model", model_path,
         "--served-model-name", model_id,  # expose HF id, not local path
         "--port", str(VLLM_PORT),
@@ -354,7 +356,8 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
         if suggested_len and (max_model_len is None or suggested_len < max_model_len):
             logger.warning(f"KV cache OOM — auto-retrying with max_model_len={suggested_len}")
             load_model(model_path=model_path, model_id=model_id,
-                       gpu_memory_utilization=gpu_memory_utilization, max_model_len=suggested_len)
+                       gpu_memory_utilization=gpu_memory_utilization, max_model_len=suggested_len,
+                       python_override=python_override)
             return
 
         # Retry: GPU util OOM → reduce utilization by 3%
@@ -362,7 +365,8 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
             reduced = round(gpu_memory_utilization - 0.03, 2)
             logger.warning(f"GPU util OOM — auto-retrying with gpu_memory_utilization={reduced}")
             load_model(model_path=model_path, model_id=model_id,
-                       gpu_memory_utilization=reduced, max_model_len=max_model_len)
+                       gpu_memory_utilization=reduced, max_model_len=max_model_len,
+                       python_override=python_override)
             return
 
         # Known incompatibility patterns — fail fast with clear message

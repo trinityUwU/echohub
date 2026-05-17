@@ -181,6 +181,7 @@ def load_model_async(
     max_model_len: Optional[int] = None,
     enforce_eager: bool = False,
     max_cudagraph_capture_size: Optional[int] = None,
+    vllm_version: Optional[str] = None,
 ) -> None:
     from backend.services import llama_service, vllm_service
 
@@ -206,6 +207,19 @@ def load_model_async(
     if gpu["type"] == "nvidia" and is_vllm_available():
         set_active_engine("vllm")
         logger.info(f"Routing {model_id} → vLLM ({fmt.upper()})")
+        # Resolve vllm python: use requested version or auto-pick best compatible
+        from backend.services.vllm_manager import get_python_for_version, get_default_python
+        if vllm_version:
+            py = get_python_for_version(vllm_version)
+            if not py:
+                raise RuntimeError(
+                    f"vLLM {vllm_version} is not installed. "
+                    f"Install it in Settings → Engines."
+                )
+            logger.info(f"Using vLLM {vllm_version} at {py}")
+        else:
+            py = get_default_python()
+
         vllm_service.load_model_async(
             model_path=model_path,
             model_id=model_id,
@@ -213,6 +227,7 @@ def load_model_async(
             max_model_len=max_model_len,
             enforce_eager=enforce_eager,
             max_cudagraph_capture_size=max_cudagraph_capture_size,
+            python_override=str(py),
         )
         return
 

@@ -46,7 +46,8 @@ class LoadRequest(BaseModel):
     gpu_memory_utilization: float = 0.75
     max_model_len: Optional[int] = None
     enforce_eager: bool = False
-    max_cudagraph_capture_size: Optional[int] = None  # None = vLLM default
+    max_cudagraph_capture_size: Optional[int] = None
+    vllm_version: Optional[str] = None  # None = use best available
 
 
 class ChatMessage(BaseModel):
