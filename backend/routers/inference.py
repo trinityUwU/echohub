@@ -268,3 +268,77 @@ async def chat_ws(ws: WebSocket):
             await ws.send_json({"error": str(e)})
         except Exception:
             pass
+
+
+@router.post("/benchmark")
+async def run_benchmark() -> dict:
+    """
+    Run a standardized performance benchmark on the currently loaded model.
+    Returns tok/s, TTFT, hardware info, and a shareable summary string.
+    """
+    import time
+    from backend.services import engine_router, gpu_service
+
+    if engine_router.get_status() is None:
+        raise HTTPException(status_code=404, detail="No model loaded — load a model first.")
+
+    model = engine_router.get_status()
+    gpu = None
+    try:
+        gpu = gpu_service.get_gpu_stats()
+    except Exception:
+        pass
+
+    # Standard prompt — long enough to get meaningful tok/s, short enough to be fast
+    BENCH_PROMPT = (
+        "Write a detailed explanation of how transformers work in machine learning, "
+        "including attention mechanisms, positional encoding, and training objectives. "
+        "Be thorough and technical."
+    )
+    MAX_TOKENS = 200
+
+    messages = [{"role": "user", "content": BENCH_PROMPT}]
+    start = time.perf_counter()
+    first_token_time = None
+    tokens = 0
+
+    try:
+        async for chunk in engine_router.generate(
+            messages=messages,
+            stream=True,
+            temperature=0.0,  # greedy — deterministic, max speed
+            max_tokens=MAX_TOKENS,
+        ):
+            if chunk and isinstance(chunk, str) and '"content":"' in chunk:
+                import json as _json, re as _re
+                m = _re.search(r'"content":"([^"]+)"', chunk)
+                if m and first_token_time is None:
+                    first_token_time = time.perf_counter()
+            tokens += 1
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Benchmark failed: {e}")
+
+    end = time.perf_counter()
+    total_ms = round((end - start) * 1000)
+    ttft_ms = round((first_token_time - start) * 1000) if first_token_time else None
+    gen_ms = round((end - (first_token_time or start)) * 1000)
+    tok_per_sec = round(tokens / max(gen_ms / 1000, 0.001), 1)
+
+    result = {
+        "model_id": model.id,
+        "model_name": model.name,
+        "engine": model.engine,
+        "tokens_generated": tokens,
+        "tok_per_sec": tok_per_sec,
+        "ttft_ms": ttft_ms,
+        "total_ms": total_ms,
+        "gpu_name": gpu.name if gpu else "Unknown",
+        "vram_total_gb": round(gpu.vram_total_mb / 1024, 1) if gpu else 0,
+        "timestamp": int(time.time()),
+        "share_text": (
+            f"{model.name} on {gpu.name if gpu else 'CPU'} — "
+            f"{tok_per_sec} tok/s · {ttft_ms}ms TTFT · "
+            f"via EchoHub (open source, github.com/trinityUwU/echohub)"
+        ),
+    }
+    return result
