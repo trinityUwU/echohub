@@ -179,6 +179,8 @@ def load_model_async(
     model_id: str,
     gpu_memory_utilization: Optional[float] = None,
     max_model_len: Optional[int] = None,
+    enforce_eager: bool = False,
+    max_cudagraph_capture_size: Optional[int] = None,
 ) -> None:
     from backend.services import llama_service, vllm_service
 
@@ -209,6 +211,8 @@ def load_model_async(
             model_id=model_id,
             gpu_memory_utilization=gpu_memory_utilization,
             max_model_len=max_model_len,
+            enforce_eager=enforce_eager,
+            max_cudagraph_capture_size=max_cudagraph_capture_size,
         )
         return
 

@@ -61,9 +61,14 @@ export default function App(): React.ReactElement {
     setPendingLoad(model)
   }
 
-  const confirmLoad = (cfg: { gpuMemoryUtilization: number; maxModelLen: number | null }): void => {
+  const confirmLoad = (cfg: { gpuMemoryUtilization: number; maxModelLen: number | null; enforceEager: boolean; maxCudagraphCaptureSize: number | null }): void => {
     if (!pendingLoad) return
-    loadModel(pendingLoad.id, { gpuMemoryUtilization: cfg.gpuMemoryUtilization, maxModelLen: cfg.maxModelLen ?? undefined })
+    loadModel(pendingLoad.id, {
+      gpuMemoryUtilization: cfg.gpuMemoryUtilization,
+      maxModelLen: cfg.maxModelLen ?? undefined,
+      enforceEager: cfg.enforceEager,
+      maxCudagraphCaptureSize: cfg.maxCudagraphCaptureSize,
+    })
     setPendingLoad(null)
   }
 

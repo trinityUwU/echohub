@@ -198,7 +198,9 @@ def get_load_state() -> dict:
 
 def load_model_async(model_path: str, model_id: str,
                      gpu_memory_utilization: Optional[float] = None,
-                     max_model_len: Optional[int] = None) -> None:
+                     max_model_len: Optional[int] = None,
+                     enforce_eager: bool = False,
+                     max_cudagraph_capture_size: Optional[int] = None) -> None:
     """Launch vLLM in a background thread — returns immediately."""
     import threading
     global _loading_model_id, _load_error, _eject_requested
@@ -209,7 +211,8 @@ def load_model_async(model_path: str, model_id: str,
     def _run():
         global _loading_model_id, _load_error
         try:
-            load_model(model_path, model_id, gpu_memory_utilization, max_model_len)
+            load_model(model_path, model_id, gpu_memory_utilization, max_model_len,
+                       enforce_eager, max_cudagraph_capture_size)
         except Exception as e:
             if not _eject_requested:
                 _load_error = str(e)
@@ -221,7 +224,9 @@ def load_model_async(model_path: str, model_id: str,
 
 
 def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[float] = None,
-               max_model_len: Optional[int] = None) -> None:
+               max_model_len: Optional[int] = None,
+               enforce_eager: bool = False,
+               max_cudagraph_capture_size: Optional[int] = None) -> None:
     """Launch vLLM subprocess serving model_path on VLLM_PORT."""
     global _current_model, _vllm_proc, _eject_requested
 
@@ -281,9 +286,13 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
             "--skip-mm-profiling",
         ]
     else:
-        # Force language-only mode — prevents vLLM from trying to load an image processor
-        # on models with ForConditionalGeneration architecture but no vision components
         cmd += ["--language-model-only"]
+        if enforce_eager:
+            cmd += ["--enforce-eager"]
+            logger.info("CUDA graphs disabled (enforce-eager)")
+        elif max_cudagraph_capture_size is not None:
+            cmd += ["--max-cudagraph-capture-size", str(max_cudagraph_capture_size)]
+            logger.info(f"CUDA graph max-capture-size: {max_cudagraph_capture_size}")
     # Disable FlashInfer JIT sampling — requires nvcc which is not installed
     cmd += ["--no-enable-flashinfer-autotune"]
 

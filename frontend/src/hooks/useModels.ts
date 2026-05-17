@@ -65,7 +65,7 @@ export function useModels() {
 
   const loadModel = useCallback(async (
     modelId: string,
-    config?: { maxModelLen?: number; gpuMemoryUtilization?: number }
+    config?: { maxModelLen?: number; gpuMemoryUtilization?: number; enforceEager?: boolean; maxCudagraphCaptureSize?: number | null }
   ) => {
     setLoadError(null)
 
@@ -91,6 +91,8 @@ export function useModels() {
         model_id: modelId,
         max_model_len: config?.maxModelLen ?? null,
         gpu_memory_utilization: config?.gpuMemoryUtilization ?? 0.75,
+        enforce_eager: config?.enforceEager ?? false,
+        max_cudagraph_capture_size: config?.maxCudagraphCaptureSize ?? null,
       })
       startPolling()
     } catch (e) {

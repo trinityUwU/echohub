@@ -35,6 +35,8 @@ def load_model(req: LoadRequest) -> dict:
             model_id=req.model_id,
             gpu_memory_utilization=req.gpu_memory_utilization if req.gpu_memory_utilization != 0.75 else None,
             max_model_len=req.max_model_len,
+            enforce_eager=req.enforce_eager,
+            max_cudagraph_capture_size=req.max_cudagraph_capture_size,
         )
         return {"status": "loading", "model_id": req.model_id}
     except FileNotFoundError as e:

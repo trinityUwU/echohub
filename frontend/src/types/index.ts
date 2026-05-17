@@ -51,6 +51,8 @@ export interface LoadRequest {
   model_id: string
   gpu_memory_utilization?: number
   max_model_len?: number | null
+  enforce_eager?: boolean
+  max_cudagraph_capture_size?: number | null
 }
 
 // OpenAI multimodal content part

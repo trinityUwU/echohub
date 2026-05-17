@@ -14,7 +14,7 @@ interface LoadModelModalProps {
   model: ModelInfo
   vramTotalGb: number
   vramUsedGb: number
-  onConfirm: (cfg: { gpuMemoryUtilization: number; maxModelLen: number | null }) => void
+  onConfirm: (cfg: { gpuMemoryUtilization: number; maxModelLen: number | null; enforceEager: boolean; maxCudagraphCaptureSize: number | null }) => void
   onCancel: () => void
 }
 
@@ -29,6 +29,8 @@ function kvCacheGb(ctxLen: number, paramsBillion: number): number {
 export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCancel }: LoadModelModalProps): React.ReactElement {
   const [gpuUtilPct, setGpuUtilPct] = useState(72)
   const [ctxLen, setCtxLen] = useState(Math.min(model.max_context_window ?? 16384, 16384))
+  const [cudaGraphs, setCudaGraphs] = useState<'default' | 'limited' | 'disabled'>('default')
+  const [maxCaptureSize, setMaxCaptureSize] = useState(512)
   const [check, setCheck] = useState<CanLoadResult | null>(null)
   const [checking, setChecking] = useState(true)
 
@@ -71,7 +73,12 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCa
       <>
         <Btn onClick={onCancel}>Cancel</Btn>
         <Btn variant="primary" disabled={!canSubmit}
-          onClick={() => onConfirm({ gpuMemoryUtilization: gpuUtil, maxModelLen: ctxLen })}>
+          onClick={() => onConfirm({
+            gpuMemoryUtilization: gpuUtil,
+            maxModelLen: ctxLen,
+            enforceEager: cudaGraphs === 'disabled',
+            maxCudagraphCaptureSize: cudaGraphs === 'limited' ? maxCaptureSize : null,
+          })}>
           {checking ? 'Checking…' : 'Load model'}
         </Btn>
       </>
@@ -121,6 +128,41 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCa
           <div className="text-xs text-text-muted mt-1">GPU memory managed automatically by llama.cpp</div>
         )}
       </div>
+
+      {engine === 'vllm' && (
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-2.5">CUDA Graphs</div>
+          <div className="flex flex-col gap-1.5">
+            {(['default', 'limited', 'disabled'] as const).map(opt => (
+              <button key={opt} onClick={() => setCudaGraphs(opt)}
+                className={`flex items-start gap-3 px-3 py-2.5 rounded-sm border cursor-pointer transition-colors text-left ${
+                  cudaGraphs === opt ? 'border-accent/40 bg-accent-dim' : 'bg-elevated border-border hover:border-border-hover'
+                }`}>
+                <div className={`w-3.5 h-3.5 rounded-full border-2 mt-0.5 flex-shrink-0 ${cudaGraphs === opt ? 'border-accent bg-accent' : 'border-border'}`} />
+                <div>
+                  <div className="text-sm font-medium text-text-primary">
+                    {opt === 'default' ? 'Enabled (default)' : opt === 'limited' ? 'Limited' : 'Disabled'}
+                  </div>
+                  <div className="text-xs text-text-muted mt-0.5">
+                    {opt === 'default' && 'Full CUDA graphs — max throughput, uses ~1.2 GB extra VRAM'}
+                    {opt === 'limited' && 'Cap graph size — reduces VRAM usage, slight throughput cost'}
+                    {opt === 'disabled' && 'No CUDA graphs (enforce-eager) — saves ~1.2 GB, slower inference'}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+          {cudaGraphs === 'limited' && (
+            <div className="mt-2.5">
+              <Slider label="Max capture size" value={maxCaptureSize} min={64} max={2048} step={64}
+                onChange={setMaxCaptureSize} formatValue={v => `${v} tokens`} />
+              <div className="text-xs text-text-muted mt-1">
+                Lower = less VRAM for graphs. Requests larger than this run in eager mode.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </Modal>
   )
 }
