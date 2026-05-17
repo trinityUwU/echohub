@@ -3,16 +3,20 @@ import { useDialog } from '@/components/shared/Dialog'
 import { Accordion } from '@/components/shared/Accordion'
 import { Slider } from '@/components/shared/Slider'
 import { Toggle } from '@/components/shared/Toggle'
-import type { ChatParams } from '@/types'
+import type { ChatParams, ModelInfo } from '@/types'
 import type { useProfiles } from '@/hooks/useProfiles'
+import { isThinkingControllable } from '@/api/client'
 
 interface RightPanelProps {
   params: ChatParams
   onChange: (p: ChatParams) => void
   profiles: ReturnType<typeof useProfiles>
+  loadedModel?: ModelInfo | null
 }
 
-export function RightPanel({ params, onChange, profiles }: RightPanelProps): React.ReactElement {
+export function RightPanel({ params, onChange, profiles, loadedModel }: RightPanelProps): React.ReactElement {
+  const thinkControllable = isThinkingControllable(loadedModel?.id)
+  const modelHasThinking = loadedModel?.capabilities?.thinking ?? false
   const set = <K extends keyof ChatParams>(k: K, v: ChatParams[K]): void => onChange({ ...params, [k]: v })
 
   return (
@@ -36,7 +40,17 @@ export function RightPanel({ params, onChange, profiles }: RightPanelProps): Rea
         <Slider label="Rep. Penalty" value={params.repetitionPenalty} min={1} max={2}     step={0.01} onChange={v => set('repetitionPenalty', v)} />
       </Accordion>
       <Accordion title="Features">
-        <ToggleRow label="Enable thinking"    value={params.enableThinking} onChange={v => set('enableThinking', v)} />
+        {modelHasThinking && !thinkControllable ? (
+          <div className="flex items-start justify-between py-1.5 gap-2">
+            <div>
+              <div className="text-sm text-text-muted">Enable thinking</div>
+              <div className="text-2xs text-yellow mt-0.5">Native thinking — cannot be disabled on this model</div>
+            </div>
+            <Toggle on={true} onChange={() => {}} />
+          </div>
+        ) : (
+          <ToggleRow label="Enable thinking" value={params.enableThinking} onChange={v => set('enableThinking', v)} />
+        )}
         <ToggleRow label="Stream output"      value={true}  onChange={() => {}} />
         <ToggleRow label="Auto-title"         value={true}  onChange={() => {}} />
         <ToggleRow label="Context compaction" value={false} onChange={() => {}} />

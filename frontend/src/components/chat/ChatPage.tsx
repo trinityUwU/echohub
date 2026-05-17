@@ -113,7 +113,6 @@ export function ChatPage({
               key={msg.id ?? i}
               message={msg}
               genStats={i === messages.length - 1 && msg.role === 'assistant' ? stats : undefined}
-              showThinking={params.enableThinking}
             />
           ))}
           <div ref={bottomRef} />
@@ -127,7 +126,7 @@ export function ChatPage({
           onStop={stop}
         />
       </div>
-      <RightPanel params={params} onChange={setParams} profiles={profilesHook} />
+      <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />
     </div>
   )
 }

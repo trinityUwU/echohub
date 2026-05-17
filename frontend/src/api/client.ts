@@ -356,3 +356,12 @@ export const runBenchmark = (): Promise<{
   total_ms: number; gpu_name: string; vram_total_gb: number
   timestamp: number; share_text: string
 }> => apiRequest('/inference/benchmark', { method: 'POST' })
+
+
+/** Returns true if the model supports /think /no_think tokens (Qwen3, QwQ).
+ *  Returns false if the model thinks natively and it cannot be disabled. */
+export function isThinkingControllable(modelId: string | undefined): boolean {
+  if (!modelId) return true
+  const m = modelId.toLowerCase()
+  return m.includes('qwen3') || m.includes('qwq')
+}
