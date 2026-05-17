@@ -64,8 +64,6 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL,
                 archived INTEGER NOT NULL DEFAULT 0
             );
-            -- Add archived column if missing (migration)
-            PRAGMA table_info(conversations);
 
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
@@ -85,6 +83,11 @@ def init_db() -> None:
             );
         """)
         conn.commit()
+        # Migrations — add columns that may be missing from older DBs
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(conversations)")}
+        if "archived" not in existing:
+            conn.execute("ALTER TABLE conversations ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
     logger.info("DB initialized at {}", get_db_path())
 
 
