@@ -1,87 +1,110 @@
 # STATE — EchoHub
-*Dernière mise à jour : 2026-05-17 (session 8)*
+*Dernière mise à jour : 2026-05-17 (session 9)*
 
 ## Résumé de l'état actuel
 
-Application Tauri v2 native pleinement fonctionnelle. Dual-engine llama-cpp + vLLM, multi-venv vLLM avec routing automatique par version, paths configurables avec migration assistée, installeur natif Tauri, système de mise à jour intégré (git pull + notification changelog). Chat streaming, conversations archivables, profils persistants, benchmark intégré.
+Application Tauri v2 native pleinement fonctionnelle. Dual-engine llama-cpp-python (GGUF, cross-platform) + vLLM (AWQ/GPTQ, NVIDIA). Multi-venv vLLM avec routing automatique par version. InstalleurApp natif, système de mise à jour git pull SSE. Chat streaming avec markdown riche, actions messages (copy/edit/regenerate), context menu conversations (rename/archive/delete). Tests E2E réalisés depuis un clone frais — majorité des bugs de fresh install corrigés.
 
-## Ce qui a été fait — session du 2026-05-17
+## Ce qui a été fait — session du 2026-05-17 (session 9)
 
-### UX / Chat
-- Conversations archivables (filtres Active/Archived, hover delete/archive)
-- GPU section dépliable dans la sidebar (VRAM + utilisation + température)
-- Topbar chat : bouton Load supprimé (redondant), Eject rouge à droite
-- Animations Framer Motion sur les messages (slide-up 0.18s)
-- Avatars SVG (user + logo EchoHub), zero emoji dans tout l'app
-- Footer messages assistant : nom du modèle + stats (avec fallback conv.model_id)
-- ThinkingBlock dépliable pendant le streaming
-- Toggle "Enable thinking" grisé avec label explicite si thinking natif non désactivable
-- Toggle focus ring supprimé (outline-none)
+### Fresh install E2E — bugs corrigés
+- `locate_project_root` en release utilisait `resource_dir()` → corrigé avec `current_exe().nth(5)`
+- `start.sh` faisait `cargo tauri build` (AppImage, nécessitait linuxdeploy) → remplacé par `cargo tauri dev`
+- `start.sh` compilait llama-cpp en CLI → délégué à l'InstallerApp
+- `main.tsx` : splash screen + retry loop 30×1s avant d'attendre le backend (évite l'app principale si backend pas prêt)
+- `InstallerApp` : log box `min-h-0` pour scroll interne dans flex column
+- Compilation llama-cpp : "still running..." spam → timer elapsed toutes 5 occurrences
+- Installer vLLM par défaut si NVIDIA détecté (fresh clone = pas de .venv-vllm)
+- Tous les paths hardcodés `/mnt/projects/echohub` supprimés des services backend
+- `import datetime` manquant dans conversations.py → archive 500 fixé
+- Migration DB `archived` column : `ALTER TABLE IF MISSING` au démarrage
+- CORS headers sur les 500 (global exception handler + logging)
 
-### Settings
-- Settings > Hardware : Resource limits (VRAM cap + GPU util% max)
-- Settings > Benchmark : tok/s, TTFT, historique 20 runs, card partageable
-- Settings > About : bouton "Check for updates" + statut
-- HF Token : champ fonctionnel + validation API HF (username confirmé)
-- Flash attention + Keep in memory toggles fonctionnels (persistés)
+### UX Chat
+- Footer messages toujours visible (plus au hover uniquement) — stats hydratées en mémoire après stream
+- Actions footer : **Copy** (check vert 1.5s), **Edit** (user, textarea inline Enter/Esc), **Regenerate**
+- `sendFromHistory()` dans useChat — stream sans ajouter de user message (pour regenerate/edit)
+- Toast erreur load : croix dismiss + auto-close 60s
 
-### Système
-- InstallerApp Tauri natif : Welcome → Paths → Installing (logs SSE) → Done → Launch
-- Système de mise à jour : UpdateBanner (30s après launch), git pull SSE, ChangelogNotification post-update
-- Chat export markdown (bouton Export topbar)
-- Badge engine (llama.cpp / vLLM) dans la topbar
+### Markdown
+- `atom-one-dark` highlight.js importé — syntax highlighting couleurs par langage
+- Badge langue corrigé (retiré préfixe `hljs `)
+- Texte 0.92rem, line-height 1.7, borders réduites
+- Code blocks fond `#282c34` assorti au thème
 
-### Bugs fixés
-- Profils builtins : modifications perdues au restart → flag `userModified`
-- Conversations vides au clic → sync `activeMessages` avec streaming guard
-- CompatBanner crash `issues.map` (undefined) → `?? []`
-- 422 search Discover sur query vide → min_length=0, skip si vide sans filtre
-- LoadModelModal : suppression appel canLoadModel au mount (ouverture instantanée)
-- installer.py : `yield from` invalide dans async → async generator
-- installer stream : EventSource → fetch ReadableStream (Tauri webview compat)
-- base.ts : health check avant cache port (évite /api fallback dans Tauri)
-- footer model absent sans modèle chargé → fallback conv.model_id
+### Conversations sidebar
+- Context menu clic droit : Rename / Archive / Delete (menu positionné, ajustement auto bord d'écran)
+- Rename inline (input dans la sidebar, Enter=confirm, blur=confirm, Esc=cancel)
+- Boutons hover : rename + archive + delete
+
+### Context menu global
+- `ContextMenuProvider` au root : bloque le menu natif partout
+- Clic droit hors zone configurée → "No actions available"
+- Fichiers séparés pour compatibilité Vite Fast Refresh (useContextMenu.ts séparé)
+- `createRoot` unique au module level (plus de recréation au HMR)
+
+### Settings > About
+- Bouton "Update now" intégré directement (plus de dépendance au UpdateBanner)
+- Logs git pull inline dans la section About
+- Bouton "Restart now" après succès
+
+### Engines tab
+- Badge "default" sur le venv legacy/builtin (non supprimable)
+- `LEGACY_VENV` chemin relatif au projet (était hardcodé)
+- Cache `_is_operational` TTL 120s (import vLLM prenait 30-60s)
+- Bouton Refresh dans le header de la liste
+- `is_builtin: True` sur le venv par défaut, suppression bloquée
+
+### Migration paths
+- Cancel & rollback pendant la copie (flag `_cancel_requested`, suppression des fichiers copiés, restauration config)
+- Bouton "Cancel & rollback" rouge visible pendant `in_progress`
 
 ## Décisions prises
 
 | Décision | Raison | Date |
 |---|---|---|
-| InstallerApp dans même fenêtre Tauri | Plus simple que multi-window, cohérent visuellement | 2026-05-17 |
-| fetch ReadableStream au lieu de EventSource | EventSource non fiable dans webview Tauri | 2026-05-17 |
-| userModified flag sur builtins | Distingue "sauvegardé explicitement" vs "jamais modifié" | 2026-05-17 |
-| Thinking natif → toggle grisé, pas filtré | Transparence : ne pas faire croire que thinking est off alors que le modèle pense | 2026-05-17 |
-| Conversations archivées vs supprimées | Récupérabilité des conversations, UX plus propre | 2026-05-17 |
+| `cargo tauri dev` dans start.sh (pas build) | `cargo tauri build` nécessite linuxdeploy pour AppImage — absent sur fresh install | 2026-05-17 |
+| InstallerApp installe vLLM par défaut si NVIDIA | Sans ça, modèles AWQ/GPTQ impossibles sur fresh clone | 2026-05-17 |
+| Cache _is_operational 120s | Import vLLM en subprocess = 30-60s bloquant, inacceptable au refresh | 2026-05-17 |
+| ContextMenuProvider global + "No actions" | Menu natif bloqué partout — cohérence UX, pas de comportement surprenant | 2026-05-17 |
+| sendFromHistory() dans useChat | Regenerate/edit nécessite stream sans ajouter user message — send() ne couvre pas ce cas | 2026-05-17 |
+| LoadingSplash fichier séparé | Vite Fast Refresh interdit composant + hook/fonction dans le même fichier | 2026-05-17 |
 
 ## Contexte non-évident
 
-- InstallerApp : `install_complete` flag en DB `app_state`. Reset via `sqlite3 ~/.local/share/echohub/echohub.db "UPDATE app_state SET value='false' WHERE key='install_complete';"` pour tester.
-- Thinking non contrôlable : Qwen3/QwQ = `/think`/`/no_think` tokens. Nemotron/DeepSeek-R1 = thinking natif, toggle grisé.
-- Footer modèle : utilise `loadedModel?.name` en priorité, puis `conv.model_id.split('/').pop()` comme fallback.
-- UpdateBanner : check git fetch 30s après launch, silencieux. Le push GitHub déclenche la notification au prochain lancement.
-- docs/private/ : jamais pushé sur git (dans .gitignore). Contient stratégie marché, posts Reddit/HN, drafts.
+- `start.sh` lance `cargo tauri dev` → frontend Vite HMR actif. Pour un binaire release : `cargo tauri build --no-bundle` dans `frontend/`.
+- Installer flag : `sqlite3 ~/.local/share/echohub/echohub.db "UPDATE app_state SET value='false' WHERE key='install_complete';"` pour re-tester l'installer.
+- `_is_operational` cache : invalider avec `invalidate_operational_cache(version)` après install vLLM.
+- Context menu : `useContextMenu` doit être importé depuis `@/components/shared/useContextMenu` (fichier séparé), pas depuis `ContextMenu.tsx`.
+- `sendFromHistory(history)` envoie l'historique directement sans ajouter de user message — utilisé pour regenerate et edit user.
+- CORS 500 : le middleware Starlette n'ajoute pas les headers CORS sur les exceptions non catchées → global_exception_handler dans main.py les ajoute manuellement.
+- Vieux composants dans `src/components/*.tsx` (héritage pré-refactor) : encore présents, inoffensifs, à nettoyer.
 
 ## Prochaines étapes
 
-1. **Stratégie marché** : créer compte Reddit, construction karma r/LocalLLaMA (participation genuïne, pas de promo)
-2. **Préparer les assets** : screenshot benchmark EchoHub vs Ollama, GIF VRAM preview, GIF install Engine
-3. **Tests end-to-end** : start.sh depuis un clone frais sur une machine vierge (pas encore testé)
-4. **MCP server** : Phase 2 roadmap — Claude Code pilote les modèles locaux via EchoHub
-5. **Packaging final** : .AppImage + .deb testés, validation sur machine propre
+1. **Stratégie marché** : créer compte Reddit, construction karma r/LocalLLaMA (participation genuïne, 3-4 semaines avant toute promo)
+2. **Assets lancement** : screenshot benchmark EchoHub vs Ollama, GIF VRAM preview, GIF Engine install
+3. **Nettoyer old components** : `src/components/*.tsx` héritage pré-refactor (ChatPanel.tsx, LoadConfigModal.tsx, etc.)
+4. **Packaging** : valider `.AppImage` et `.deb` sur machine propre (linuxdeploy à installer)
+5. **MCP server** : Phase 2 roadmap — Claude Code pilote modèles locaux via EchoHub
 
 ## Points en suspens
 
-- start.sh jamais testé depuis un clone frais → potentiellement des bugs
-- AMD ROCm et Apple Silicon : gpu_service codé mais non testé sur vrai hardware
-- Installer : si l'utilisateur passe Paths et clique Install Now alors que le backend n'a pas encore démarré → race condition possible
-- Old components dans src/components/*.tsx (héritage pré-refactor) : encore présents, inoffensifs mais à nettoyer
+- Vieux composants `src/components/*.tsx` : encore présents, inoffensifs mais à nettoyer
+- AMD ROCm et Apple Silicon : code présent, non testé sur vrai hardware
+- Installer race condition : si backend pas encore démarré lors du clic "Install Now"
+- `.AppImage` : nécessite `linuxdeploy` — pas testé depuis ce refactoring start.sh
 
 ## Historique
 
+### Session 8 (2026-05-17) — UX polish, installeur natif, système MAJ
+Conversations archivables, GPU sidebar, ThinkingBlock, Framer Motion, InstallerApp, UpdateBanner, benchmark, resource limits, HF token, export markdown, badge engine.
+
 ### Session 7 (2026-05-17) — Multi-venv vLLM, paths, migration, docs
-vllm_manager.py, Settings/Engines, config_service, migration_service, PathsTab, MigrationBanner, engine_router routing par version, CompatBanner, Dialog.tsx, Flash attention toggles, README grand public, docs/v0.1 + v0.2, start.sh universel, OnboardingWizard.
+vllm_manager.py, Settings/Engines, config_service, migration_service, PathsTab, MigrationBanner, engine_router routing par version, CompatBanner, Dialog.tsx, start.sh universel, OnboardingWizard.
 
 ### Session 6 (2026-05-16) — Sidecar Python fonctionnel
-Sidecar Python spawné par Rust, port dynamique, kill à fermeture. base.ts invoke. CORS dynamique. Tests avec modèles réels.
+Sidecar Python spawné par Rust, port dynamique, kill à fermeture. base.ts invoke. CORS dynamique.
 
 ### Session 5 (2026-05-16) — Tauri init + componentisation React
 cargo tauri init, composants React complets depuis mockup, tailwind tokens.
