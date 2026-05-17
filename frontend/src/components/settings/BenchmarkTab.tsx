@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { apiRequest } from '@/api/base'
 import { RunBenchmarkModal } from './RunBenchmarkModal'
 import { CompareView } from './CompareView'
+import { LeaderboardView } from './LeaderboardView'
 import { useContextMenu } from '@/components/shared/useContextMenu'
 
 interface EngineParams {
@@ -47,7 +48,7 @@ export function BenchmarkTab(): React.ReactElement {
   const [detail, setDetail] = useState<BenchResult | null>(null)
   const [copied, setCopied] = useState(false)
   const [showRun, setShowRun] = useState(false)
-  const [view, setView] = useState<'list' | 'compare'>('list')
+  const [view, setView] = useState<'list' | 'compare' | 'leaderboard'>('list')
   const [showArchived, setShowArchived] = useState(false)
   const [filterModel, setFilterModel] = useState<string>('all')
   const [filterProfile, setFilterProfile] = useState<string>('all')
@@ -107,6 +108,13 @@ export function BenchmarkTab(): React.ReactElement {
             <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
             Compare
           </button>
+          <button onClick={() => setView('leaderboard')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded transition-colors cursor-pointer ${
+              view === 'leaderboard' ? 'bg-elevated text-text-primary' : 'text-text-muted hover:text-text-secondary'
+            }`}>
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="18 20 18 10"/><polyline points="12 20 12 4"/><polyline points="6 20 6 14"/></svg>
+            Leaderboard
+          </button>
         </div>
         <button onClick={() => setShowRun(true)}
           className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-md cursor-pointer transition-colors flex-shrink-0">
@@ -121,6 +129,9 @@ export function BenchmarkTab(): React.ReactElement {
           ? <div className="text-center text-text-muted py-12 text-sm">No results yet — run some benchmarks first.</div>
           : <CompareView history={history} />
       )}
+
+      {/* Leaderboard */}
+      {view === 'leaderboard' && <LeaderboardView history={history} />}
 
       {/* Filters */}
       {view === 'list' && history.length > 0 && (
