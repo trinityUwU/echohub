@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { downloadModel, getModelReadme } from '@/api/client'
+import { downloadModel, getModelReadme, checkModelCompatibility } from '@/api/client'
 import type { DownloadJob, GgufFile, ModelInfo } from '@/types'
 import { Badge } from '@/components/shared/Badge'
 import { Btn } from '@/components/shared/Btn'
@@ -30,6 +30,14 @@ export function ModelDetailPanel({ model, loading, vramFreeGb, job, isFavorite, 
   const [downloading, setDownloading] = useState(false)
   const [readme, setReadme] = useState<string | null>(null)
   const [readmeLoading, setReadmeLoading] = useState(false)
+  const [compat, setCompat] = useState<{ compatible_vllm: boolean | null; compatible_llama: boolean | null; vllm_issues: string[]; recommendation: string } | null>(null)
+
+  useEffect(() => {
+    setCompat(null)
+    checkModelCompatibility(model.id)
+      .then(r => setCompat(r))
+      .catch(() => {})
+  }, [model.id])
 
   const isDownloading = job?.state === 'running' || job?.state === 'pending'
   const dlPct = job ? Math.round((job.progress ?? 0) * 100) : 0
@@ -131,7 +139,7 @@ export function ModelDetailPanel({ model, loading, vramFreeGb, job, isFavorite, 
         {tab === 'info' && (
           loading
             ? <div className="flex items-center justify-center h-24 text-text-muted text-sm animate-pulse">Loading details…</div>
-            : <InfoTab model={model} selectedGguf={selectedGguf} onSelectGguf={setSelectedGguf} vramFreeGb={vramFreeGb} onSelectRelated={onSelectRelated} />
+            : <InfoTab model={model} selectedGguf={selectedGguf} onSelectGguf={setSelectedGguf} vramFreeGb={vramFreeGb} onSelectRelated={onSelectRelated} compat={compat} />
         )}
         {tab === 'readme' && <ReadmeTab content={readme} loading={readmeLoading} />}
       </div>
@@ -208,13 +216,21 @@ function WarnIcon(): React.ReactElement {
   return <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
 }
 
-function InfoTab({ model, selectedGguf, onSelectGguf, vramFreeGb, onSelectRelated }: {
+type CompatResult = { compatible_vllm: boolean | null; compatible_llama: boolean | null; vllm_issues: string[]; recommendation: string } | null
+
+function InfoTab({ model, selectedGguf, onSelectGguf, vramFreeGb, onSelectRelated, compat }: {
   model: ModelInfo; selectedGguf: GgufFile | null
   onSelectGguf: (f: GgufFile) => void; vramFreeGb: number
   onSelectRelated?: (id: string) => void
+  compat?: CompatResult
 }): React.ReactElement {
   return (
     <div className="p-4 flex flex-col gap-5">
+
+      {/* Compatibility banner */}
+      {compat && (
+        <CompatBanner compat={compat} />
+      )}
 
       {model.description && (
         <p className="text-sm text-text-secondary leading-relaxed line-clamp-4 overflow-hidden">{model.description}</p>
@@ -313,6 +329,37 @@ function ReadmeTab({ content, loading }: { content: string | null; loading: bool
         }}>
         {content}
       </ReactMarkdown>
+    </div>
+  )
+}
+
+function CompatBanner({ compat }: { compat: NonNullable<CompatResult> }): React.ReactElement {
+  const ok = compat.compatible_vllm || compat.compatible_llama
+  const issues = compat.vllm_issues
+
+  if (ok && issues.length === 0) {
+    return (
+      <div className="flex items-start gap-2 bg-green/8 border border-green/20 rounded-sm px-3 py-2 text-xs text-green">
+        <svg className="w-3.5 h-3.5 flex-shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        Compatible with {compat.compatible_vllm ? 'vLLM' : 'llama-cpp'}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5 bg-red/8 border border-red/20 rounded-sm px-3 py-2.5">
+      <div className="flex items-center gap-2 text-xs font-medium text-red">
+        <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        Compatibility warning
+      </div>
+      {issues.map((issue, i) => (
+        <div key={i} className="text-xs text-red/80">{issue}</div>
+      ))}
+      <div className="text-xs text-text-muted mt-0.5 border-t border-red/15 pt-1.5">{compat.recommendation}</div>
     </div>
   )
 }

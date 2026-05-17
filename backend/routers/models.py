@@ -173,3 +173,86 @@ def get_model_readme(model_id: str) -> dict:
         return {"content": content}
     except Exception as e:
         return {"content": None, "error": str(e)}
+
+
+@router.get("/compatibility/{model_id:path}")
+def check_compatibility(model_id: str) -> dict:
+    """
+    Fetch config.json from HF and check architecture compatibility with vLLM + llama-cpp.
+    Returns: { compatible_vllm, compatible_llama, architecture, quantization, issues, recommendation }
+    """
+    from huggingface_hub import hf_hub_download
+    import json as _json
+    from pathlib import Path as _P
+
+    # Try local first, then HF
+    local_config = _P(f"/mnt/models/echohub/{model_id.replace('/', '--')}/config.json")
+    try:
+        if local_config.exists():
+            config = _json.loads(local_config.read_text())
+        else:
+            cfg_path = hf_hub_download(repo_id=model_id, filename="config.json", token=_get_hf_token())
+            config = _json.loads(_P(cfg_path).read_text())
+    except Exception as e:
+        return {"error": str(e), "compatible_vllm": None, "compatible_llama": None}
+
+    architectures = config.get("architectures", [])
+    quant_config = config.get("quantization_config", {})
+    quant_method = quant_config.get("quant_method", "none")
+    quant_bits = quant_config.get("bits")
+    model_type = config.get("model_type", "")
+
+    # Check vLLM support
+    compatible_vllm = False
+    vllm_issues = []
+    try:
+        from vllm.model_executor.models import ModelRegistry
+        supported = ModelRegistry.get_supported_archs()
+        arch_ok = any(a in supported for a in architectures)
+        if not arch_ok:
+            vllm_issues.append(f"Architecture {architectures} not supported by vLLM 0.21")
+        else:
+            compatible_vllm = True
+
+        # Check AWQ + multimodal compatibility
+        # vLLM 0.21 has issues with AWQ on multimodal architectures (vision+text)
+        has_vision = "vision_config" in config or "ForConditionalGeneration" in str(architectures)
+        if quant_method == "awq" and has_vision:
+            vllm_issues.append(
+                "AWQ quantization on multimodal (vision+text) model — "
+                "vLLM 0.21 may fail with alignment errors on vision layers. "
+                "This is a known vLLM limitation for this architecture."
+            )
+            compatible_vllm = False
+    except Exception as e:
+        vllm_issues.append(f"vLLM check failed: {e}")
+
+    # Check llama-cpp support (GGUF only — can't load safetensors)
+    compatible_llama = quant_method in ("gguf", "none") and not quant_method.startswith("awq")
+    llama_issues = []
+    if quant_method in ("awq", "gptq", "fp8"):
+        compatible_llama = False
+        llama_issues.append(f"{quant_method.upper()} format not supported by llama-cpp (GGUF only)")
+
+    # Build recommendation
+    if compatible_vllm:
+        recommendation = "Compatible with vLLM — can be loaded directly"
+    elif compatible_llama:
+        recommendation = "Compatible with llama-cpp — use GGUF format"
+    else:
+        rec_parts = []
+        if architectures:
+            rec_parts.append(f"Search for a GGUF version of this model on HuggingFace")
+        recommendation = ". ".join(rec_parts) if rec_parts else "No compatible engine found"
+
+    return {
+        "compatible_vllm": compatible_vllm,
+        "compatible_llama": compatible_llama,
+        "architecture": architectures[0] if architectures else model_type,
+        "quantization": quant_method,
+        "bits": quant_bits,
+        "vllm_issues": vllm_issues,
+        "llama_issues": llama_issues,
+        "recommendation": recommendation,
+        "vllm_version": "0.21.0",
+    }

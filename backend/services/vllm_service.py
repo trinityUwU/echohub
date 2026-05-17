@@ -350,9 +350,9 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
         # Known incompatibility patterns — fail fast with clear message
         if "input size is not aligned with the quantized weight shape" in log_content:
             raise RuntimeError(
-                f"Model '{model_id}' is incompatible with vLLM {_vllm_version()}. "
-                "This quantization format (AWQ with custom architecture) is not supported. "
-                "Try a GGUF version of this model instead."
+                f"AWQ alignment error: this model has a multimodal (vision+text) architecture "
+                f"incompatible with AWQ quantization in vLLM {_vllm_version()}. "
+                "Look for a GGUF version of this model on HuggingFace."
             )
 
         # Extract root cause from vLLM log

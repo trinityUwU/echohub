@@ -239,3 +239,16 @@ export const canLoadModel = (modelId: string, gpuUtil?: number, maxModelLen?: nu
 
 export const getModelReadme = (modelId: string): Promise<{ content: string | null; error?: string }> =>
   apiRequest(`/models/readme/${encodeURIComponent(modelId)}`)
+
+export const checkModelCompatibility = (modelId: string): Promise<{
+  compatible_vllm: boolean | null
+  compatible_llama: boolean | null
+  architecture: string
+  quantization: string
+  bits: number | null
+  vllm_issues: string[]
+  llama_issues: string[]
+  recommendation: string
+  vllm_version: string
+  error?: string
+}> => apiRequest(`/models/compatibility/${encodeURIComponent(modelId)}`)
