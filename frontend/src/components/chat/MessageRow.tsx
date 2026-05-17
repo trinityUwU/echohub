@@ -14,7 +14,7 @@ interface MessageRowProps {
   onEditUser?: (text: string) => void
 }
 
-export const MessageRow = memo(function MessageRow({ message, isLast, genStats, modelName, streaming, onRegenerate, onEditUser }: MessageRowProps): React.ReactElement {
+function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRegenerate, onEditUser }: MessageRowProps): React.ReactElement {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -173,8 +173,9 @@ function ActionBtn({ onClick, title, children }: { onClick: () => void; title: s
       {children}
     </button>
   )
-}, (prev, next) => {
-  // Only re-render if this specific message changed, or if streaming state changed
+}
+
+export const MessageRow = memo(MessageRowInner, (prev, next) => {
   if (prev.streaming !== next.streaming) return false
   if (prev.isLast !== next.isLast) return false
   if (prev.message.content !== next.message.content) return false
