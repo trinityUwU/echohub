@@ -98,38 +98,7 @@ fi
 .venv/bin/pip install --quiet --upgrade pip
 .venv/bin/pip install --quiet fastapi "uvicorn[standard]" huggingface_hub loguru pydantic httpx python-dotenv
 
-# ── Detect GPU & compile llama-cpp ────────────────────────────────────────────
-log_step "Inference engine (llama-cpp-python)"
-if ! .venv/bin/python -c "import llama_cpp" 2>/dev/null; then
-    log_warn "llama-cpp-python not installed — compiling..."
-
-    if command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null 2>&1; then
-        log_ok "NVIDIA GPU detected"
-        # Arch: use /opt/cuda + gcc-15 if available
-        if [[ "$OS" == "arch" ]] && [[ -f /usr/bin/gcc-15 ]] && [[ -d /opt/cuda ]]; then
-            log_warn "Arch + CUDA: compiling with gcc-15 (takes 3-5 min)..."
-            CUDA_PATH=/opt/cuda PATH="/opt/cuda/bin:$PATH" \
-                NVCC_CCBIN=/usr/bin/gcc-15 \
-                CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=native \
-                    -DCMAKE_CUDA_FLAGS=--allow-unsupported-compiler \
-                    -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/gcc-15" \
-                .venv/bin/pip install llama-cpp-python --no-cache-dir
-        else
-            log_warn "CUDA: compiling llama-cpp (takes 3-5 min)..."
-            CMAKE_ARGS="-DGGML_CUDA=on" .venv/bin/pip install llama-cpp-python --no-cache-dir
-        fi
-    elif command -v rocm-smi &>/dev/null 2>&1; then
-        log_ok "AMD ROCm detected"
-        CMAKE_ARGS="-DGGML_HIPBLAS=on" .venv/bin/pip install llama-cpp-python --no-cache-dir
-    elif [[ "$(uname)" == "Darwin" ]]; then
-        log_ok "macOS: Metal backend"
-        CMAKE_ARGS="-DGGML_METAL=on" .venv/bin/pip install llama-cpp-python --no-cache-dir
-    else
-        log_warn "No GPU — CPU inference only"
-        .venv/bin/pip install llama-cpp-python --no-cache-dir
-    fi
-fi
-log_ok "llama-cpp-python ready"
+# Inference engine compilation is handled by the InstallerApp on first launch
 
 # ── Migrate legacy vLLM venv if needed ────────────────────────────────────────
 LEGACY_VLLM="$ROOT/.venv-vllm"
