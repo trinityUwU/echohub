@@ -8,7 +8,7 @@ from loguru import logger
 
 load_dotenv()
 
-from backend.routers import conversations, inference, models, settings, system
+from backend.routers import conversations, inference, installer, models, settings, system
 from backend.services import db, engine_router, vllm_service
 
 
@@ -37,6 +37,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(installer.router)
 app.include_router(models.router)
 app.include_router(inference.router)
 app.include_router(system.router)
