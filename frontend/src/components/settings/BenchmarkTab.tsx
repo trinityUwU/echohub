@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { apiRequest } from '@/api/base'
 import { RunBenchmarkModal } from './RunBenchmarkModal'
 
@@ -91,16 +91,16 @@ export function BenchmarkTab(): React.ReactElement {
       {/* Filters */}
       {history.length > 0 && (
         <div className="flex items-center gap-2">
-          <select value={filterModel} onChange={e => setFilterModel(e.target.value)}
-            className="bg-elevated border border-border rounded-sm px-2.5 py-1.5 text-xs text-text-secondary outline-none cursor-pointer">
-            <option value="all">All models</option>
-            {models.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-          <select value={filterProfile} onChange={e => setFilterProfile(e.target.value)}
-            className="bg-elevated border border-border rounded-sm px-2.5 py-1.5 text-xs text-text-secondary outline-none cursor-pointer">
-            <option value="all">All profiles</option>
-            {profiles.map(p => <option key={p} value={p as string}>{p}</option>)}
-          </select>
+          <FilterSelect
+            value={filterModel}
+            onChange={setFilterModel}
+            options={[{ value: 'all', label: 'All models' }, ...models.map(m => ({ value: m, label: m }))]}
+          />
+          <FilterSelect
+            value={filterProfile}
+            onChange={setFilterProfile}
+            options={[{ value: 'all', label: 'All profiles' }, ...profiles.map(p => ({ value: p as string, label: p as string }))]}
+          />
           <span className="text-xs text-text-muted ml-auto">{filtered.length} result{filtered.length !== 1 ? 's' : ''}</span>
           <button onClick={clear} className="text-xs text-text-muted hover:text-red cursor-pointer transition-colors">Clear all</button>
         </div>
@@ -338,6 +338,52 @@ function InfoRow({ label, value, highlight, muted }: {
       <span className={`text-xs font-mono font-medium truncate ${
         highlight ? 'text-white' : muted ? 'text-white/40' : 'text-white/80'
       }`}>{value}</span>
+    </div>
+  )
+}
+
+function FilterSelect({ value, onChange, options }: {
+  value: string
+  onChange: (v: string) => void
+  options: { value: string; label: string }[]
+}): React.ReactElement {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const selected = options.find(o => o.value === value) ?? options[0]
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', handler)
+    return () => window.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <button onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-2 px-3 py-1.5 bg-elevated hover:bg-overlay border border-border rounded-md text-xs text-text-secondary cursor-pointer transition-colors min-w-[120px] justify-between">
+        <span className="truncate">{selected.label}</span>
+        <svg className={`w-3 h-3 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 z-50 bg-elevated border border-border rounded-md shadow-xl py-1 min-w-full">
+          {options.map(o => (
+            <button key={o.value} onClick={() => { onChange(o.value); setOpen(false) }}
+              className={`w-full text-left px-3 py-1.5 text-xs cursor-pointer transition-colors ${
+                o.value === value
+                  ? 'text-accent bg-accent/10'
+                  : 'text-text-secondary hover:bg-overlay hover:text-text-primary'
+              }`}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
