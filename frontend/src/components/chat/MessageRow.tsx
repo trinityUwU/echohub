@@ -25,7 +25,7 @@ export function MessageRow({ message, genStats }: MessageRowProps): React.ReactE
       : text
 
   return (
-    <div className={`flex px-5 py-1.5 gap-3 hover:bg-white/[0.02] transition-colors ${isUser ? 'flex-row-reverse' : ''}`}>
+    <div className={`flex px-5 py-1.5 gap-3 hover:bg-white/[0.02] transition-colors animate-slide-up ${isUser ? 'flex-row-reverse' : ''}`}>
       <Avatar role={message.role} />
       <div className={`max-w-[680px] flex flex-col gap-1 ${isUser ? 'items-end' : ''}`}>
         {images.length > 0 && (
@@ -53,10 +53,22 @@ export function MessageRow({ message, genStats }: MessageRowProps): React.ReactE
 function Avatar({ role }: { role: string }): React.ReactElement {
   const isUser = role === 'user'
   return (
-    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 mt-0.5 ${
-      isUser ? 'bg-accent-dim text-accent' : 'bg-green/15 text-green'
+    <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${
+      isUser ? 'bg-accent-dim' : 'bg-green/15'
     }`}>
-      {isUser ? 'C' : 'AI'}
+      {isUser ? (
+        <svg className="w-3.5 h-3.5 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+      ) : (
+        <svg className="w-3.5 h-3.5 text-green" viewBox="0 0 20 20" fill="none">
+          <path d="M3 10 C3 5.5 6.5 2 11 2 s8 3.5 8 8 -3.5 8-8 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+          <circle cx="7" cy="10" r="1.2" fill="currentColor"/>
+          <circle cx="11" cy="10" r="1.2" fill="currentColor"/>
+          <circle cx="15" cy="10" r="1.2" fill="currentColor"/>
+        </svg>
+      )}
     </div>
   )
 }

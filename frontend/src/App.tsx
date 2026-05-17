@@ -101,7 +101,7 @@ export default function App(): React.ReactElement {
       <NavRail active={page} onNavigate={setPage} downloadsBadge={activeJobs > 0} />
 
       <div className="flex flex-1 overflow-hidden">
-        <div className={`flex flex-1 overflow-hidden ${page === 'chat' ? '' : 'hidden'}`}>
+        <div className={`flex flex-1 overflow-hidden ${page === 'chat' ? 'animate-fade-in' : 'hidden'}`}>
           <ChatPage
             loadedModel={loadedModel}
             loading={isLoading}
@@ -119,7 +119,7 @@ export default function App(): React.ReactElement {
             setActiveMessages={setActiveMessages}
           />
         </div>
-        <div className={`flex flex-1 overflow-hidden ${page === 'library' ? '' : 'hidden'}`}>
+        <div className={`flex flex-1 overflow-hidden ${page === 'library' ? 'animate-fade-in' : 'hidden'}`}>
           <LibraryPage
             models={downloaded}
             onDelete={async (id) => {
@@ -131,7 +131,7 @@ export default function App(): React.ReactElement {
             totalDiskGb={downloaded.reduce((s, m) => s + (m.size_gb ?? 0), 0)}
           />
         </div>
-        <div className={`flex flex-1 overflow-hidden ${page === 'discover' ? '' : 'hidden'}`}>
+        <div className={`flex flex-1 overflow-hidden ${page === 'discover' ? 'animate-fade-in' : 'hidden'}`}>
           <DiscoverPage
             loadedModelId={loadedModel?.id ?? null}
             onLoad={requestLoad}
@@ -141,14 +141,14 @@ export default function App(): React.ReactElement {
             vramFreeGb={gpu ? gpu.vram_free_mb / 1024 : 0}
           />
         </div>
-        <div className={`flex flex-1 overflow-hidden ${page === 'downloads' ? '' : 'hidden'}`}>
+        <div className={`flex flex-1 overflow-hidden ${page === 'downloads' ? 'animate-fade-in' : 'hidden'}`}>
           <DownloadsPage
             jobs={downloadJobs}
             onCancel={handleCancelDownload}
             onLoad={id => { requestLoad(id); setPage('chat') }}
           />
         </div>
-        <div className={`flex flex-1 overflow-hidden ${page === 'settings' ? '' : 'hidden'}`}>
+        <div className={`flex flex-1 overflow-hidden ${page === 'settings' ? 'animate-fade-in' : 'hidden'}`}>
           <SettingsPage />
         </div>
       </div>

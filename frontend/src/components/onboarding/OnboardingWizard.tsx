@@ -2,6 +2,32 @@ import { useEffect, useState } from 'react'
 import { completeOnboarding, listEngines, getPaths, getGpuStats } from '@/api/client'
 import type { GpuStats } from '@/types'
 
+// ── Icon components (no emojis) ──────────────────────────────────────────────
+
+function WelcomeIcon({ name }: { name: string }): React.ReactElement {
+  const cls = "w-5 h-5 text-accent"
+  const p = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const }
+  if (name === 'lock') return <svg className={cls} viewBox="0 0 24 24" {...p}><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+  if (name === 'zap') return <svg className={cls} viewBox="0 0 24 24" {...p}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+  if (name === 'wifi-off') return <svg className={cls} viewBox="0 0 24 24" {...p}><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+  return <svg className={cls} viewBox="0 0 24 24" {...p}><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+}
+
+function CompatIcon({ name }: { name: string }): React.ReactElement {
+  const p = { fill: "none", stroke: "currentColor", strokeLinecap: "round" as const, strokeLinejoin: "round" as const }
+  if (name === 'check') return <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" {...p} strokeWidth={2.5}><polyline points="20 6 9 17 4 12"/></svg>
+  if (name === 'warn') return <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" {...p} strokeWidth={2}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+  return <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" {...p} strokeWidth={2.5}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+}
+
+function StorageIcon({ name }: { name: string }): React.ReactElement {
+  const p = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const }
+  if (name === 'model') return <svg className="w-4 h-4" viewBox="0 0 24 24" {...p}><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+  if (name === 'engine') return <svg className="w-4 h-4" viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+  return <svg className="w-4 h-4" viewBox="0 0 24 24" {...p}><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+}
+
+
 interface OnboardingWizardProps {
   onComplete: () => void
 }
@@ -83,13 +109,13 @@ function StepWelcome({ onNext }: { onNext: () => void }): React.ReactElement {
 
       <div className="grid grid-cols-2 gap-3">
         {[
-          { icon: '🔒', title: '100% local', desc: 'Models run on your GPU. Nothing leaves your machine.' },
-          { icon: '⚡', title: 'One click', desc: 'Search, download, and chat. No configuration needed.' },
-          { icon: '🔌', title: 'Offline capable', desc: 'Once downloaded, models work without internet.' },
-          { icon: '🔧', title: 'Open source', desc: 'MIT license. You own your data and your setup.' },
+          { icon: 'lock', title: '100% local', desc: 'Models run on your GPU. Nothing leaves your machine.' },
+          { icon: 'zap', title: 'One click', desc: 'Search, download, and chat. No configuration needed.' },
+          { icon: 'wifi-off', title: 'Offline capable', desc: 'Once downloaded, models work without internet.' },
+          { icon: 'code', title: 'Open source', desc: 'MIT license. You own your data and your setup.' },
         ].map(({ icon, title, desc }) => (
           <div key={title} className="bg-elevated border border-border rounded-md p-4">
-            <div className="text-lg mb-1.5">{icon}</div>
+            <div className="mb-2"><WelcomeIcon name={icon} /></div>
             <div className="text-sm font-semibold text-text-primary mb-1">{title}</div>
             <div className="text-xs text-text-muted leading-relaxed">{desc}</div>
           </div>
@@ -106,9 +132,9 @@ function StepStorage({ paths, onNext }: { paths: { models_dir: string; vllm_envs
     <div className="flex flex-col gap-5">
       <StepHeader step="2/6" title="Storage" subtitle="EchoHub stores files in two main locations. Here's what to expect." />
       <div className="flex flex-col gap-3">
-        <StorageItem icon="🤖" title="AI Models" path={paths?.models_dir ?? '/mnt/models/echohub'} desc="Downloaded model files. Each model is 2–70 GB. Change this in Settings → Paths." badge="2–70 GB per model" badgeColor="text-blue" />
-        <StorageItem icon="⚙️" title="vLLM Environments" path={paths?.vllm_envs_dir ?? '~/.local/share/echohub/vllm-envs'} desc="One isolated environment per vLLM version. Add more later for compatibility with specific models." badge="~7 GB per version" badgeColor="text-yellow" />
-        <StorageItem icon="💾" title="App Data" path={paths?.user_data_dir ?? '~/.local/share/echohub'} desc="Conversations, settings, state. Very small." badge="< 50 MB" badgeColor="text-green" />
+        <StorageItem icon="model" title="AI Models" path={paths?.models_dir ?? '/mnt/models/echohub'} desc="Downloaded model files. Each model is 2–70 GB. Change this in Settings → Paths." badge="2–70 GB per model" badgeColor="text-blue" />
+        <StorageItem icon="engine" title="vLLM Environments" path={paths?.vllm_envs_dir ?? '~/.local/share/echohub/vllm-envs'} desc="One isolated environment per vLLM version. Add more later for compatibility with specific models." badge="~7 GB per version" badgeColor="text-yellow" />
+        <StorageItem icon="data" title="App Data" path={paths?.user_data_dir ?? '~/.local/share/echohub'} desc="Conversations, settings, state. Very small." badge="< 50 MB" badgeColor="text-green" />
       </div>
       <div className="bg-yellow/7 border border-yellow/20 rounded-sm px-4 py-3 text-sm text-yellow/90">
         Plan for at least 20–30 GB of free disk space to get started comfortably.
@@ -153,7 +179,7 @@ function StepHardware({ gpu, onNext }: { gpu: GpuStats | null; onNext: () => voi
           <div key={label} className="bg-elevated border border-border rounded-sm p-3">
             <div className={`font-medium mb-0.5 ${ok ? 'text-text-primary' : 'text-text-muted'}`}>{label}</div>
             <div className="text-text-muted mb-2">{desc}</div>
-            <div className={`text-xs font-medium ${ok ? 'text-green' : 'text-text-muted'}`}>{ok ? '✓ Available' : '✗ Unavailable'}</div>
+            <div className={`text-xs font-medium ${ok ? 'text-green' : 'text-text-muted'}`}>{ok ? 'Available' : 'Unavailable'}</div>
           </div>
         ))}
       </div>
@@ -197,12 +223,15 @@ function StepCompatibility({ onNext }: { onNext: () => void }): React.ReactEleme
       <StepHeader step="5/6" title="Model compatibility" subtitle="EchoHub checks compatibility before you download anything — no surprises." />
       <div className="flex flex-col gap-3">
         {[
-          { color: 'text-green', bg: 'bg-green/8 border-green/20', title: '✓ Fully compatible', desc: 'Works with your current engine. Download and use immediately.' },
-          { color: 'text-yellow', bg: 'bg-yellow/8 border-yellow/20', title: '⚠ Needs a different vLLM version', desc: 'One-click install of the required version. 10–30 min. Happens in the background.' },
-          { color: 'text-red', bg: 'bg-red/8 border-red/20', title: '✗ No compatible engine exists yet', desc: 'EchoHub says so clearly and suggests alternatives (e.g. GGUF version of the same model).' },
-        ].map(({ color, bg, title, desc }) => (
+          { color: 'text-green', bg: 'bg-green/8 border-green/20', icon: 'check', title: 'Fully compatible', desc: 'Works with your current engine. Download and use immediately.' },
+          { color: 'text-yellow', bg: 'bg-yellow/8 border-yellow/20', icon: 'warn', title: 'Needs a different vLLM version', desc: 'One-click install of the required version. 10–30 min. Happens in the background.' },
+          { color: 'text-red', bg: 'bg-red/8 border-red/20', icon: 'cross', title: 'No compatible engine exists yet', desc: 'EchoHub says so clearly and suggests alternatives (e.g. GGUF version of the same model).' },
+        ].map(({ color, bg, icon, title, desc }) => (
           <div key={title} className={`border rounded-sm px-4 py-3 ${bg}`}>
-            <div className={`text-sm font-semibold ${color} mb-1`}>{title}</div>
+            <div className={`flex items-center gap-2 text-sm font-semibold ${color} mb-1`}>
+              <CompatIcon name={icon} />
+              {title}
+            </div>
             <div className="text-xs text-text-secondary leading-relaxed">{desc}</div>
           </div>
         ))}
@@ -252,7 +281,7 @@ function StorageItem({ icon, title, path, desc, badge, badgeColor }: { icon: str
     <div className="bg-elevated border border-border rounded-md p-4">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          <span>{icon}</span>
+          <StorageIcon name={icon} />
           <span className="text-sm font-semibold text-text-primary">{title}</span>
         </div>
         <span className={`text-xs font-medium ${badgeColor}`}>{badge}</span>
