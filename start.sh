@@ -133,26 +133,11 @@ fi
 echo -e "\n${BOLD}${GREEN}All checks passed — launching EchoHub${RESET}"
 echo -e "────────────────────────────────────────"
 
+export VITE_MSW=false
 if [[ "$DEV_MODE" == "true" ]]; then
-    log_ok "Dev mode: hot reload enabled"
-    export VITE_MSW=false
-    exec cargo tauri dev
-else
-    # Build if needed
-    if [[ ! -d "dist" ]] || [[ "$(find src -newer dist -name '*.tsx' -o -name '*.ts' 2>/dev/null | head -1)" ]]; then
-        log_step "Building frontend..."
-        bun run build
-    fi
-    log_step "Building Tauri app..."
-    cargo tauri build --no-bundle 2>&1 | tee "$LOG/tauri-build.log" | tail -5
-    # Launch the built binary
-    BINARY=$(find src-tauri/target/release -maxdepth 1 -name "app" -o -name "echohub" 2>/dev/null | head -1)
-    if [[ -n "$BINARY" ]]; then
-        log_ok "Launching $BINARY"
-        exec "$BINARY"
-    else
-        log_warn "Binary not found — falling back to dev mode"
-        export VITE_MSW=false
-        exec cargo tauri dev
-    fi
+    log_ok "Dev mode: hot reload + MSW enabled"
+    export VITE_MSW=true
 fi
+
+log_step "Launching EchoHub..."
+exec cargo tauri dev
