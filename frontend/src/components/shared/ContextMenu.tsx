@@ -79,7 +79,7 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
           ) : (
             menu.items.map((item, i) => (
               item.separator ? (
-                <div key={i} className="border-t border-border/50 my-1" />
+                <div key={i} className="h-px bg-white/8 mx-2 my-1" />
               ) : (
                 <button key={i}
                   onClick={() => { item.onClick(); setMenu(null) }}
