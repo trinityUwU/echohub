@@ -431,6 +431,14 @@ async def run_benchmark() -> dict:
         "timestamp": int(time.time()),
         "share_text": "\n".join(share_lines),
     }
+    # Quality scoring
+    try:
+        from backend.services.quality_scorer import score_response
+        profile_name = result.get("profile_name", "throughput")
+        quality = score_response(profile_name, BENCH_PROMPT, generated_text)
+        result["quality"] = quality
+    except Exception as _qe:
+        result["quality"] = None
     # Auto-save to DB
     from backend.services.db import save_benchmark
     result["_db_id"] = save_benchmark(result)
@@ -586,6 +594,13 @@ async def run_benchmark_profiles(body: dict):
                 "timestamp": int(_time.time()),
                 "share_text": "\n".join(share_lines),
             }
+            # Quality scoring
+            try:
+                from backend.services.quality_scorer import score_response as _score
+                quality = _score(profile["name"], profile["prompt"], generated_text)
+                result["quality"] = quality
+            except Exception:
+                result["quality"] = None
             result["_db_id"] = save_benchmark(result)
             yield f"data: {_json.dumps({'type': 'result', 'profile_id': pid, 'profile_name': profile['name'], 'index': idx, 'total': total, 'result': result})}\n\n"
 

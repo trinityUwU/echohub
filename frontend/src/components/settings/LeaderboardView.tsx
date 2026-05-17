@@ -5,6 +5,7 @@ interface BenchResult {
   profile_name?: string; tok_per_sec: number; ttft_ms: number | null
   decode_ms: number; total_ms: number; tokens_generated: number
   gpu_short: string; vram_total_gb: number; timestamp: number
+  quality?: { score: number; grade: string } | null
   _name?: string; _archived?: boolean; _db_id?: number
 }
 
@@ -20,6 +21,8 @@ interface ModelStats {
   worst_tps: number
   best_ttft: number | null
   avg_ttft: number | null
+  best_quality: number | null
+  avg_quality: number | null
   latest: number
 }
 
@@ -28,6 +31,7 @@ interface Props { history: BenchResult[] }
 function computeStats(runs: BenchResult[]): ModelStats {
   const tps = runs.map(r => r.tok_per_sec)
   const ttfts = runs.map(r => r.ttft_ms).filter((v): v is number => v != null)
+  const qualities = runs.map(r => r.quality?.score).filter((v): v is number => v != null)
   return {
     model_name: runs[0].model_name,
     engine: runs[0].engine ?? 'llama',
@@ -38,6 +42,8 @@ function computeStats(runs: BenchResult[]): ModelStats {
     worst_tps: Math.min(...tps),
     best_ttft: ttfts.length ? Math.min(...ttfts) : null,
     avg_ttft: ttfts.length ? Math.round(ttfts.reduce((a, b) => a + b, 0) / ttfts.length) : null,
+    best_quality: qualities.length ? Math.max(...qualities) : null,
+    avg_quality: qualities.length ? Math.round(qualities.reduce((a, b) => a + b, 0) / qualities.length) : null,
     latest: Math.max(...runs.map(r => r.timestamp)),
   }
 }
@@ -208,6 +214,12 @@ function LeaderboardRow({ stats: m, rank, globalBestTps, expanded, onToggle, pro
             <StatCol label="Best" value={`${m.best_tps}`} unit="tok/s" color={tpsColor} />
             <StatCol label="Avg" value={`${m.avg_tps}`} unit="tok/s" />
             <StatCol label="TTFT" value={m.best_ttft ? `${m.best_ttft}ms` : '—'} />
+            {m.best_quality != null && (
+              <StatCol label="Quality" value={`${m.best_quality}`} color={
+                m.best_quality >= 85 ? 'text-green' : m.best_quality >= 70 ? 'text-accent' :
+                m.best_quality >= 55 ? 'text-yellow' : 'text-red'
+              } />
+            )}
             <StatCol label="Runs" value={String(m.runs)} />
           </div>
           <svg className={`w-3.5 h-3.5 text-text-muted transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`}

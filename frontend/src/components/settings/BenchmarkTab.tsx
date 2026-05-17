@@ -21,6 +21,7 @@ interface BenchResult {
   engine_params: EngineParams
   bench_prompt: string; bench_max_tokens: number; bench_temperature: number
   generated_text?: string; thinking_tokens?: number | null
+  quality?: { score: number; grade: string; details: Record<string, unknown>; method: string } | null
   timestamp: number; share_text: string; _db_id?: number
   _name?: string; _archived?: boolean
 }
@@ -32,6 +33,16 @@ function speedColor(tps: number): string {
   if (tps >= 60) return 'text-green'
   if (tps >= 30) return 'text-yellow'
   return 'text-red'
+}
+
+function gradeColor(grade: string): string {
+  switch (grade) {
+    case 'A': return 'text-green'
+    case 'B': return 'text-accent'
+    case 'C': return 'text-yellow'
+    case 'D': return 'text-orange-400'
+    default:  return 'text-red'
+  }
 }
 
 function speedLabel(tps: number): string {
@@ -274,6 +285,12 @@ function ResultCard({ result: r, isLatest, renaming, onClick, onRename, onRename
                 <div className={`text-xl font-bold font-mono ${speedColor(r.tok_per_sec)}`}>{r.tok_per_sec}</div>
                 <div className="text-2xs text-text-muted">tok/s</div>
               </div>
+              {r.quality && (
+                <div className="text-right min-w-[40px]">
+                  <div className={`text-sm font-bold font-mono ${gradeColor(r.quality.grade)}`}>{r.quality.grade}</div>
+                  <div className="text-2xs text-text-muted">{r.quality.score}</div>
+                </div>
+              )}
             </div>
           </div>
         </button>
@@ -370,6 +387,34 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
               </div>
             )}
           </InfoCard>
+
+          {/* Quality score */}
+          {r.quality && (
+            <InfoCard title={`Quality score — ${r.quality.method.split('+')[0].trim()}`}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-baseline gap-2">
+                  <span className={`text-3xl font-black font-mono ${gradeColor(r.quality.grade)}`}>{r.quality.grade}</span>
+                  <span className="text-sm text-white/50">{r.quality.score}/100</span>
+                </div>
+                <div className="h-1.5 flex-1 mx-4 bg-black/20 rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full ${
+                    r.quality.score >= 85 ? 'bg-green' : r.quality.score >= 70 ? 'bg-accent' :
+                    r.quality.score >= 55 ? 'bg-yellow' : r.quality.score >= 40 ? 'bg-orange-400' : 'bg-red'
+                  }`} style={{ width: `${r.quality.score}%` }} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-x-4">
+                {Object.entries(r.quality.details).map(([k, v]) => (
+                  <div key={k} className="flex items-baseline justify-between py-0.5 gap-2">
+                    <span className="text-2xs text-white/40 truncate">{k.replace(/_/g, ' ')}</span>
+                    <span className="text-2xs font-mono text-white/70 flex-shrink-0">
+                      {typeof v === 'boolean' ? (v ? '✓' : '✗') : String(v)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </InfoCard>
+          )}
 
           {/* Bench config */}
           <InfoCard title="Benchmark config">

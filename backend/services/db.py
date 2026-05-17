@@ -506,6 +506,72 @@ _BUILTIN_PROFILES = [
         "temperature": 0.0,
     },
     {
+        "name": "Conversation Short",
+        "description": "Minimal context dialogue — detects hallucination on established facts.",
+        "prompt": (
+            "We've been discussing a Python project called 'DataSync' that syncs PostgreSQL to Redis. "
+            "The project uses asyncio and was started in 2024. "
+            "Now tell me: what database is DataSync syncing to, what async library does it use, "
+            "and what year was it started? Answer each question in one sentence."
+        ),
+        "max_tokens": 150,
+        "temperature": 0.0,
+    },
+    {
+        "name": "Conversation Medium",
+        "description": "Medium context — retention across a multi-turn simulated conversation.",
+        "prompt": (
+            "Earlier in our conversation we established these facts: "
+            "1) The server runs on port 8421. "
+            "2) Authentication uses JWT tokens with a 24-hour expiry. "
+            "3) The database has 3 tables: users, sessions, and events. "
+            "4) The tech lead's name is Marie. "
+            "5) The project deadline is Q3 2026. "
+            "Based on these facts, answer: What port does the server run on? "
+            "How long do JWT tokens last? Who is the tech lead? "
+            "When is the deadline? List all 3 database tables."
+        ),
+        "max_tokens": 200,
+        "temperature": 0.0,
+    },
+    {
+        "name": "Conversation Long",
+        "description": "Dense context — memory and coherence across complex multi-fact scenario.",
+        "prompt": (
+            "Context from our previous conversation:
+"
+            "Project: EchoNet — a distributed message broker written in Go.
+"
+            "Architecture: 5 nodes in a Raft consensus cluster. Leader election timeout: 150ms.
+"
+            "Storage: RocksDB with WAL enabled, 8GB memory budget per node.
+"
+            "Network: nodes communicate over gRPC, TLS 1.3 mandatory.
+"
+            "Performance targets: p99 latency < 2ms, throughput > 50k msg/s per node.
+"
+            "Current issues: node 3 has 40% higher latency, suspected cause is disk I/O contention.
+"
+            "Team: Alice (Go), Bob (infrastructure), Carol (monitoring), Dave (QA).
+"
+            "Deployment: Kubernetes, 3 regions (EU, US-East, AP-South).
+"
+            "Based on all of the above, answer these questions:
+"
+            "1. What is the consensus algorithm used?
+"
+            "2. What storage engine is used and what feature is enabled?
+"
+            "3. Which node has performance issues and what is the suspected cause?
+"
+            "4. What are the two performance targets?
+"
+            "5. Name all team members and their roles."
+        ),
+        "max_tokens": 300,
+        "temperature": 0.0,
+    },
+    {
         "name": "Instruction",
         "description": "Instruction following — measures compliance and output speed on structured tasks.",
         "prompt": (

@@ -15,6 +15,7 @@ interface BenchResult {
   engine_params: EngineParams
   bench_prompt: string; bench_max_tokens: number; bench_temperature: number
   generated_text?: string; timestamp: number; _db_id?: number
+  quality?: { score: number; grade: string } | null
 }
 
 type Layout = '1x2' | '2x2' | '2x4' | '4x4' | '4x8' | '8x8'
@@ -206,7 +207,7 @@ function CompareCell({ slot, result, baseline, isBaseline, history, onSelect }: 
             </div>
           </div>
 
-          {/* Hero tok/s */}
+          {/* Hero tok/s + quality */}
           <div className="flex items-baseline gap-2 mb-1">
             <span className={`text-2xl font-black font-mono ${speedColor(result.tok_per_sec)}`}>
               {result.tok_per_sec}
@@ -214,6 +215,12 @@ function CompareCell({ slot, result, baseline, isBaseline, history, onSelect }: 
             <span className="text-2xs text-white/30">tok/s</span>
             {!isBaseline && baseline && (
               <DiffBadge a={baseline.tok_per_sec} b={result.tok_per_sec} higherBetter />
+            )}
+            {result.quality && (
+              <span className={`ml-auto text-xs font-bold font-mono ${
+                result.quality.grade === 'A' ? 'text-green' : result.quality.grade === 'B' ? 'text-accent' :
+                result.quality.grade === 'C' ? 'text-yellow' : 'text-red'
+              }`}>{result.quality.grade}</span>
             )}
           </div>
 
