@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useModels } from '@/hooks/useModels'
 import { useGpu } from '@/hooks/useGpu'
 import { useConversations } from '@/hooks/useConversations'
@@ -179,15 +179,35 @@ export default function App(): React.ReactElement {
           onCancel={() => setShowPicker(false)}
         />
       )}
-      {loadError && (
-        <div className="fixed bottom-4 right-4 bg-red/15 border border-red/30 text-red text-sm px-4 py-3 rounded-md max-w-sm">
-          Load failed: {loadError}
-        </div>
-      )}
+      {loadError && <LoadErrorToast message={loadError} />}
       {showOnboarding && <OnboardingWizard onComplete={() => setShowOnboarding(false)} />}
       {dialogEl}
       <ChangelogNotification />
         </div>
+    </div>
+  )
+}
+
+function LoadErrorToast({ message }: { message: string }): React.ReactElement | null {
+  const [visible, setVisible] = useState(true)
+  const dismiss = useCallback(() => setVisible(false), [])
+
+  useEffect(() => {
+    const t = setTimeout(dismiss, 60_000)
+    return () => clearTimeout(t)
+  }, [dismiss])
+
+  if (!visible) return null
+
+  return (
+    <div className="fixed bottom-4 right-4 bg-red/15 border border-red/30 text-red text-sm px-4 py-3 rounded-md max-w-sm flex items-start gap-3">
+      <span className="flex-1">Load failed: {message}</span>
+      <button onClick={dismiss}
+        className="flex-shrink-0 w-4 h-4 flex items-center justify-center opacity-60 hover:opacity-100 cursor-pointer transition-opacity mt-0.5">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="w-3 h-3">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
     </div>
   )
 }
