@@ -64,6 +64,7 @@ export function ChatPage({
     loadedModel?.max_context_window ?? undefined,
     loadedModel?.id,
     activeId ?? undefined,
+    activeModelName,
   )
 
   // Sync messages when conversation changes OR when activeMessages loads from DB

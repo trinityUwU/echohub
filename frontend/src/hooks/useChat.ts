@@ -74,6 +74,7 @@ export function useChat(
   maxContextTokens?: number,
   modelId?: string,
   convId?: string,
+  modelName?: string | null,
 ) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages)
   const [streaming, setStreaming] = useState(false)
@@ -189,7 +190,7 @@ export function useChat(
         const assistantFinal: ChatMessage = {
           role: 'assistant', content: accumulated, id: assistantMsgId,
           stats: {
-            tokens: generationStats.tokensGenerated,
+            tokens: generationStats.tokensGenerated, model_name: modelName ?? undefined,
             tok_per_sec: generationStats.tokensPerSecond,
             time_ms: generationStats.timeMs,
             prompt_tokens: generationStats.promptTokens,
@@ -206,7 +207,7 @@ export function useChat(
             role: 'assistant',
             content: accumulated,
             stats: {
-              tokens: generationStats.tokensGenerated,
+              tokens: generationStats.tokensGenerated, model_name: modelName ?? undefined,
               tok_per_sec: generationStats.tokensPerSecond,
               time_ms: generationStats.timeMs,
               prompt_tokens: generationStats.promptTokens,
@@ -273,7 +274,7 @@ export function useChat(
         setStreaming(false)
         const assistantFinal2: ChatMessage = {
           role: 'assistant', content: accumulated, id: assistantMsgId,
-          stats: { tokens: generationStats.tokensGenerated, tok_per_sec: generationStats.tokensPerSecond, time_ms: generationStats.timeMs, prompt_tokens: generationStats.promptTokens },
+          stats: { tokens: generationStats.tokensGenerated, model_name: modelName ?? undefined, tok_per_sec: generationStats.tokensPerSecond, time_ms: generationStats.timeMs, prompt_tokens: generationStats.promptTokens },
         }
         setMessages(prev => { const u = [...prev]; u[u.length - 1] = assistantFinal2; return u })
         const final = [...history, assistantFinal2]
@@ -281,7 +282,7 @@ export function useChat(
         if (convId) {
           addMessage(convId, {
             id: assistantMsgId, role: 'assistant', content: accumulated,
-            stats: { tokens: generationStats.tokensGenerated, tok_per_sec: generationStats.tokensPerSecond, time_ms: generationStats.timeMs, prompt_tokens: generationStats.promptTokens },
+            stats: { tokens: generationStats.tokensGenerated, model_name: modelName ?? undefined, tok_per_sec: generationStats.tokensPerSecond, time_ms: generationStats.timeMs, prompt_tokens: generationStats.promptTokens },
           }).catch(() => {})
         }
       },

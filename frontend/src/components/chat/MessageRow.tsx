@@ -125,7 +125,7 @@ export function MessageRow({ message, isLast, genStats, modelName, streaming, on
                 {genStats
                   ? <>{genStats.tokensGenerated} tokens · <span className="text-green">{genStats.tokensPerSecond.toFixed(1)} tok/s</span> · {(genStats.timeMs / 1000).toFixed(2)}s{modelName && <span className="text-text-muted/50"> · {modelName}</span>}</>
                   : message.stats
-                    ? <>{message.stats.tokens} tokens · <span className="text-green">{message.stats.tok_per_sec.toFixed(1)} tok/s</span> · {(message.stats.time_ms / 1000).toFixed(2)}s{modelName && <span className="text-text-muted/50"> · {modelName}</span>}</>
+                    ? <>{message.stats.tokens} tokens · <span className="text-green">{message.stats.tok_per_sec.toFixed(1)} tok/s</span> · {(message.stats.time_ms / 1000).toFixed(2)}s{(modelName ?? message.stats.model_name) && <span className="text-text-muted/50"> · {modelName ?? message.stats.model_name}</span>}</>
                     : null
                 }
               </span>

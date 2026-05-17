@@ -66,6 +66,7 @@ export interface MessageStats {
   tok_per_sec: number
   time_ms: number
   prompt_tokens: number
+  model_name?: string
 }
 
 export interface ConversationSummary {
