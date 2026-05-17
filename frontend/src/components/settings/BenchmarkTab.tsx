@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { apiRequest } from '@/api/base'
 import { RunBenchmarkModal } from './RunBenchmarkModal'
+import { CompareView } from './CompareView'
 
 interface EngineParams {
   n_ctx?: number; n_batch?: number; n_gpu_layers?: number; flash_attn?: boolean
@@ -44,6 +45,7 @@ export function BenchmarkTab(): React.ReactElement {
   const [detail, setDetail] = useState<BenchResult | null>(null)
   const [copied, setCopied] = useState(false)
   const [showRun, setShowRun] = useState(false)
+  const [view, setView] = useState<'list' | 'compare'>('list')
   const [filterModel, setFilterModel] = useState<string>('all')
   const [filterProfile, setFilterProfile] = useState<string>('all')
 
@@ -79,9 +81,22 @@ export function BenchmarkTab(): React.ReactElement {
 
       {/* Header */}
       <div className="flex items-center justify-between">
-        <p className="text-sm text-text-muted leading-relaxed">
-          Select profiles and run. Click any result for full details.
-        </p>
+        <div className="flex items-center gap-2 bg-overlay rounded-md p-0.5">
+          <button onClick={() => setView('list')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded transition-colors cursor-pointer ${
+              view === 'list' ? 'bg-elevated text-text-primary' : 'text-text-muted hover:text-text-secondary'
+            }`}>
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            Results
+          </button>
+          <button onClick={() => setView('compare')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded transition-colors cursor-pointer ${
+              view === 'compare' ? 'bg-elevated text-text-primary' : 'text-text-muted hover:text-text-secondary'
+            }`}>
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            Compare
+          </button>
+        </div>
         <button onClick={() => setShowRun(true)}
           className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-md cursor-pointer transition-colors flex-shrink-0">
           <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -89,8 +104,15 @@ export function BenchmarkTab(): React.ReactElement {
         </button>
       </div>
 
+      {/* Compare view */}
+      {view === 'compare' && (
+        history.length === 0
+          ? <div className="text-center text-text-muted py-12 text-sm">No results yet — run some benchmarks first.</div>
+          : <CompareView history={history} />
+      )}
+
       {/* Filters */}
-      {history.length > 0 && (
+      {view === 'list' && history.length > 0 && (
         <div className="flex items-center gap-2">
           <FilterSelect
             value={filterModel}
@@ -108,8 +130,8 @@ export function BenchmarkTab(): React.ReactElement {
       )}
 
       {/* Results list */}
-      {loading && <div className="text-sm text-text-muted animate-pulse">Loading…</div>}
-      {!loading && filtered.length > 0 && (
+      {view === 'list' && loading && <div className="text-sm text-text-muted animate-pulse">Loading…</div>}
+      {view === 'list' && !loading && filtered.length > 0 && (
         <div className="flex flex-col gap-2">
           {filtered.map((r, i) => (
             <ResultCard key={`${r.timestamp}-${r.profile_id ?? i}`} result={r} isLatest={i === 0 && filterModel === 'all' && filterProfile === 'all'}
@@ -117,7 +139,7 @@ export function BenchmarkTab(): React.ReactElement {
           ))}
         </div>
       )}
-      {!loading && history.length === 0 && (
+      {view === 'list' && !loading && history.length === 0 && (
         <div className="text-center text-text-muted py-12 text-sm">
           No results yet — load a model and run your first benchmark.
         </div>
