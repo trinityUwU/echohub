@@ -25,6 +25,7 @@ interface ChatPageProps {
   onDeleteConversation: (id: string) => void
   onArchiveConversation: (id: string) => void
   onUnarchiveConversation: (id: string) => void
+  onRenameConversation: (id: string, title: string) => void
   onOpenPicker: () => void
   onEject: () => void
   onGoToSettings: () => void
@@ -35,7 +36,7 @@ export function ChatPage({
   loadedModel, loading, loadingPct, gpu, hasCuda,
   conversations, archivedConversations, activeId, activeMessages,
   onNewConversation, onSelectConversation,
-  onDeleteConversation, onArchiveConversation, onUnarchiveConversation,
+  onDeleteConversation, onArchiveConversation, onUnarchiveConversation, onRenameConversation,
   onOpenPicker, onEject, onGoToSettings,
   setActiveMessages,
 }: ChatPageProps): React.ReactElement {
@@ -123,6 +124,7 @@ export function ChatPage({
         onDelete={onDeleteConversation}
         onArchive={onArchiveConversation}
         onUnarchive={onUnarchiveConversation}
+        onRename={onRenameConversation}
         gpu={gpu}
       />
       <div className="flex flex-col flex-1 overflow-hidden">

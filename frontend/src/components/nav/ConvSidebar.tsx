@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import type { ConversationSummary, GpuStats } from '@/types'
 
 type Filter = 'active' | 'archived'
+
+interface ContextMenu { x: number; y: number; conv: ConversationSummary; isArchived: boolean }
 
 interface ConvSidebarProps {
   conversations: ConversationSummary[]
@@ -12,16 +14,50 @@ interface ConvSidebarProps {
   onDelete: (id: string) => void
   onArchive: (id: string) => void
   onUnarchive: (id: string) => void
+  onRename: (id: string, title: string) => void
   gpu: GpuStats | null
 }
 
-export function ConvSidebar({ conversations, archivedConversations, activeId, onSelect, onNew, onDelete, onArchive, onUnarchive, gpu }: ConvSidebarProps): React.ReactElement {
+export function ConvSidebar({ conversations, archivedConversations, activeId, onSelect, onNew, onDelete, onArchive, onUnarchive, onRename, gpu }: ConvSidebarProps): React.ReactElement {
   const [filter, setFilter] = useState<Filter>('active')
+  const [ctx, setCtx] = useState<ContextMenu | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
   const list = filter === 'active' ? conversations : archivedConversations
+
+  const closeCtx = useCallback(() => setCtx(null), [])
+
+  useEffect(() => {
+    if (!ctx) return
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('[data-ctx-menu]')) closeCtx()
+    }
+    window.addEventListener('mousedown', handler)
+    return () => window.removeEventListener('mousedown', handler)
+  }, [ctx, closeCtx])
+
+  const handleContextMenu = (e: React.MouseEvent, conv: ConversationSummary, isArchived: boolean): void => {
+    e.preventDefault()
+    setCtx({ x: e.clientX, y: e.clientY, conv, isArchived })
+  }
+
+  const startRename = (id: string): void => {
+    closeCtx()
+    setRenamingId(id)
+  }
+
+  const handleArchive = (id: string, isArchived: boolean): void => {
+    closeCtx()
+    isArchived ? onUnarchive(id) : onArchive(id)
+  }
+
+  const handleDelete = (id: string): void => {
+    closeCtx()
+    onDelete(id)
+  }
 
   return (
     <aside className="w-[240px] bg-surface border-r border-border flex flex-col flex-shrink-0 overflow-hidden">
-
       {/* Header */}
       <div className="flex items-center gap-2 px-3.5 py-3 border-b border-border">
         <h2 className="flex-1 text-xs font-semibold uppercase tracking-widest text-text-muted">Chats</h2>
@@ -54,15 +90,66 @@ export function ConvSidebar({ conversations, archivedConversations, activeId, on
             key={conv.id} conv={conv}
             active={conv.id === activeId}
             isArchived={filter === 'archived'}
-            onClick={() => onSelect(conv.id)}
-            onDelete={() => onDelete(conv.id)}
-            onArchive={() => filter === 'active' ? onArchive(conv.id) : onUnarchive(conv.id)}
+            renaming={renamingId === conv.id}
+            onClick={() => { if (renamingId !== conv.id) onSelect(conv.id) }}
+            onContextMenu={e => handleContextMenu(e, conv, filter === 'archived')}
+            onDelete={() => handleDelete(conv.id)}
+            onArchive={() => handleArchive(conv.id, filter === 'archived')}
+            onRenameStart={() => startRename(conv.id)}
+            onRenameSubmit={title => { setRenamingId(null); onRename(conv.id, title) }}
+            onRenameCancel={() => setRenamingId(null)}
           />
         ))}
       </div>
 
       {gpu && <GpuSection gpu={gpu} />}
+
+      {/* Context menu */}
+      {ctx && (
+        <div data-ctx-menu
+          className="fixed z-50 bg-elevated border border-border rounded-md shadow-xl py-1 min-w-[160px]"
+          style={{ left: ctx.x, top: ctx.y }}>
+          <CtxItem onClick={() => startRename(ctx.conv.id)}>
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+            Rename
+          </CtxItem>
+          <CtxItem onClick={() => handleArchive(ctx.conv.id, ctx.isArchived)}>
+            {ctx.isArchived ? (
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.01"/>
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>
+              </svg>
+            )}
+            {ctx.isArchived ? 'Unarchive' : 'Archive'}
+          </CtxItem>
+          <div className="border-t border-border/50 my-1" />
+          <CtxItem danger onClick={() => handleDelete(ctx.conv.id)}>
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+              <path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/>
+            </svg>
+            Delete
+          </CtxItem>
+        </div>
+      )}
     </aside>
+  )
+}
+
+function CtxItem({ onClick, danger, children }: { onClick: () => void; danger?: boolean; children: React.ReactNode }): React.ReactElement {
+  return (
+    <button onClick={onClick}
+      className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-sm cursor-pointer transition-colors ${
+        danger ? 'text-red hover:bg-red/10' : 'text-text-secondary hover:bg-overlay hover:text-text-primary'
+      }`}>
+      {children}
+    </button>
   )
 }
 
@@ -77,34 +164,70 @@ function FilterTab({ label, count, active, onClick }: { label: string; count: nu
   )
 }
 
-function ConvItem({ conv, active, isArchived, onClick, onDelete, onArchive }: {
-  conv: ConversationSummary; active: boolean; isArchived: boolean
-  onClick: () => void; onDelete: () => void; onArchive: () => void
+function ConvItem({ conv, active, isArchived, renaming, onClick, onContextMenu, onDelete, onArchive, onRenameStart, onRenameSubmit, onRenameCancel }: {
+  conv: ConversationSummary; active: boolean; isArchived: boolean; renaming: boolean
+  onClick: () => void; onContextMenu: (e: React.MouseEvent) => void
+  onDelete: () => void; onArchive: () => void
+  onRenameStart: () => void; onRenameSubmit: (title: string) => void; onRenameCancel: () => void
 }): React.ReactElement {
-  const [hovered, setHovered] = useState(false)
+  const [renameVal, setRenameVal] = useState(conv.title)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (renaming) {
+      setRenameVal(conv.title)
+      setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select() }, 0)
+    }
+  }, [renaming, conv.title])
+
+  const submit = (): void => {
+    const val = renameVal.trim()
+    if (val && val !== conv.title) onRenameSubmit(val)
+    else onRenameCancel()
+  }
 
   return (
     <div
       className={`relative w-full group rounded-sm transition-colors ${active ? 'bg-accent-dim' : 'hover:bg-overlay'}`}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onContextMenu={onContextMenu}
     >
-      <button onClick={onClick} className="w-full text-left px-2.5 py-2 flex flex-col gap-0.5 pr-16">
-        <span className={`text-sm truncate ${active ? 'text-accent-hover' : 'text-text-primary'}`}>
-          {conv.title}
-        </span>
-        <span className="text-xs text-text-muted flex gap-1.5">
-          <span>{conv.model_id?.split('/').pop()?.split('-').slice(0, 2).join('-') ?? '—'}</span>
-          {conv.message_count > 0 && <span>{conv.message_count} msgs</span>}
-        </span>
-      </button>
+      {renaming ? (
+        <div className="px-2.5 py-2">
+          <input
+            ref={inputRef}
+            value={renameVal}
+            onChange={e => setRenameVal(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') submit()
+              if (e.key === 'Escape') onRenameCancel()
+            }}
+            onBlur={submit}
+            className="w-full bg-elevated border border-accent/50 rounded-sm px-2 py-0.5 text-sm text-text-primary outline-none"
+          />
+        </div>
+      ) : (
+        <button onClick={onClick} className="w-full text-left px-2.5 py-2 flex flex-col gap-0.5 pr-16">
+          <span className={`text-sm truncate ${active ? 'text-accent-hover' : 'text-text-primary'}`}>
+            {conv.title}
+          </span>
+          <span className="text-xs text-text-muted flex gap-1.5">
+            <span>{conv.model_id?.split('/').pop()?.split('-').slice(0, 2).join('-') ?? '—'}</span>
+            {conv.message_count > 0 && <span>{conv.message_count} msgs</span>}
+          </span>
+        </button>
+      )}
 
       {/* Hover actions */}
-      {hovered && (
-        <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex gap-0.5">
-          <button
-            onClick={e => { e.stopPropagation(); onArchive() }}
-            title={isArchived ? 'Unarchive' : 'Archive'}
+      {!renaming && (
+        <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={e => { e.stopPropagation(); onRenameStart() }} title="Rename"
+            className="w-6 h-6 flex items-center justify-center rounded hover:bg-overlay text-text-muted hover:text-text-secondary cursor-pointer transition-colors">
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </button>
+          <button onClick={e => { e.stopPropagation(); onArchive() }} title={isArchived ? 'Unarchive' : 'Archive'}
             className="w-6 h-6 flex items-center justify-center rounded hover:bg-overlay text-text-muted hover:text-text-secondary cursor-pointer transition-colors">
             {isArchived ? (
               <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -116,9 +239,7 @@ function ConvItem({ conv, active, isArchived, onClick, onDelete, onArchive }: {
               </svg>
             )}
           </button>
-          <button
-            onClick={e => { e.stopPropagation(); onDelete() }}
-            title="Delete"
+          <button onClick={e => { e.stopPropagation(); onDelete() }} title="Delete"
             className="w-6 h-6 flex items-center justify-center rounded hover:bg-red/15 text-text-muted hover:text-red cursor-pointer transition-colors">
             <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
