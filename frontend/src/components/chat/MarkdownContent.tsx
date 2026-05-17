@@ -8,29 +8,21 @@ interface MarkdownContentProps { content: string }
 const components: Components = {
   // ── Headings ──────────────────────────────────────────────────────────────
   h1: ({ children }) => (
-    <h1 className="text-lg font-bold text-text-primary mt-5 mb-2 pb-1.5 border-b border-border/60 first:mt-0">
-      {children}
-    </h1>
+    <h1 className="text-xl font-bold text-text-primary mt-6 mb-3 first:mt-0">{children}</h1>
   ),
   h2: ({ children }) => (
-    <h2 className="text-base font-semibold text-text-primary mt-4 mb-2 first:mt-0">
-      {children}
-    </h2>
+    <h2 className="text-[1.05rem] font-semibold text-text-primary mt-5 mb-2 first:mt-0">{children}</h2>
   ),
   h3: ({ children }) => (
-    <h3 className="text-sm font-semibold text-text-primary mt-3 mb-1.5 first:mt-0">
-      {children}
-    </h3>
+    <h3 className="text-[0.97rem] font-semibold text-text-primary mt-4 mb-1.5 first:mt-0">{children}</h3>
   ),
   h4: ({ children }) => (
-    <h4 className="text-sm font-medium text-text-secondary mt-3 mb-1 first:mt-0">
-      {children}
-    </h4>
+    <h4 className="text-[0.92rem] font-medium text-text-secondary mt-3 mb-1 first:mt-0">{children}</h4>
   ),
 
   // ── Paragraphs ────────────────────────────────────────────────────────────
   p: ({ children }) => (
-    <p className="text-sm text-text-primary leading-relaxed mb-3 last:mb-0">
+    <p className="text-[0.92rem] text-text-primary leading-[1.7] mb-3 last:mb-0">
       {children}
     </p>
   ),
@@ -43,7 +35,7 @@ const components: Components = {
     if (!isBlock) {
       return (
         <code
-          className="font-mono text-[0.8em] bg-white/8 text-accent/90 px-1.5 py-0.5 rounded-sm border border-white/8"
+          className="font-mono text-[0.85em] bg-white/8 text-accent/80 px-1 py-px rounded"
           {...props}
         >
           {children}
@@ -52,13 +44,13 @@ const components: Components = {
     }
 
     return (
-      <div className="my-3 rounded-md overflow-hidden border border-border/60">
+      <div className="my-3 rounded-md overflow-hidden border border-border/40">
         {lang && (
-          <div className="flex items-center justify-between px-3 py-1.5 bg-elevated border-b border-border/40">
-            <span className="text-2xs font-mono text-text-muted uppercase tracking-widest">{lang}</span>
+          <div className="px-3.5 py-1.5 bg-white/4 border-b border-border/30">
+            <span className="text-xs font-mono text-text-muted/70">{lang}</span>
           </div>
         )}
-        <pre className="bg-[#0a0a0d] p-3.5 font-mono text-xs leading-relaxed overflow-x-auto m-0">
+        <pre className="bg-[#0a0a0d] p-4 font-mono text-[0.82rem] leading-relaxed overflow-x-auto m-0">
           <code className={className} {...props}>{children}</code>
         </pre>
       </div>
@@ -67,22 +59,22 @@ const components: Components = {
 
   // ── Lists ─────────────────────────────────────────────────────────────────
   ul: ({ children }) => (
-    <ul className="text-sm text-text-primary mb-3 last:mb-0 space-y-1 pl-0 list-none">
+    <ul className="text-[0.92rem] text-text-primary mb-3 last:mb-0 space-y-1.5 pl-0 list-none">
       {children}
     </ul>
   ),
   ol: ({ children }) => (
-    <ol className="text-sm text-text-primary mb-3 last:mb-0 space-y-1 pl-0 list-none counter-reset-[item]">
+    <ol className="text-[0.92rem] text-text-primary mb-3 last:mb-0 space-y-1.5 pl-0 list-none">
       {children}
     </ol>
   ),
   li: ({ children, ...props }) => {
     const isOrdered = (props as { ordered?: boolean }).ordered
     return (
-      <li className="flex gap-2.5 items-baseline leading-relaxed">
+      <li className="flex gap-2.5 items-baseline leading-[1.7]">
         {isOrdered
-          ? <span className="text-accent/70 font-mono text-xs flex-shrink-0 min-w-[1.25rem] text-right" />
-          : <span className="text-accent/70 mt-1.5 flex-shrink-0 text-xs">▸</span>
+          ? <span className="text-text-muted font-mono text-xs flex-shrink-0 min-w-[1.25rem] text-right" />
+          : <span className="text-text-muted/60 flex-shrink-0 text-[0.6rem] mt-[0.35rem]">●</span>
         }
         <span>{children}</span>
       </li>
