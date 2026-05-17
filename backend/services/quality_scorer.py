@@ -465,6 +465,45 @@ PROFILE_SCORERS = {
     "conversation":   score_conversation,
 }
 
+def _extract_conversation_facts(prompt: str) -> dict:
+    """
+    Extract known_facts from a conversation profile prompt.
+    Strategy: split on sentence boundaries and keep sentences that state facts
+    (contain numbers, names, technical terms with values).
+    """
+    facts = []
+
+    # Pattern 1 : numbered list "1) X" or "1. X"
+    numbered = re.findall(r'^\s*\d+[\.\)]\s+(.+)$', prompt, re.MULTILINE)
+    facts.extend(s.strip() for s in numbered)
+
+    # Pattern 2 : sentences containing a colon or "uses/is/runs/started" with a value
+    sentences = re.split(r'(?<=[.!?])\s+', prompt)
+    fact_indicators = re.compile(
+        r'(\d+|uses\s+\w+|is\s+\w+|runs\s+on|called\s+\w+|named\s+\w+|'
+        r'started\s+in|syncs\s+\w+|written\s+in|team\s+lead|'
+        r'port\s+\d+|timeout|expiry|regions|deadline)',
+        re.IGNORECASE
+    )
+    for s in sentences:
+        s = s.strip()
+        # Skip the question part (after "Now tell me", "Based on", "answer")
+        if re.search(r'\b(tell me|based on|answer|question)\b', s, re.IGNORECASE):
+            continue
+        if fact_indicators.search(s) and 5 < len(s) < 200:
+            facts.append(s)
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique: list[str] = []
+    for f in facts:
+        if f not in seen:
+            seen.add(f)
+            unique.append(f)
+
+    return {"known_facts": unique[:15]}
+
+
 def score_response(profile_name: str, prompt: str, response: str, context: dict | None = None) -> dict:
     """
     Route to the right scorer based on profile name.
@@ -486,8 +525,10 @@ def score_response(profile_name: str, prompt: str, response: str, context: dict 
         )
 
     try:
-        if scorer is score_conversation and context:
-            return scorer(prompt, response, context)
+        if scorer is score_conversation:
+            # Auto-extract facts from prompt if no explicit context provided
+            ctx = context or _extract_conversation_facts(prompt)
+            return scorer(prompt, response, ctx)
         return scorer(prompt, response)
     except Exception as e:
         return make_result(0, {"error": str(e)}, f"Scoring failed: {type(e).__name__}")
