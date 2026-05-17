@@ -198,82 +198,80 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
     month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
   })
   const engineLabel = r.engine === 'vllm' ? 'vLLM' : 'llama.cpp'
-  const engineColor = r.engine === 'vllm' ? 'bg-blue/15 text-blue border-blue/20' : 'bg-accent/15 text-accent border-accent/20'
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-[#111114] border border-white/8 rounded-xl w-full max-w-[520px] max-h-[92vh] overflow-y-auto shadow-2xl mx-4 mb-4 sm:mb-0">
+      <div className="relative bg-[#0f0f12] rounded-xl w-full max-w-[500px] max-h-[92vh] overflow-y-auto shadow-2xl mx-4 mb-4 sm:mb-0">
 
         {/* Top bar */}
-        <div className="sticky top-0 z-10 bg-[#111114]/95 backdrop-blur-sm border-b border-white/6 px-5 py-3.5 flex items-center justify-between">
+        <div className="sticky top-0 z-10 bg-[#0f0f12]/95 backdrop-blur-sm px-5 py-3.5 flex items-center justify-between">
           <div className="flex items-center gap-2.5 min-w-0">
-            <span className={`text-2xs font-semibold px-2 py-0.5 rounded border ${engineColor}`}>{engineLabel}</span>
+            <span className="text-2xs font-semibold text-text-muted">{engineLabel}</span>
+            <span className="text-text-muted/30">·</span>
             <span className="text-sm font-medium text-text-primary truncate">{r.model_name}</span>
           </div>
           <button onClick={onClose}
-            className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors cursor-pointer flex-shrink-0">
+            className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-white/6 text-text-muted hover:text-text-primary transition-colors cursor-pointer flex-shrink-0">
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
 
-        <div className="p-5 flex flex-col gap-5">
+        <div className="px-5 pb-5 flex flex-col gap-4">
 
-          {/* Hero — tok/s + 3 stats clés */}
-          <div className="rounded-xl bg-gradient-to-br from-white/[0.04] to-white/[0.01] border border-white/8 p-5">
-            <div className="flex items-end justify-between mb-4">
+          {/* Hero */}
+          <div className="rounded-xl bg-white/[0.03] p-5">
+            <div className="flex items-end justify-between mb-5">
               <div>
                 <div className={`text-5xl font-black font-mono tracking-tight ${speedColor(r.tok_per_sec)}`}>
                   {r.tok_per_sec}
                 </div>
-                <div className="text-xs text-text-muted mt-1">tokens / second — decode</div>
+                <div className="text-xs text-text-muted mt-1.5">tokens / second — decode</div>
               </div>
-              <div className={`flex flex-col items-end gap-1`}>
-                <span className={`text-xs font-bold px-2.5 py-1 rounded-md ${
-                  r.tok_per_sec >= 60 ? 'bg-green/15 text-green' :
-                  r.tok_per_sec >= 30 ? 'bg-yellow/15 text-yellow' : 'bg-red/15 text-red'
-                }`}>
-                  {speedLabel(r.tok_per_sec)}
-                </span>
-                <span className="text-2xs text-text-muted">{date}</span>
+              <div className="flex flex-col items-end gap-1.5">
+                <span className={`text-xs font-semibold px-2.5 py-1 rounded-md ${
+                  r.tok_per_sec >= 60 ? 'bg-green/12 text-green' :
+                  r.tok_per_sec >= 30 ? 'bg-yellow/12 text-yellow' : 'bg-red/12 text-red'
+                }`}>{speedLabel(r.tok_per_sec)}</span>
+                <span className="text-2xs text-text-muted/50">{date}</span>
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-3 gap-2">
               <HeroStat label="TTFT" value={r.ttft_ms ? `${r.ttft_ms}ms` : '—'} sub="first token" />
               <HeroStat label="Total" value={`${(r.total_ms / 1000).toFixed(2)}s`} sub="wall time" />
               <HeroStat label="Tokens" value={String(r.tokens_generated)} sub="generated" />
             </div>
           </div>
 
-          {/* Grid 2 col — Throughput + Hardware */}
+          {/* Grid 2 col */}
           <div className="grid grid-cols-2 gap-3">
             <InfoCard title="Throughput">
-              <InfoRow label="Decode" value={`${r.tok_per_sec} tok/s`} accent />
+              <InfoRow label="Decode" value={`${r.tok_per_sec} tok/s`} highlight />
               {r.prefill_tok_per_sec && <InfoRow label="Prefill" value={`${r.prefill_tok_per_sec} tok/s`} />}
-              <InfoRow label="Out tokens" value={String(r.tokens_generated)} />
-              <InfoRow label="In tokens" value={`~${r.prompt_tokens}`} dim />
+              <InfoRow label="Out" value={String(r.tokens_generated)} />
+              <InfoRow label="In" value={`~${r.prompt_tokens}`} muted />
             </InfoCard>
             <InfoCard title="Hardware">
               <InfoRow label="GPU" value={r.gpu_short || r.gpu_name} />
               <InfoRow label="VRAM" value={`${r.vram_total_gb} GB`} />
               <InfoRow label="Used" value={r.vram_used_gb != null ? `${r.vram_used_gb} GB` : '—'} />
-              <InfoRow label="Util." value={r.gpu_util_pct != null ? `${r.gpu_util_pct}%` : '—'} />
+              <InfoRow label="Util" value={r.gpu_util_pct != null ? `${r.gpu_util_pct}%` : '—'} />
             </InfoCard>
           </div>
 
-          {/* Engine params */}
-          <InfoCard title={`${engineLabel} ${r.engine_version || ''}`}>
+          {/* Engine */}
+          <InfoCard title={`${engineLabel}  ${r.engine_version || ''}`}>
             {r.engine === 'llama' && r.engine_params && (
-              <div className="grid grid-cols-2 gap-x-4">
+              <div className="grid grid-cols-2 gap-x-6">
                 <InfoRow label="n_ctx" value={String(r.engine_params.n_ctx ?? '—')} />
                 <InfoRow label="n_batch" value={String(r.engine_params.n_batch ?? 512)} />
                 <InfoRow label="GPU layers" value={r.engine_params.n_gpu_layers === -1 ? 'All' : String(r.engine_params.n_gpu_layers ?? '—')} />
-                <InfoRow label="Flash Attn" value={r.engine_params.flash_attn ? 'On' : 'Off'} accent={r.engine_params.flash_attn} />
+                <InfoRow label="Flash Attn" value={r.engine_params.flash_attn ? 'On' : 'Off'} highlight={r.engine_params.flash_attn} />
               </div>
             )}
             {r.engine === 'vllm' && r.engine_params && (
-              <div className="grid grid-cols-2 gap-x-4">
+              <div className="grid grid-cols-2 gap-x-6">
                 <InfoRow label="max_model_len" value={String(r.engine_params.max_model_len ?? '—')} />
                 {r.engine_params.gpu_memory_utilization != null && (
                   <InfoRow label="GPU util cap" value={`${Math.round(r.engine_params.gpu_memory_utilization * 100)}%`} />
@@ -282,33 +280,30 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
             )}
           </InfoCard>
 
-          {/* Bench config + prompt */}
+          {/* Bench config */}
           <InfoCard title="Benchmark config">
-            <div className="grid grid-cols-2 gap-x-4 mb-3">
+            <div className="grid grid-cols-2 gap-x-6 mb-3">
               <InfoRow label="Max tokens" value={r.bench_max_tokens != null ? String(r.bench_max_tokens) : '—'} />
               <InfoRow label="Temperature" value={r.bench_temperature != null ? String(r.bench_temperature) : '—'} />
             </div>
             {r.bench_prompt && (
-              <div className="bg-black/30 border border-white/6 rounded-lg px-3 py-2.5 text-xs text-text-muted/80 font-mono leading-relaxed italic">
+              <div className="bg-black/20 rounded-lg px-3 py-2.5 text-xs text-text-muted/60 leading-relaxed italic">
                 "{r.bench_prompt}"
               </div>
             )}
           </InfoCard>
 
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 pb-5">
+          {/* Copy */}
           <button onClick={onCopy}
-            className="w-full flex items-center justify-center gap-2 py-2.5 bg-white/4 hover:bg-white/8 border border-white/8 rounded-lg text-sm text-text-secondary hover:text-text-primary cursor-pointer transition-colors">
+            className="w-full flex items-center justify-center gap-2 py-2.5 bg-white/4 hover:bg-white/7 rounded-lg text-sm text-text-muted hover:text-text-secondary cursor-pointer transition-colors">
             {copied ? (
               <><svg className="w-3.5 h-3.5 text-green" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>Copied!</>
             ) : (
               <><svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy & share</>
             )}
           </button>
-        </div>
 
+        </div>
       </div>
     </div>
   )
@@ -317,30 +312,30 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
 function HeroStat({ label, value, sub }: { label: string; value: string; sub: string }): React.ReactElement {
   return (
     <div className="bg-black/20 rounded-lg px-3 py-2.5 text-center">
-      <div className="text-2xs text-text-muted uppercase tracking-widest mb-1">{label}</div>
-      <div className="text-base font-bold font-mono text-text-primary">{value}</div>
-      <div className="text-2xs text-text-muted/60 mt-0.5">{sub}</div>
+      <div className="text-2xs text-text-muted/50 uppercase tracking-widest mb-1">{label}</div>
+      <div className="text-sm font-bold font-mono text-text-primary">{value}</div>
+      <div className="text-2xs text-text-muted/40 mt-0.5">{sub}</div>
     </div>
   )
 }
 
 function InfoCard({ title, children }: { title: string; children: React.ReactNode }): React.ReactElement {
   return (
-    <div className="bg-white/[0.025] border border-white/6 rounded-xl p-4">
-      <div className="text-2xs font-semibold uppercase tracking-widest text-text-muted/70 mb-3">{title}</div>
+    <div className="bg-white/[0.025] rounded-xl p-4">
+      <div className="text-2xs font-medium uppercase tracking-widest text-text-muted/50 mb-3">{title}</div>
       {children}
     </div>
   )
 }
 
-function InfoRow({ label, value, accent, dim }: {
-  label: string; value: string; accent?: boolean; dim?: boolean
+function InfoRow({ label, value, highlight, muted }: {
+  label: string; value: string; highlight?: boolean; muted?: boolean
 }): React.ReactElement {
   return (
-    <div className="flex items-baseline justify-between py-1 gap-2">
-      <span className="text-xs text-text-muted/70 flex-shrink-0">{label}</span>
-      <span className={`text-xs font-mono font-semibold truncate ${
-        accent ? 'text-accent' : dim ? 'text-text-muted' : 'text-text-primary'
+    <div className="flex items-baseline justify-between py-0.5 gap-2">
+      <span className="text-xs text-text-muted/50 flex-shrink-0">{label}</span>
+      <span className={`text-xs font-mono font-medium truncate ${
+        highlight ? 'text-text-primary' : muted ? 'text-text-muted/60' : 'text-text-secondary'
       }`}>{value}</span>
     </div>
   )
