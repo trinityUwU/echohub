@@ -227,7 +227,7 @@ function InstallingStep({ logs, installing }: { logs: LogLine[]; installing: boo
 
       {/* Log box */}
       <div ref={logRef}
-        className="flex-1 bg-[#0a0a0d] border border-border rounded-md p-3 font-mono text-xs leading-relaxed overflow-y-auto">
+        className="flex-1 min-h-0 bg-[#0a0a0d] border border-border rounded-md p-3 font-mono text-xs leading-relaxed overflow-y-auto">
         {logs.map((line, i) => (
           <div key={i} className={
             line.level === 'error' ? 'text-red' :
