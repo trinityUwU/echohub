@@ -390,14 +390,36 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
                   if is_util_oom else "vLLM failed to start — check model compatibility.")
         )
 
+    # Resolve active vllm version
+    try:
+        from backend.services.vllm_manager import get_default_python as _gp
+        _active_py = str(python_override) if python_override else str(_gp())
+        _active_version = None
+        from backend.services.vllm_manager import list_versions as _lv
+        for _v in _lv():
+            if _v["path"] in _active_py:
+                _active_version = _v["version"]
+                break
+    except Exception:
+        _active_version = None
+
     _current_model = ModelInfo(
         id=model_id,
         name=model_id.split("/")[-1],
         downloaded=True,
         loaded=True,
-        max_context_window=max_model_len,  # actual context used by vLLM
+        max_context_window=max_model_len,
+        engine="vllm",
     )
-    logger.info(f"Model loaded: {model_id}")
+
+    # Persist to DB
+    try:
+        from backend.services.db import set_app_state
+        set_app_state(f"engine:{model_id}", f"vllm:{_active_version or '?'}")
+    except Exception:
+        pass
+
+    logger.info(f"Model loaded: {model_id} (vLLM {_active_version})")
 
 
 def unload_model() -> None:

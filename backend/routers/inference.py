@@ -3,6 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from backend.models.schemas import ChatRequest, LoadRequest, ModelInfo
@@ -225,3 +226,45 @@ def can_load(req: LoadRequest) -> dict:
         "gpu_type": gpu["type"],
         "vllm_available": vllm_ok,
     }
+
+
+@router.websocket("/chat/ws")
+async def chat_ws(ws: WebSocket):
+    """WebSocket alternative to SSE streaming — same protocol, better for Tauri prod."""
+    await ws.accept()
+    try:
+        req_data = await ws.receive_json()
+        req = ChatRequest(**req_data)
+
+        if engine_router.get_status() is None:
+            await ws.send_json({"error": "No model loaded"})
+            return
+
+        messages = [{"role": m.role, "content": m.content} for m in req.messages]
+        if req.system_prompt and req.system_prompt.strip():
+            messages = [{"role": "system", "content": req.system_prompt}] + messages
+
+        generate_kwargs = dict(
+            stream=True,
+            temperature=req.temperature,
+            max_tokens=req.max_tokens,
+            top_p=req.top_p,
+            top_k=req.top_k,
+            repetition_penalty=req.repetition_penalty,
+            presence_penalty=req.presence_penalty,
+            frequency_penalty=req.frequency_penalty,
+            stop=req.stop,
+        )
+
+        async for chunk in engine_router.generate(messages=messages, **generate_kwargs):
+            await ws.send_text(chunk)
+
+        await ws.send_json({"done": True})
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error(f"chat_ws error: {e}")
+        try:
+            await ws.send_json({"error": str(e)})
+        except Exception:
+            pass

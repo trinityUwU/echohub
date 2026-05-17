@@ -37,17 +37,17 @@
 - [ ] Ouvre l'app → premier lancement = onboarding automatique
 
 ### Backend (P2)
-- [ ] DB : persister vllm_version utilisée par modèle chargé
-- [ ] Badge engine dans l'UI (llama/vLLM + version visible sur modèle chargé)
-- [ ] GPU service : fallback AMD (rocm-smi) et Mac (powermetrics)
+- [x] DB : vllm_version + engine persistés par modèle chargé
+- [x] Badge engine dans l'UI (fait avec engine field)
+- [x] GPU service : fallback AMD (rocm-smi) et Mac (powermetrics + sysctl)
 
 ### Features (P2)
 - [x] HF Token : feedback + validation contre API HF (username confirmé)
 - [x] Chat export markdown (bouton Export dans topbar)
 
 ### Packaging (P3)
-- [ ] .AppImage / .deb / .dmg
-- [ ] Python sidecar WebSocket (remplacer SSE pour streaming)
+- [x] Packaging : tauri.conf.json AppImage + .deb, build.sh
+- [x] WebSocket endpoint /inference/chat/ws (SSE conservé, WS disponible)
 
 ## Backlog
 - [ ] MCP server EchoHub → Claude Code pilote les modèles locaux
