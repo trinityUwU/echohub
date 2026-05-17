@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { apiRequest } from '@/api/base'
 import { RunBenchmarkModal } from './RunBenchmarkModal'
 import { CompareView } from './CompareView'
+import { useContextMenu } from '@/components/shared/useContextMenu'
 
 interface EngineParams {
   n_ctx?: number; n_batch?: number; n_gpu_layers?: number; flash_attn?: boolean
@@ -20,6 +21,7 @@ interface BenchResult {
   bench_prompt: string; bench_max_tokens: number; bench_temperature: number
   generated_text?: string
   timestamp: number; share_text: string; _db_id?: number
+  _name?: string; _archived?: boolean
 }
 
 // Clear legacy localStorage keys
@@ -46,8 +48,10 @@ export function BenchmarkTab(): React.ReactElement {
   const [copied, setCopied] = useState(false)
   const [showRun, setShowRun] = useState(false)
   const [view, setView] = useState<'list' | 'compare'>('list')
+  const [showArchived, setShowArchived] = useState(false)
   const [filterModel, setFilterModel] = useState<string>('all')
   const [filterProfile, setFilterProfile] = useState<string>('all')
+  const [renamingId, setRenamingId] = useState<number | null>(null)
 
   useEffect(() => {
     apiRequest<BenchResult[]>('/settings/benchmarks')
@@ -56,14 +60,21 @@ export function BenchmarkTab(): React.ReactElement {
       .finally(() => setLoading(false))
   }, [])
 
-  const models = useMemo(() => Array.from(new Set(history.map(r => r.model_name))), [history])
-  const profiles = useMemo(() => Array.from(new Set(history.map(r => r.profile_name).filter(Boolean))), [history])
+  const visible = useMemo(() => history.filter(r => showArchived ? r._archived : !r._archived), [history, showArchived])
+  const models = useMemo(() => Array.from(new Set(visible.map(r => r.model_name))), [visible])
+  const profiles = useMemo(() => Array.from(new Set(visible.map(r => r.profile_name).filter(Boolean))), [visible])
+  const archivedCount = useMemo(() => history.filter(r => r._archived).length, [history])
 
-  const filtered = useMemo(() => history.filter(r => {
+  const filtered = useMemo(() => visible.filter(r => {
     if (filterModel !== 'all' && r.model_name !== filterModel) return false
     if (filterProfile !== 'all' && r.profile_name !== filterProfile) return false
     return true
-  }), [history, filterModel, filterProfile])
+  }), [visible, filterModel, filterProfile])
+
+  const patchBenchmark = async (id: number, patch: { name?: string; archived?: boolean }): Promise<void> => {
+    await apiRequest(`/settings/benchmarks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }).catch(() => {})
+    setHistory(prev => prev.map(r => r._db_id === id ? { ...r, ...patch.name !== undefined ? { _name: patch.name } : {}, ...patch.archived !== undefined ? { _archived: patch.archived } : {} } : r))
+  }
 
   const clear = async (): Promise<void> => {
     await apiRequest('/settings/benchmarks', { method: 'DELETE' }).catch(() => {})
@@ -113,7 +124,7 @@ export function BenchmarkTab(): React.ReactElement {
 
       {/* Filters */}
       {view === 'list' && history.length > 0 && (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <FilterSelect
             value={filterModel}
             onChange={setFilterModel}
@@ -124,6 +135,15 @@ export function BenchmarkTab(): React.ReactElement {
             onChange={setFilterProfile}
             options={[{ value: 'all', label: 'All profiles' }, ...profiles.map(p => ({ value: p as string, label: p as string }))]}
           />
+          {archivedCount > 0 && (
+            <button onClick={() => setShowArchived(v => !v)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-md border transition-colors cursor-pointer ${
+                showArchived ? 'border-accent/40 text-accent bg-accent/10' : 'border-border text-text-muted hover:text-text-secondary'
+              }`}>
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/></svg>
+              {showArchived ? 'Hide archived' : `Archived (${archivedCount})`}
+            </button>
+          )}
           <span className="text-xs text-text-muted ml-auto">{filtered.length} result{filtered.length !== 1 ? 's' : ''}</span>
           <button onClick={clear} className="text-xs text-text-muted hover:text-red cursor-pointer transition-colors">Clear all</button>
         </div>
@@ -134,8 +154,16 @@ export function BenchmarkTab(): React.ReactElement {
       {view === 'list' && !loading && filtered.length > 0 && (
         <div className="flex flex-col gap-2">
           {filtered.map((r, i) => (
-            <ResultCard key={`${r.timestamp}-${r.profile_id ?? i}`} result={r} isLatest={i === 0 && filterModel === 'all' && filterProfile === 'all'}
-              onClick={() => setDetail(r)} />
+            <ResultCard key={`${r.timestamp}-${r.profile_id ?? i}`} result={r}
+              isLatest={i === 0 && filterModel === 'all' && filterProfile === 'all' && !showArchived}
+              renaming={renamingId === r._db_id}
+              onClick={() => setDetail(r)}
+              onRename={() => r._db_id && setRenamingId(r._db_id)}
+              onRenameSubmit={name => { r._db_id && patchBenchmark(r._db_id, { name }); setRenamingId(null) }}
+              onRenameCancel={() => setRenamingId(null)}
+              onArchive={() => r._db_id && patchBenchmark(r._db_id, { archived: !r._archived })}
+              onDelete={() => r._db_id && apiRequest(`/settings/benchmarks/${r._db_id}`, { method: 'DELETE' }).then(() => setHistory(prev => prev.filter(x => x._db_id !== r._db_id))).catch(() => {})}
+            />
           ))}
         </div>
       )}
@@ -161,58 +189,85 @@ export function BenchmarkTab(): React.ReactElement {
   )
 }
 
-function ResultCard({ result: r, isLatest, onClick }: {
-  result: BenchResult; isLatest: boolean; onClick: () => void
+function ResultCard({ result: r, isLatest, renaming, onClick, onRename, onRenameSubmit, onRenameCancel, onArchive, onDelete }: {
+  result: BenchResult; isLatest: boolean; renaming: boolean
+  onClick: () => void; onRename: () => void
+  onRenameSubmit: (name: string) => void; onRenameCancel: () => void
+  onArchive: () => void; onDelete: () => void
 }): React.ReactElement {
+  const { open: openCtx } = useContextMenu()
+  const [renameVal, setRenameVal] = useState(r._name || r.model_name)
+  const inputRef = useRef<HTMLInputElement>(null)
   const date = new Date(r.timestamp * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 
-  return (
-    <button onClick={onClick}
-      className={`w-full text-left bg-surface border rounded-md px-4 py-3 hover:bg-elevated transition-colors cursor-pointer ${
-        isLatest ? 'border-accent/30' : 'border-border'
-      }`}>
-      <div className="flex items-center gap-3">
-        {/* Left */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            {isLatest && <span className="text-2xs text-accent font-semibold uppercase tracking-widest">latest</span>}
-            <span className="text-sm font-medium text-text-primary truncate">{r.model_name}</span>
-            {r.profile_name && <span className="text-2xs text-text-muted bg-overlay px-1.5 py-px rounded flex-shrink-0">{r.profile_name}</span>}
-          </div>
-          <div className="flex items-center gap-2 text-xs text-text-muted">
-            <span>{r.gpu_short}</span>
-            <span className="text-text-muted/40">·</span>
-            <span className={`px-1.5 py-px rounded text-2xs ${
-              r.engine === 'vllm' ? 'bg-blue/15 text-blue' : 'bg-accent/15 text-accent'
-            }`}>
-              {r.engine === 'vllm' ? 'vLLM' : 'llama.cpp'}
-            </span>
-            <span className="text-text-muted/40">·</span>
-            <span>{date}</span>
-          </div>
-        </div>
+  useEffect(() => {
+    if (renaming) {
+      setRenameVal(r._name || r.model_name)
+      setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select() }, 0)
+    }
+  }, [renaming, r._name, r.model_name])
 
-        {/* Metrics */}
-        <div className="flex items-center gap-4 flex-shrink-0">
-          <div className="text-right">
-            <div className="text-xs text-text-muted">TTFT</div>
-            <div className="text-sm font-mono font-medium text-text-primary">
-              {r.ttft_ms ? `${r.ttft_ms}ms` : '—'}
+  const handleCtx = (e: React.MouseEvent): void => {
+    openCtx(e, [
+      { label: 'Rename', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>, onClick: onRename },
+      { label: r._archived ? 'Unarchive' : 'Archive', icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/></svg>, onClick: onArchive },
+      { label: '', separator: true, onClick: () => {} },
+      { label: 'Delete', danger: true, icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M9 6V4h6v2"/></svg>, onClick: onDelete },
+    ])
+  }
+
+  const displayName = r._name || r.model_name
+
+  return (
+    <div onContextMenu={handleCtx}
+      className={`w-full bg-surface border rounded-md px-4 py-3 hover:bg-elevated transition-colors ${
+        isLatest ? 'border-accent/30' : r._archived ? 'border-border/40 opacity-60' : 'border-border'
+      }`}>
+      {renaming ? (
+        <input ref={inputRef} value={renameVal} onChange={e => setRenameVal(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') onRenameSubmit(renameVal.trim() || displayName); if (e.key === 'Escape') onRenameCancel() }}
+          onBlur={() => onRenameSubmit(renameVal.trim() || displayName)}
+          className="w-full bg-elevated border border-accent/50 rounded-sm px-2 py-1 text-sm text-text-primary outline-none"
+        />
+      ) : (
+        <button onClick={onClick} className="w-full text-left">
+          <div className="flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-0.5">
+                {isLatest && <span className="text-2xs text-accent font-semibold uppercase tracking-widest">latest</span>}
+                {r._archived && <span className="text-2xs text-text-muted bg-overlay px-1.5 py-px rounded">archived</span>}
+                <span className="text-sm font-medium text-text-primary truncate">{displayName}</span>
+                {r._name && r._name !== r.model_name && <span className="text-2xs text-text-muted/60 truncate">{r.model_name}</span>}
+                {r.profile_name && <span className="text-2xs text-text-muted bg-overlay px-1.5 py-px rounded flex-shrink-0">{r.profile_name}</span>}
+              </div>
+              <div className="flex items-center gap-2 text-xs text-text-muted">
+                <span>{r.gpu_short}</span>
+                <span className="text-text-muted/40">·</span>
+                <span className={`px-1.5 py-px rounded text-2xs ${r.engine === 'vllm' ? 'bg-blue/15 text-blue' : 'bg-accent/15 text-accent'}`}>
+                  {r.engine === 'vllm' ? 'vLLM' : 'llama.cpp'}
+                </span>
+                <span className="text-text-muted/40">·</span>
+                <span>{date}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 flex-shrink-0">
+              <div className="text-right">
+                <div className="text-xs text-text-muted">TTFT</div>
+                <div className="text-sm font-mono font-medium text-text-primary">{r.ttft_ms ? `${r.ttft_ms}ms` : '—'}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-text-muted">tokens</div>
+                <div className="text-sm font-mono font-medium text-text-primary">{r.tokens_generated}</div>
+              </div>
+              <div className="text-right min-w-[56px]">
+                <div className={`text-xl font-bold font-mono ${speedColor(r.tok_per_sec)}`}>{r.tok_per_sec}</div>
+                <div className="text-2xs text-text-muted">tok/s</div>
+              </div>
             </div>
           </div>
-          <div className="text-right">
-            <div className="text-xs text-text-muted">tokens</div>
-            <div className="text-sm font-mono font-medium text-text-primary">{r.tokens_generated}</div>
-          </div>
-          <div className="text-right min-w-[56px]">
-            <div className={`text-xl font-bold font-mono ${speedColor(r.tok_per_sec)}`}>
-              {r.tok_per_sec}
-            </div>
-            <div className="text-2xs text-text-muted">tok/s</div>
-          </div>
-        </div>
-      </div>
-    </button>
+        </button>
+      )}
+    </div>
   )
 }
 

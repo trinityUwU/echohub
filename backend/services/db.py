@@ -115,6 +115,15 @@ def init_db() -> None:
                 )
             """)
             conn.commit()
+        # Add name/archived columns to benchmarks if missing
+        bench_cols = {row[1] for row in conn.execute("PRAGMA table_info(benchmarks)")}
+        if "name" not in bench_cols:
+            conn.execute("ALTER TABLE benchmarks ADD COLUMN name TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+        if "archived" not in bench_cols:
+            conn.execute("ALTER TABLE benchmarks ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+
         if "benchmark_profiles" not in existing_tables:
             conn.execute("""
                 CREATE TABLE benchmark_profiles (
@@ -305,22 +314,41 @@ def save_benchmark(data: dict) -> int:
     return cur.lastrowid
 
 
-def get_benchmarks(limit: int = 50) -> list[dict]:
+def get_benchmarks(limit: int = 50, include_archived: bool = False) -> list[dict]:
     import json as _json
     with _lock:
         conn = _get_conn()
+        where = "" if include_archived else "WHERE archived = 0"
         rows = conn.execute(
-            "SELECT id, data, created_at FROM benchmarks ORDER BY id DESC LIMIT ?", (limit,)
+            f"SELECT id, data, created_at, name, archived FROM benchmarks {where} ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
     results = []
     for row in rows:
         try:
             d = _json.loads(row["data"])
             d["_db_id"] = row["id"]
+            d["_name"] = row["name"] or ""
+            d["_archived"] = bool(row["archived"])
             results.append(d)
         except Exception:
             pass
     return results
+
+
+def update_benchmark(bench_id: int, name: str | None = None, archived: bool | None = None) -> bool:
+    with _lock:
+        conn = _get_conn()
+        fields, values = [], []
+        if name is not None:
+            fields.append("name = ?"); values.append(name)
+        if archived is not None:
+            fields.append("archived = ?"); values.append(1 if archived else 0)
+        if not fields:
+            return False
+        values.append(bench_id)
+        conn.execute(f"UPDATE benchmarks SET {', '.join(fields)} WHERE id = ?", values)
+        conn.commit()
+    return True
 
 
 def delete_benchmark(bench_id: int) -> None:

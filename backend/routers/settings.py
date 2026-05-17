@@ -450,9 +450,9 @@ def clear_changelog() -> dict:
 # ── Benchmarks persistence ──────────────────────────────────────────────────
 
 @router.get("/benchmarks")
-def list_benchmarks() -> list:
+def list_benchmarks(archived: int = 0) -> list:
     from backend.services.db import get_benchmarks
-    return get_benchmarks(50)
+    return get_benchmarks(100, include_archived=bool(archived))
 
 
 @router.post("/benchmarks")
@@ -506,3 +506,14 @@ def delete_benchmark_profile(profile_id: int) -> dict:
     if not ok:
         raise HTTPException(status_code=403, detail="Cannot delete builtin profile or profile not found")
     return {"status": "deleted"}
+
+
+@router.patch("/benchmarks/{bench_id}")
+def patch_benchmark(bench_id: int, body: dict) -> dict:
+    from backend.services.db import update_benchmark
+    name = body.get("name")
+    archived = body.get("archived")
+    ok = update_benchmark(bench_id, name=name, archived=archived)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Benchmark not found")
+    return {"status": "updated"}
