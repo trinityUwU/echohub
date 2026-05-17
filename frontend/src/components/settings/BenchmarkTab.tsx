@@ -312,9 +312,9 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
 function HeroStat({ label, value, sub }: { label: string; value: string; sub: string }): React.ReactElement {
   return (
     <div className="bg-black/20 rounded-lg px-3 py-2.5 text-center">
-      <div className="text-2xs text-text-muted/50 uppercase tracking-widest mb-1">{label}</div>
+      <div className="text-2xs text-text-muted uppercase tracking-widest mb-1">{label}</div>
       <div className="text-sm font-bold font-mono text-text-primary">{value}</div>
-      <div className="text-2xs text-text-muted/40 mt-0.5">{sub}</div>
+      <div className="text-2xs text-text-muted/70 mt-0.5">{sub}</div>
     </div>
   )
 }
@@ -322,7 +322,7 @@ function HeroStat({ label, value, sub }: { label: string; value: string; sub: st
 function InfoCard({ title, children }: { title: string; children: React.ReactNode }): React.ReactElement {
   return (
     <div className="bg-white/[0.025] rounded-xl p-4">
-      <div className="text-2xs font-medium uppercase tracking-widest text-text-muted/50 mb-3">{title}</div>
+      <div className="text-2xs font-semibold uppercase tracking-widest text-text-muted mb-3">{title}</div>
       {children}
     </div>
   )
@@ -333,7 +333,7 @@ function InfoRow({ label, value, highlight, muted }: {
 }): React.ReactElement {
   return (
     <div className="flex items-baseline justify-between py-0.5 gap-2">
-      <span className="text-xs text-text-muted/50 flex-shrink-0">{label}</span>
+      <span className="text-xs text-text-muted flex-shrink-0">{label}</span>
       <span className={`text-xs font-mono font-medium truncate ${
         highlight ? 'text-text-primary' : muted ? 'text-text-muted/60' : 'text-text-secondary'
       }`}>{value}</span>
