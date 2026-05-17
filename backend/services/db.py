@@ -138,10 +138,18 @@ def init_db() -> None:
                 )
             """)
             conn.commit()
-        # Seed builtin profiles if none exist
-        count = conn.execute("SELECT COUNT(*) FROM benchmark_profiles WHERE builtin=1").fetchone()[0]
-        if count == 0:
-            _seed_builtin_profiles(conn)
+        # Seed builtin profiles — add any missing ones
+        existing_names = {row[0] for row in conn.execute("SELECT name FROM benchmark_profiles WHERE builtin=1")}
+        missing = [p for p in _BUILTIN_PROFILES if p["name"] not in existing_names]
+        if missing:
+            from datetime import datetime as _dt
+            now = _dt.utcnow().isoformat()
+            for p in missing:
+                conn.execute(
+                    "INSERT INTO benchmark_profiles (name, description, prompt, max_tokens, temperature, builtin, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)",
+                    (p["name"], p["description"], p["prompt"], p["max_tokens"], p["temperature"], now)
+                )
+            conn.commit()
     logger.info("DB initialized at {}", get_db_path())
 
 
@@ -428,6 +436,84 @@ _BUILTIN_PROFILES = [
             "search, and inorder traversal methods. Include type hints and docstrings."
         ),
         "max_tokens": 400,
+        "temperature": 0.0,
+    },
+    {
+        "name": "Long Context",
+        "description": "Large context window stress test — measures prefill speed on ~1500 token input.",
+        "prompt": (
+            "You are given the following codebase to review:\n\n"
+            "```python\n"
+            "import asyncio\nimport json\nimport threading\nfrom pathlib import Path\nfrom typing import Optional, List, Dict, Any\n\n"
+            "class DataPipeline:\n"
+            "    def __init__(self, config: Dict[str, Any]):\n"
+            "        self.config = config\n"
+            "        self.workers: List[threading.Thread] = []\n"
+            "        self.results: Dict[str, Any] = {}\n"
+            "        self._lock = threading.Lock()\n"
+            "        self._queue: asyncio.Queue = asyncio.Queue(maxsize=100)\n\n"
+            "    async def process_batch(self, items: List[str]) -> List[Dict]:\n"
+            "        processed = []\n"
+            "        for item in items:\n"
+            "            try:\n"
+            "                result = await self._transform(item)\n"
+            "                if result and self._validate(result):\n"
+            "                    processed.append(result)\n"
+            "                    with self._lock:\n"
+            "                        self.results[item] = result\n"
+            "            except Exception as e:\n"
+            "                print(f'Error processing {item}: {e}')\n"
+            "                continue\n"
+            "        return processed\n\n"
+            "    async def _transform(self, item: str) -> Optional[Dict]:\n"
+            "        await asyncio.sleep(0.001)\n"
+            "        parts = item.split(':')\n"
+            "        if len(parts) != 2:\n"
+            "            return None\n"
+            "        key, value = parts\n"
+            "        return {'key': key.strip(), 'value': value.strip(), 'timestamp': asyncio.get_event_loop().time()}\n\n"
+            "    def _validate(self, result: Dict) -> bool:\n"
+            "        return bool(result.get('key')) and bool(result.get('value'))\n\n"
+            "    def start_workers(self, n: int = 4) -> None:\n"
+            "        for i in range(n):\n"
+            "            t = threading.Thread(target=self._worker_loop, args=(i,), daemon=True)\n"
+            "            t.start()\n"
+            "            self.workers.append(t)\n\n"
+            "    def _worker_loop(self, worker_id: int) -> None:\n"
+            "        while True:\n"
+            "            try:\n"
+            "                item = self._queue.get_nowait()\n"
+            "                asyncio.run(self._transform(item))\n"
+            "            except Exception:\n"
+            "                threading.Event().wait(0.1)\n"
+            "```\n\n"
+            "Identify the top 3 bugs or design issues in this code and suggest fixes for each."
+        ),
+        "max_tokens": 300,
+        "temperature": 0.0,
+    },
+    {
+        "name": "Reasoning",
+        "description": "Logic and math problem — tests reasoning quality and speed.",
+        "prompt": (
+            "A train leaves station A at 9:00 AM traveling at 80 km/h toward station B. "
+            "Another train leaves station B at 9:30 AM traveling at 120 km/h toward station A. "
+            "The distance between the two stations is 420 km. "
+            "At what time will the two trains meet, and how far from station A? "
+            "Show your reasoning step by step."
+        ),
+        "max_tokens": 300,
+        "temperature": 0.0,
+    },
+    {
+        "name": "Instruction",
+        "description": "Instruction following — measures compliance and output speed on structured tasks.",
+        "prompt": (
+            "List exactly 5 best practices for writing production-ready REST APIs. "
+            "Format your response as a numbered list. Each item must be one sentence. "
+            "Do not include any introduction or conclusion."
+        ),
+        "max_tokens": 200,
         "temperature": 0.0,
     },
 ]
