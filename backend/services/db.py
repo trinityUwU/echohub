@@ -301,14 +301,31 @@ def set_app_state(key: str, value: str) -> None:
         conn.commit()
 
 
+def _auto_bench_name(data: dict) -> str:
+    """Generate default name: model-profile-date-time."""
+    from datetime import datetime
+    model = data.get("model_name", "unknown").split("/")[-1]
+    # Shorten long model names (keep first 3 segments separated by -)
+    parts = model.split("-")
+    short_model = "-".join(parts[:4]) if len(parts) > 4 else model
+    profile = data.get("profile_name", "")
+    ts = data.get("timestamp")
+    dt = datetime.utcfromtimestamp(ts) if ts else datetime.utcnow()
+    date_str = dt.strftime("%Y%m%d-%H%M")
+    if profile:
+        return f"{short_model}-{profile}-{date_str}"
+    return f"{short_model}-{date_str}"
+
+
 def save_benchmark(data: dict) -> int:
     import json as _json
     from datetime import datetime
+    name = _auto_bench_name(data)
     with _lock:
         conn = _get_conn()
         cur = conn.execute(
-            "INSERT INTO benchmarks (data, created_at) VALUES (?, ?)",
-            (_json.dumps(data), datetime.utcnow().isoformat())
+            "INSERT INTO benchmarks (data, created_at, name) VALUES (?, ?, ?)",
+            (_json.dumps(data), datetime.utcnow().isoformat(), name)
         )
         conn.commit()
     return cur.lastrowid
