@@ -42,8 +42,8 @@
 - [ ] GPU service : fallback AMD (rocm-smi) et Mac (powermetrics)
 
 ### Features (P2)
-- [ ] HF_TOKEN : feedback si token invalide
-- [ ] Chat export (markdown)
+- [x] HF Token : feedback + validation contre API HF (username confirmé)
+- [x] Chat export markdown (bouton Export dans topbar)
 
 ### Packaging (P3)
 - [ ] .AppImage / .deb / .dmg

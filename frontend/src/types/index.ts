@@ -39,6 +39,7 @@ export interface ModelInfo {
   gguf_files: GgufFile[] | null
   more_from_author: ModelStub[] | null
   gated: boolean
+  engine?: string | null
 }
 
 export interface DownloadRequest {

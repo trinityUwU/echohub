@@ -8,14 +8,15 @@ interface ChatTopBarProps {
   onOpenLoad: () => void
   onClear: () => void
   onEject: () => void
+  onExport: () => void
 }
 
-export function ChatTopBar({ loadedModel, loading, loadingPct, onOpenPicker, onOpenLoad, onClear, onEject }: ChatTopBarProps): React.ReactElement {
+export function ChatTopBar({ loadedModel, loading, loadingPct, onOpenPicker, onOpenLoad, onClear, onEject, onExport }: ChatTopBarProps): React.ReactElement {
   if (loading) return <LoadingBar pct={loadingPct} modelName={loadedModel?.name ?? '…'} onEject={onEject} />
-  return <NormalBar loadedModel={loadedModel} onOpenPicker={onOpenPicker} onOpenLoad={onOpenLoad} onClear={onClear} onEject={onEject} />
+  return <NormalBar loadedModel={loadedModel} onOpenPicker={onOpenPicker} onOpenLoad={onOpenLoad} onClear={onClear} onEject={onEject} onExport={onExport} />
 }
 
-function NormalBar({ loadedModel, onOpenPicker, onOpenLoad, onClear, onEject }: Pick<ChatTopBarProps, 'loadedModel' | 'onOpenPicker' | 'onOpenLoad' | 'onClear' | 'onEject'>): React.ReactElement {
+function NormalBar({ loadedModel, onOpenPicker, onOpenLoad, onClear, onEject, onExport }: Pick<ChatTopBarProps, 'loadedModel' | 'onOpenPicker' | 'onOpenLoad' | 'onClear' | 'onEject' | 'onExport'>): React.ReactElement {
   return (
     <div className="h-[50px] bg-surface border-b border-border flex items-center px-4 gap-2.5 flex-shrink-0">
       <button
@@ -27,6 +28,13 @@ function NormalBar({ loadedModel, onOpenPicker, onOpenLoad, onClear, onEject }: 
         </span>
         {loadedModel && (
           <span className="text-2xs bg-green/15 text-green rounded px-1.5 py-px">loaded</span>
+        )}
+        {loadedModel?.engine && (
+          <span className={`text-2xs rounded px-1.5 py-px ${
+            loadedModel.engine === 'vllm' ? 'bg-blue/15 text-blue' : 'bg-accent/15 text-accent'
+          }`}>
+            {loadedModel.engine === 'vllm' ? 'vLLM' : 'llama.cpp'}
+          </span>
         )}
         <svg className="w-3.5 h-3.5 stroke-text-muted" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="6 9 12 15 18 9"/>
@@ -43,6 +51,10 @@ function NormalBar({ loadedModel, onOpenPicker, onOpenLoad, onClear, onEject }: 
             Eject
           </TopBarBtn>
         )}
+        <TopBarBtn onClick={onExport}>
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+          Export
+        </TopBarBtn>
         <TopBarBtn onClick={onClear}>
           <polyline points="1 4 1 10 7 10"/>
           <path d="M3.51 15a9 9 0 1 0 .49-5.01"/>

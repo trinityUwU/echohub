@@ -154,11 +154,14 @@ def set_active_engine(engine: Optional[str]) -> None:
 
 def get_status() -> Optional[ModelInfo]:
     from backend.services import llama_service, vllm_service
+    info = None
     if _active_engine == "llama":
-        return llama_service.get_status()
-    if _active_engine == "vllm":
-        return vllm_service.get_status()
-    return None
+        info = llama_service.get_status()
+    elif _active_engine == "vllm":
+        info = vllm_service.get_status()
+    if info is not None:
+        info.engine = _active_engine
+    return info
 
 
 def get_load_state() -> dict:

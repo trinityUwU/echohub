@@ -66,6 +66,25 @@ export function ChatPage({
 
   const handleClear = (): void => { setMessages([]); setActiveMessages([]) }
 
+  const handleExport = (): void => {
+    const lines: string[] = []
+    const modelName = loadedModel?.name ?? 'Unknown model'
+    lines.push(`# Chat export — ${modelName}`)
+    lines.push(`*Exported: ${new Date().toLocaleString()}*\n`)
+    for (const msg of messages) {
+      const role = msg.role === 'user' ? '**You**' : `**${modelName}**`
+      const text = typeof msg.content === 'string' ? msg.content : msg.content.find(p => p.type === 'text')?.text ?? ''
+      lines.push(`### ${role}\n${text}\n`)
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `echohub-chat-${Date.now()}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="flex flex-1 overflow-hidden">
       <ConvSidebar
@@ -84,6 +103,7 @@ export function ChatPage({
           onOpenLoad={onOpenLoad}
           onClear={handleClear}
           onEject={onEject}
+          onExport={handleExport}
         />
         {!hasCuda && <CpuBanner onGoToSettings={onGoToSettings} />}
         <MigrationBanner onGoToSettings={onGoToSettings} />

@@ -33,6 +33,7 @@ class ModelInfo(BaseModel):
     gguf_files: Optional[list[dict]] = None     # [{"name": "...", "size_gb": 4.2, "variant": "Q4_K_M"}]
     more_from_author: Optional[list[dict]] = None  # [{"id": "...", "downloads": 123, "likes": 5}]
     gated: bool = False  # modèle nécessitant acceptation de licence sur HF
+    engine: Optional[str] = None  # "llama" | "vllm" | None
 
 
 class DownloadRequest(BaseModel):

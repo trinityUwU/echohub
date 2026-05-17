@@ -292,3 +292,27 @@ def reset_onboarding() -> dict:
     from backend.services.db import set_app_state
     set_app_state("onboarding_complete", "false")
     return {"status": "reset"}
+
+
+@router.post("/hf-token/validate")
+def validate_hf_token() -> dict:
+    """Test the current HF token against the HF API."""
+    import httpx
+    token = os.getenv("HF_TOKEN", "")
+    if not token:
+        return {"valid": False, "reason": "No token set", "username": None}
+    try:
+        r = httpx.get(
+            "https://huggingface.co/api/whoami-v2",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=8,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            return {"valid": True, "reason": None, "username": data.get("name")}
+        elif r.status_code == 401:
+            return {"valid": False, "reason": "Invalid token — check your HuggingFace account", "username": None}
+        else:
+            return {"valid": False, "reason": f"HF API returned {r.status_code}", "username": None}
+    except Exception as e:
+        return {"valid": False, "reason": f"Network error: {e}", "username": None}

@@ -61,11 +61,66 @@ function SetupSection(): React.ReactElement {
         <SetupCard title="Python environment" status="warn" desc={<>Isolated venv at <code className="font-mono text-xs bg-white/7 px-1 py-px rounded-sm">backend/.venv</code></>} />
       </SettingsGroup>
       <SettingsGroup title="Hugging Face" desc="Required for gated models and faster downloads.">
-        <SettingsRow label="HF Token" desc="Access gated models (Llama, Gemma…)">
-          <input type="password" defaultValue="hf_••••••••••••••" className="w-[200px] bg-elevated border border-border focus:border-border-hover rounded-sm px-2.5 py-1.5 text-sm font-mono text-text-primary outline-none transition-colors" />
-        </SettingsRow>
+        <HfTokenRow />
       </SettingsGroup>
     </>
+  )
+}
+
+function HfTokenRow(): React.ReactElement {
+  const [token, setToken] = useState("")
+  const [status, setStatus] = useState<"idle"|"saving"|"validating"|"ok"|"error">("idle")
+  const [message, setMessage] = useState("")
+  const [preview, setPreview] = useState("")
+
+  useEffect(() => {
+    apiRequest<{token_set: boolean; token_preview: string}>("/settings/hf-token")
+      .then(r => { if (r.token_set) setPreview(r.token_preview) })
+      .catch(() => {})
+  }, [])
+
+  const save = async (): Promise<void> => {
+    setStatus("saving")
+    try {
+      await apiRequest("/settings/hf-token", { method: "POST", body: JSON.stringify({ token }) })
+      setStatus("validating")
+      setMessage("Validating…")
+      const v = await apiRequest<{valid: boolean; reason: string|null; username: string|null}>("/settings/hf-token/validate")
+      if (v.valid) {
+        setStatus("ok")
+        setMessage(`✓ Connected as ${v.username}`)
+        setPreview(token.slice(0, 6) + "…" + token.slice(-4))
+        setToken("")
+      } else {
+        setStatus("error")
+        setMessage(v.reason ?? "Invalid token")
+      }
+    } catch {
+      setStatus("error")
+      setMessage("Failed to save")
+    }
+  }
+
+  return (
+    <SettingsRow label="HF Token" desc={preview ? `Active: ${preview}` : "Access gated models (Llama, Gemma…)"}>
+      <div className="flex flex-col items-end gap-1.5">
+        <div className="flex gap-2">
+          <input type="password" value={token} onChange={e => setToken(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && token && save()}
+            placeholder="hf_…"
+            className="w-[180px] bg-elevated border border-border focus:border-accent rounded-sm px-2.5 py-1.5 text-sm font-mono text-text-primary outline-none transition-colors" />
+          <button onClick={save} disabled={!token || status === "saving" || status === "validating"}
+            className="px-3 py-1.5 text-xs rounded-sm bg-accent hover:bg-accent-hover disabled:opacity-40 text-white cursor-pointer transition-colors">
+            {status === "saving" || status === "validating" ? "…" : "Save"}
+          </button>
+        </div>
+        {message && (
+          <span className={`text-xs ${status === "ok" ? "text-green" : status === "error" ? "text-red" : "text-text-muted"}`}>
+            {message}
+          </span>
+        )}
+      </div>
+    </SettingsRow>
   )
 }
 
