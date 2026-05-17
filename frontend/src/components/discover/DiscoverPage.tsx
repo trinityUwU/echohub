@@ -69,8 +69,11 @@ export function DiscoverPage({ onLoad, onDownloaded, downloadJobs, vramTotalGb, 
         setResults(prev => [...prev, ...data])
       }
       setHasMore(data.length === PAGE_SIZE)
-    } catch {
-      if (ticket === searchRef.current) setHasMore(false)
+    } catch (e) {
+      if (ticket === searchRef.current) {
+        setHasMore(false)
+        console.error('Search failed:', e)
+      }
     } finally {
       if (ticket === searchRef.current) setLoading(false)
     }

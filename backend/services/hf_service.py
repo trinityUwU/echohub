@@ -456,7 +456,8 @@ def search_models(
         return deduped[start:start + page_size]
 
     except Exception as e:
-        logger.error(f"hf_service.search_models error: {e}")
+        import traceback
+        logger.error(f"hf_service.search_models error: {e}\n{traceback.format_exc()}")
         return []
         raise
 
