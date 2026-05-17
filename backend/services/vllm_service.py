@@ -511,7 +511,10 @@ async def generate(
                 f"{VLLM_BASE_URL}/v1/chat/completions",
                 json=payload,
             ) as resp:
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    body = await resp.aread()
+                    logger.error(f"vLLM {resp.status_code}: {body.decode(errors='replace')} | payload_msgs={[m['role'] for m in payload.get('messages', [])]}")
+                    resp.raise_for_status()
                 async for line in resp.aiter_lines():
                     if line:
                         yield line
@@ -521,6 +524,8 @@ async def generate(
                 f"{VLLM_BASE_URL}/v1/chat/completions",
                 json=payload,
             )
+            if resp.status_code >= 400:
+                logger.error(f"vLLM {resp.status_code}: {resp.text} | payload_msgs={[m['role'] for m in payload.get('messages', [])]}")
             resp.raise_for_status()
             yield resp.json()
 
