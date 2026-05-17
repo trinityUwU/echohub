@@ -75,7 +75,12 @@ export function PathsTab(): React.ReactElement {
 
   const handleCancel = async (): Promise<void> => {
     await cancelMigration()
-    await refresh()
+    setMigrating(false)
+    // Give backend a moment to finish rollback, then clean state
+    setTimeout(async () => {
+      await cleanupMigration()
+      await refresh()
+    }, 2000)
   }
 
   const pct = migration.files_total
@@ -119,7 +124,7 @@ export function PathsTab(): React.ReactElement {
       </div>
 
       {/* Migration panel */}
-      {migration.status !== 'idle' && migration.status !== 'complete' && (
+      {migration.status !== 'idle' && migration.status !== 'complete' && migration.status !== 'cancelled' && (
         <MigrationPanel
           migration={migration}
           migrating={migrating}
@@ -190,6 +195,12 @@ function MigrationPanel({ migration, migrating, pct, logs, logsRef, onStart, onC
               Migrate now
             </button>
           </div>
+        )}
+        {isInProgress && (
+          <button onClick={onCancel}
+            className="flex-shrink-0 px-3 py-1.5 text-xs rounded-sm border border-red/30 text-red hover:bg-red/10 cursor-pointer transition-colors">
+            Cancel &amp; rollback
+          </button>
         )}
       </div>
 
