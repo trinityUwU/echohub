@@ -17,6 +17,8 @@ from loguru import logger
 
 from backend.models.schemas import ModelInfo
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Format detection
 # ──────────────────────────────────────────────────────────────────────────────
@@ -122,9 +124,9 @@ def is_vllm_available() -> bool:
         from backend.services.vllm_manager import list_versions
         return any(v["installed"] for v in list_versions())
     except Exception:
-        # Fallback: check legacy path
+        # Fallback: check legacy path relative to project root
         import glob as _glob
-        legacy = Path("/mnt/projects/echohub/.venv-vllm")
+        legacy = Path(__file__).resolve().parents[3] / ".venv-vllm"
         if (legacy / "bin" / "python").exists():
             for sp in legacy.glob("lib/python*/site-packages"):
                 if (sp / "vllm").is_dir() or _glob.glob(str(sp / "vllm-*.dist-info")):
@@ -267,7 +269,7 @@ def get_engine_log(n_lines: int = 100) -> str:
     if _active_engine == "llama":
         return llama_service.get_log(n_lines)
     if _active_engine == "vllm":
-        log_path = Path("/mnt/projects/echohub/logs/vllm.log")
+        log_path = _PROJECT_ROOT / "logs" / "vllm.log"
         if not log_path.exists():
             return ""
         lines = log_path.read_text(errors="replace").splitlines()

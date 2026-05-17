@@ -25,15 +25,16 @@ def _get_vllm_python(version: Optional[str] = None) -> Path:
                 return py
         return get_default_python()
     except Exception:
-        # Fallback to legacy path
-        legacy = Path("/mnt/projects/echohub/.venv-vllm/bin/python")
+        # Fallback to legacy path relative to project root
+        legacy = Path(__file__).resolve().parents[3] / ".venv-vllm" / "bin" / "python"
         if legacy.exists():
             return legacy
         raise FileNotFoundError("No vLLM installation found")
 
 
 # Kept for backward compat — actual path resolved dynamically
-VLLM_PYTHON = Path("/mnt/projects/echohub/.venv-vllm/bin/python")
+VLLM_PYTHON = Path(__file__).resolve().parents[3] / ".venv-vllm" / "bin" / "python"
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 VRAM_SAFETY_MARGIN = 0.03   # 3% of total reserved
 VRAM_FIXED_OVERHEAD_MB = 1536  # 1.5GB fixed: vLLM process startup, NCCL, CUDA graphs
 VRAM_SAMPLE_WINDOW = 10    # last N nvidia-smi samples for baseline
@@ -179,7 +180,7 @@ def _parse_suggested_max_len(log_content: str = "") -> Optional[int]:
     import re
     if not log_content:
         try:
-            log_content = Path("/mnt/projects/echohub/logs/vllm.log").read_text(errors="replace")
+            log_content = (_PROJECT_ROOT / "logs" / "vllm.log").read_text(errors="replace")
         except Exception:
             return None
     m = re.search(r'estimated maximum model length is (\d+)', log_content)
@@ -318,7 +319,7 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
 
     logger.info(f"Starting vLLM: {' '.join(cmd)}")
 
-    log_path = Path("/mnt/projects/echohub/logs/vllm.log")
+    log_path = _PROJECT_ROOT / "logs" / "vllm.log"
     log_file = open(log_path, "w")
     _vllm_log_path = log_path  # store for _parse_suggested_max_len
 

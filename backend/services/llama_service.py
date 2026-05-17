@@ -39,7 +39,7 @@ _load_error: Optional[str] = None
 _eject_requested: bool = False
 _lock = threading.Lock()
 
-LOG_PATH = Path("/mnt/projects/echohub/logs/llama.log")
+LOG_PATH = Path(__file__).resolve().parents[3] / "logs" / "llama.log"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GPU layer mapping
