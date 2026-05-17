@@ -18,10 +18,17 @@ interface BenchResult {
   timestamp: number; share_text: string
 }
 
-const STORAGE_KEY = 'echohub:benchmarks_v2'
+const STORAGE_KEY = 'echohub:benchmarks_v3'
 
 function loadHistory(): BenchResult[] {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') } catch { return [] }
+  // Clear old keys from previous formats
+  localStorage.removeItem('echohub:benchmarks')
+  localStorage.removeItem('echohub:benchmarks_v2')
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
+    // Filter out entries missing required v3 fields
+    return raw.filter((r: BenchResult) => r.engine_version !== undefined && r.decode_ms !== undefined)
+  } catch { return [] }
 }
 function saveHistory(h: BenchResult[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(h.slice(0, 20)))
@@ -230,7 +237,7 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
           {/* Timing */}
           <Section title="Timing">
             <MetricRow label="Time to first token (TTFT)" value={r.ttft_ms ? `${r.ttft_ms} ms` : '—'} note="prefill latency" />
-            <MetricRow label="Decode time" value={`${r.decode_ms} ms`} note={`${r.tokens_generated} tokens`} />
+            <MetricRow label="Decode time" value={r.decode_ms != null ? `${r.decode_ms} ms` : '—'} note={`${r.tokens_generated} tokens`} />
             <MetricRow label="Total time" value={`${(r.total_ms / 1000).toFixed(2)} s`} />
           </Section>
 
@@ -248,18 +255,14 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
           <Section title="Hardware">
             <MetricRow label="GPU" value={r.gpu_name} />
             <MetricRow label="VRAM total" value={`${r.vram_total_gb} GB`} />
-            {r.vram_used_gb !== null && (
-              <MetricRow label="VRAM used (at bench start)" value={`${r.vram_used_gb} GB`} />
-            )}
-            {r.gpu_util_pct !== null && (
-              <MetricRow label="GPU utilization" value={`${r.gpu_util_pct}%`} />
-            )}
+            <MetricRow label="VRAM used (at bench start)" value={r.vram_used_gb != null ? `${r.vram_used_gb} GB` : '—'} />
+            <MetricRow label="GPU utilization" value={r.gpu_util_pct != null ? `${r.gpu_util_pct}%` : '—'} />
           </Section>
 
           {/* Engine */}
           <Section title="Engine">
             <MetricRow label="Engine" value={r.engine === 'vllm' ? 'vLLM' : 'llama.cpp'} />
-            <MetricRow label="Version" value={r.engine_version} />
+            <MetricRow label="Version" value={r.engine_version || '—'} />
             {r.engine === 'llama' && r.engine_params && (
               <>
                 <MetricRow label="Context length (n_ctx)" value={String(r.engine_params.n_ctx ?? '—')} />
@@ -280,8 +283,8 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
 
           {/* Bench config */}
           <Section title="Benchmark config">
-            <MetricRow label="Max tokens" value={String(r.bench_max_tokens)} />
-            <MetricRow label="Temperature" value={String(r.bench_temperature)} />
+            <MetricRow label="Max tokens" value={r.bench_max_tokens != null ? String(r.bench_max_tokens) : '—'} />
+            <MetricRow label="Temperature" value={r.bench_temperature != null ? String(r.bench_temperature) : '—'} />
             <div className="mt-2">
               <div className="text-xs text-text-muted mb-1">Prompt</div>
               <div className="bg-elevated border border-border rounded-sm px-3 py-2 text-xs text-text-secondary font-mono leading-relaxed">

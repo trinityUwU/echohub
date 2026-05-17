@@ -317,12 +317,21 @@ async def run_benchmark() -> dict:
             temperature=0.0,
             max_tokens=MAX_TOKENS,
         ):
-            if chunk and isinstance(chunk, str):
-                if first_token_time is None and '"content":"' in chunk:
-                    m = _re.search(r'"content":"([^"\\])', chunk)
-                    if m:
-                        first_token_time = time.perf_counter()
-                decode_tokens += 1
+            if not chunk:
+                continue
+            # Detect first token — works with both SSE strings and raw dicts
+            if first_token_time is None:
+                has_content = False
+                if isinstance(chunk, str):
+                    # SSE format: data: {"choices":[{"delta":{"content":"..."}}]}
+                    m = _re.search(r'"content"\s*:\s*"([^"]+)"', chunk)
+                    has_content = bool(m and m.group(1).strip())
+                elif isinstance(chunk, dict):
+                    delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                    has_content = bool(delta and delta.strip())
+                if has_content:
+                    first_token_time = time.perf_counter()
+            decode_tokens += 1
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Benchmark failed: {e}")
 
