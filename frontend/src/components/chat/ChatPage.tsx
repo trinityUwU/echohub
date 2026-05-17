@@ -55,7 +55,7 @@ export function ChatPage({
   const activeConv = conversations.find(cv => cv.id === activeId)
   const activeModelName = loadedModel?.name ?? activeConv?.model_id?.split('/').pop() ?? null
 
-  const { messages, streaming, stats, send, stop, setMessages } = useChat(
+  const { messages, streaming, stats, send, sendFromHistory, stop, setMessages } = useChat(
     params,
     activeMessages,
     setActiveMessages,
@@ -75,6 +75,23 @@ export function ChatPage({
   }, [messages])
 
   const handleClear = (): void => { setMessages([]); setActiveMessages([]) }
+
+  const handleRegenerate = (): void => {
+    const lastAssistant = [...messages].reverse().findIndex(m => m.role === 'assistant')
+    if (lastAssistant === -1 || !loadedModel) return
+    const idx = messages.length - 1 - lastAssistant
+    const history = messages.slice(0, idx)
+    setActiveMessages(history)
+    sendFromHistory(history)
+  }
+
+  const handleEditUser = (index: number, newText: string): void => {
+    if (!loadedModel) return
+    const updated = { ...messages[index], content: newText }
+    const history = [...messages.slice(0, index), updated]
+    setActiveMessages(history)
+    sendFromHistory(history)
+  }
 
   const handleExport = (): void => {
     const lines: string[] = []
@@ -125,8 +142,12 @@ export function ChatPage({
             <MessageRow
               key={msg.id ?? i}
               message={msg}
+              isLast={i === messages.length - 1}
               genStats={i === messages.length - 1 && msg.role === 'assistant' ? stats : undefined}
               modelName={activeModelName}
+              streaming={streaming}
+              onRegenerate={msg.role === 'assistant' && i === messages.length - 1 ? handleRegenerate : undefined}
+              onEditUser={msg.role === 'user' ? (text: string) => handleEditUser(i, text) : undefined}
             />
           ))}
           <div ref={bottomRef} />

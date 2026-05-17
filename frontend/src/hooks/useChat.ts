@@ -234,6 +234,50 @@ export function useChat(
     setStreaming(false)
   }, [])
 
+  const sendFromHistory = useCallback(async (history: ChatMessage[]) => {
+    setError(null)
+    setStats(null)
+    setMessages(history)
+
+    const assistantMsg: ChatMessage = { role: 'assistant', content: '' }
+    setMessages(prev => [...prev, assistantMsg])
+    setStreaming(true)
+
+    const controller = new AbortController()
+    abortRef.current = controller
+    let accumulated = ''
+    const assistantMsgId = crypto.randomUUID()
+
+    await chatStream(
+      { messages: history, stream: true },
+      params,
+      (chunk) => {
+        accumulated += chunk
+        setMessages(prev => {
+          const updated = [...prev]
+          updated[updated.length - 1] = { role: 'assistant', content: accumulated, id: assistantMsgId }
+          return updated
+        })
+      },
+      (generationStats) => {
+        setStats(generationStats)
+        setStreaming(false)
+        const final = [...history, { role: 'assistant' as const, content: accumulated, id: assistantMsgId }]
+        onMessagesChange?.(final)
+        if (convId) {
+          addMessage(convId, {
+            id: assistantMsgId, role: 'assistant', content: accumulated,
+            stats: { tokens: generationStats.tokensGenerated, tok_per_sec: generationStats.tokensPerSecond, time_ms: generationStats.timeMs, prompt_tokens: generationStats.promptTokens },
+          }).catch(() => {})
+        }
+      },
+      (err) => { setError(err.message); setStreaming(false) },
+      modelId,
+      controller.signal,
+    )
+    abortRef.current = null
+  }, [params, onMessagesChange, modelId, convId])
+
   return {
     messages,
     setMessages: setMessagesExternal,
@@ -243,6 +287,7 @@ export function useChat(
     stats,
     lastCompact,
     send,
+    sendFromHistory,
     stop,
     clear,
   }
