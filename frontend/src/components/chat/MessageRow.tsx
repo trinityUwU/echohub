@@ -5,9 +5,10 @@ import { ThinkingBlock } from './ThinkingBlock'
 interface MessageRowProps {
   message: ChatMessage
   genStats?: GenerationStats | null
+  showThinking?: boolean
 }
 
-export function MessageRow({ message, genStats }: MessageRowProps): React.ReactElement {
+export function MessageRow({ message, genStats, showThinking = true }: MessageRowProps): React.ReactElement {
   const isUser = message.role === 'user'
   const text = typeof message.content === 'string'
     ? message.content
@@ -18,11 +19,17 @@ export function MessageRow({ message, genStats }: MessageRowProps): React.ReactE
 
   const thinkMatch   = text.match(/^<think>([\s\S]*?)<\/think>([\s\S]*)$/s)
   const thinkOpen    = !thinkMatch && text.startsWith('<think>')  // still streaming inside <think>
-  const visibleText  = thinkMatch
+
+  // If thinking is disabled, strip <think>...</think> entirely and show only the answer
+  const visibleText  = !showThinking && thinkMatch
     ? thinkMatch[2].trim()
-    : thinkOpen
-      ? ''   // hide raw <think> content while streaming
-      : text
+    : !showThinking && thinkOpen
+      ? ''  // still generating — nothing to show yet
+      : thinkMatch
+        ? thinkMatch[2].trim()
+        : thinkOpen
+          ? ''
+          : text
 
   return (
     <div className={`flex px-5 py-1.5 gap-3 hover:bg-white/[0.02] transition-colors ${isUser ? 'flex-row-reverse' : ''}`}>
@@ -35,7 +42,7 @@ export function MessageRow({ message, genStats }: MessageRowProps): React.ReactE
             ))}
           </div>
         )}
-        {(thinkMatch || thinkOpen) && !isUser && (
+        {showThinking && (thinkMatch || thinkOpen) && !isUser && (
           <ThinkingBlock content={thinkMatch ? thinkMatch[1] : text.slice(7)} streaming={thinkOpen} />
         )}
         <div className={`rounded-md px-3.5 py-2.5 text-md leading-relaxed border ${
