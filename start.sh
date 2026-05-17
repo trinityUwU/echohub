@@ -175,7 +175,7 @@ else
         bun run build
     fi
     log_step "Building Tauri app..."
-    cargo tauri build 2>&1 | tee "$LOG/tauri-build.log" | tail -5
+    cargo tauri build --no-bundle 2>&1 | tee "$LOG/tauri-build.log" | tail -5
     # Launch the built binary
     BINARY=$(find src-tauri/target/release -maxdepth 1 -name "app" -o -name "echohub" 2>/dev/null | head -1)
     if [[ -n "$BINARY" ]]; then

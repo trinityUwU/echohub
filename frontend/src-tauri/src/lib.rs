@@ -121,15 +121,12 @@ fn get_child_arc(app: &AppHandle) -> Arc<Mutex<Option<tauri_plugin_shell::proces
     Arc::clone(&state.child)
 }
 
-fn locate_project_root(app: &AppHandle) -> String {
-    if cfg!(debug_assertions) {
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.ancestors().nth(5).map(|a| a.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| "/mnt/projects/echohub".to_string())
-    } else {
-        app.path().resource_dir()
+fn locate_project_root(_app: &AppHandle) -> String {
+    // Binary is at <root>/frontend/src-tauri/target/{profile}/app — nth(5) = project root
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.ancestors().nth(5).map(|a| a.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| std::env::current_dir()
             .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| "/mnt/projects/echohub".to_string())
-    }
+            .unwrap_or_else(|_| ".".to_string()))
 }
