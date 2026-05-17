@@ -35,6 +35,7 @@ export function DiscoverPage({ onLoad, onDownloaded, downloadJobs, vramTotalGb, 
   const [selectedFull, setSelectedFull] = useState<ModelInfo | null>(null)
   const { favorites, isFavorite, toggleFavorite } = useFavorites()
   const searchRef = useRef(0)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
   const toggleFilter = (f: string): void => {
     setActiveFilters(prev => {
@@ -63,12 +64,9 @@ export function DiscoverPage({ onLoad, onDownloaded, downloadJobs, vramTotalGb, 
       const filterArr = Array.from(filters).map(f => f.toLowerCase())
       const data = await searchModels(q, filterArr, pg, sk, sd)
       if (ticket !== searchRef.current) return  // stale
-      if (pg === 0) {
-        setResults(data)
-      } else {
-        setResults(prev => [...prev, ...data])
-      }
+      setResults(data)
       setHasMore(data.length === PAGE_SIZE)
+      scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (e) {
       if (ticket === searchRef.current) {
         setHasMore(false)
@@ -157,7 +155,7 @@ export function DiscoverPage({ onLoad, onDownloaded, downloadJobs, vramTotalGb, 
         </div>
 
         {/* Grid */}
-        <div className="flex-1 overflow-y-auto p-5">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-5">
           {showFavs && favorites.length === 0 && (
             <div className="text-center text-text-muted py-16 text-sm">No favorites yet — click ★ on any model</div>
           )}
