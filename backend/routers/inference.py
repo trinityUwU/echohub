@@ -273,72 +273,133 @@ async def chat_ws(ws: WebSocket):
 @router.post("/benchmark")
 async def run_benchmark() -> dict:
     """
-    Run a standardized performance benchmark on the currently loaded model.
-    Returns tok/s, TTFT, hardware info, and a shareable summary string.
+    Run a standardized benchmark. Returns full metrics: tok/s, TTFT, prefill/decode speeds,
+    engine params (n_ctx, n_batch, flash_attn, gpu_layers, gpu_memory_utilization),
+    VRAM used, engine version, prompt info.
     """
+    import re as _re
     import time
+    import importlib.metadata
     from backend.services import engine_router, gpu_service
 
     if engine_router.get_status() is None:
         raise HTTPException(status_code=404, detail="No model loaded — load a model first.")
 
     model = engine_router.get_status()
+    active_engine = engine_router.get_active_engine()  # "llama" | "vllm"
+
     gpu = None
     try:
         gpu = gpu_service.get_gpu_stats()
     except Exception:
         pass
 
-    # Standard prompt — long enough to get meaningful tok/s, short enough to be fast
+    # VRAM snapshot before bench
+    vram_used_mb = gpu.vram_used_mb if gpu else None
+
     BENCH_PROMPT = (
         "Write a detailed explanation of how transformers work in machine learning, "
         "including attention mechanisms, positional encoding, and training objectives. "
         "Be thorough and technical."
     )
+    PROMPT_TOKENS = 35  # approximate — llama.cpp tokenizer not exposed here
     MAX_TOKENS = 200
 
     messages = [{"role": "user", "content": BENCH_PROMPT}]
     start = time.perf_counter()
     first_token_time = None
-    tokens = 0
+    decode_tokens = 0
 
     try:
         async for chunk in engine_router.generate(
             messages=messages,
             stream=True,
-            temperature=0.0,  # greedy — deterministic, max speed
+            temperature=0.0,
             max_tokens=MAX_TOKENS,
         ):
-            if chunk and isinstance(chunk, str) and '"content":"' in chunk:
-                import json as _json, re as _re
-                m = _re.search(r'"content":"([^"]+)"', chunk)
-                if m and first_token_time is None:
-                    first_token_time = time.perf_counter()
-            tokens += 1
+            if chunk and isinstance(chunk, str):
+                if first_token_time is None and '"content":"' in chunk:
+                    m = _re.search(r'"content":"([^"\\])', chunk)
+                    if m:
+                        first_token_time = time.perf_counter()
+                decode_tokens += 1
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Benchmark failed: {e}")
 
     end = time.perf_counter()
+
     total_ms = round((end - start) * 1000)
     ttft_ms = round((first_token_time - start) * 1000) if first_token_time else None
-    gen_ms = round((end - (first_token_time or start)) * 1000)
-    tok_per_sec = round(tokens / max(gen_ms / 1000, 0.001), 1)
+    prefill_ms = ttft_ms  # prefill = time to first token
+    decode_ms = round((end - (first_token_time or start)) * 1000)
+    tok_per_sec = round(decode_tokens / max(decode_ms / 1000, 0.001), 1)
+    prefill_tok_per_sec = round(PROMPT_TOKENS / max((prefill_ms or 1) / 1000, 0.001), 1) if prefill_ms else None
 
-    result = {
+    # Engine-specific params
+    engine_params: dict = {}
+    engine_version = "unknown"
+
+    if active_engine == "llama":
+        try:
+            from backend.services import llama_service
+            engine_version = importlib.metadata.version("llama_cpp_python")
+            engine_params = {
+                "n_ctx": model.max_context_window,
+                "n_batch": 512,
+                "n_gpu_layers": -1,
+                "flash_attn": llama_service._flash_attn_enabled(),
+            }
+        except Exception:
+            pass
+    elif active_engine == "vllm":
+        try:
+            from backend.services import vllm_service
+            engine_version = vllm_service._vllm_version()
+            engine_params = {
+                "max_model_len": model.max_context_window,
+                "gpu_memory_utilization": None,  # not stored post-load
+                "enforce_eager": False,
+            }
+        except Exception:
+            pass
+
+    gpu_short = gpu.name.replace("NVIDIA GeForce ", "").replace("AMD Radeon ", "").replace("Apple ", "") if gpu else "CPU"
+
+    share_lines = [
+        f"🔥 {model.name}",
+        f"   {tok_per_sec} tok/s decode · {ttft_ms}ms TTFT",
+        f"   {decode_tokens} tokens · {total_ms/1000:.1f}s total",
+        f"   {gpu_short} · {active_engine} {engine_version}",
+        f"   EchoHub — github.com/trinityUwU/echohub",
+    ]
+
+    return {
+        # Identity
         "model_id": model.id,
         "model_name": model.name,
-        "engine": model.engine,
-        "tokens_generated": tokens,
+        "engine": active_engine,
+        "engine_version": engine_version,
+        # Timing
+        "tokens_generated": decode_tokens,
+        "prompt_tokens": PROMPT_TOKENS,
         "tok_per_sec": tok_per_sec,
+        "prefill_tok_per_sec": prefill_tok_per_sec,
         "ttft_ms": ttft_ms,
+        "prefill_ms": prefill_ms,
+        "decode_ms": decode_ms,
         "total_ms": total_ms,
-        "gpu_name": gpu.name if gpu else "Unknown",
+        # Hardware
+        "gpu_name": gpu.name if gpu else "CPU",
+        "gpu_short": gpu_short,
         "vram_total_gb": round(gpu.vram_total_mb / 1024, 1) if gpu else 0,
+        "vram_used_gb": round(vram_used_mb / 1024, 1) if vram_used_mb else None,
+        "gpu_util_pct": gpu.gpu_utilization_pct if gpu else None,
+        # Engine params
+        "engine_params": engine_params,
+        # Meta
+        "bench_prompt": BENCH_PROMPT,
+        "bench_max_tokens": MAX_TOKENS,
+        "bench_temperature": 0.0,
         "timestamp": int(time.time()),
-        "share_text": (
-            f"{model.name} on {gpu.name if gpu else 'CPU'} — "
-            f"{tok_per_sec} tok/s · {ttft_ms}ms TTFT · "
-            f"via EchoHub (open source, github.com/trinityUwU/echohub)"
-        ),
+        "share_text": "\n".join(share_lines),
     }
-    return result

@@ -350,12 +350,8 @@ export const getOnboardingStatus = (): Promise<{ complete: boolean }> =>
 export const completeOnboarding = (): Promise<{ status: string }> =>
   apiRequest('/settings/onboarding/complete', { method: 'POST' })
 
-export const runBenchmark = (): Promise<{
-  model_id: string; model_name: string; engine: string | null
-  tokens_generated: number; tok_per_sec: number; ttft_ms: number | null
-  total_ms: number; gpu_name: string; vram_total_gb: number
-  timestamp: number; share_text: string
-}> => apiRequest('/inference/benchmark', { method: 'POST' })
+export const runBenchmark = (): Promise<Record<string, unknown>> =>
+  apiRequest('/inference/benchmark', { method: 'POST' })
 
 
 /** Returns true if the model supports /think /no_think tokens (Qwen3, QwQ).
