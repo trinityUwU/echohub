@@ -52,6 +52,9 @@ export function ChatPage({
   }, [profilesHook.activeId, profilesHook.activeProfile.params])
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  const activeConv = conversations.find(cv => cv.id === activeId)
+  const activeModelName = loadedModel?.name ?? activeConv?.model_id?.split('/').pop() ?? null
+
   const { messages, streaming, stats, send, stop, setMessages } = useChat(
     params,
     activeMessages,
@@ -123,7 +126,7 @@ export function ChatPage({
               key={msg.id ?? i}
               message={msg}
               genStats={i === messages.length - 1 && msg.role === 'assistant' ? stats : undefined}
-              modelName={loadedModel?.name ?? null}
+              modelName={activeModelName}
             />
           ))}
           <div ref={bottomRef} />
