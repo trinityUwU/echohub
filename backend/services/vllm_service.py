@@ -543,7 +543,12 @@ atexit.register(cleanup)
 
 def _vllm_version() -> str:
     try:
-        import importlib.metadata
-        return importlib.metadata.version("vllm")
+        py = _get_vllm_python()
+        result = subprocess.run(
+            [str(py), "-c", "import importlib.metadata; print(importlib.metadata.version('vllm'))"],
+            capture_output=True, text=True, timeout=10
+        )
+        v = result.stdout.strip()
+        return v if v else "unknown"
     except Exception:
         return "unknown"

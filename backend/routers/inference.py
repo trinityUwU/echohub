@@ -308,8 +308,9 @@ async def run_benchmark() -> dict:
     messages = [{"role": "system", "content": "/no_think"}, {"role": "user", "content": BENCH_PROMPT}]
     start = time.perf_counter()
     first_token_time = None
-    decode_tokens = 0
+    all_tokens = 0      # all tokens including thinking — used for tok/s
     thinking_tokens = 0
+    output_tokens = 0   # non-thinking tokens
     generated_text = ""
     in_think_block = False
 
@@ -332,20 +333,20 @@ async def run_benchmark() -> dict:
             if not content:
                 continue
 
+            if first_token_time is None:
+                first_token_time = time.perf_counter()
+
             generated_text += content
+            all_tokens += 1
+
             if "<think>" in content:
                 in_think_block = True
             if "</think>" in content:
                 in_think_block = False
-                continue
-            if in_think_block:
+            if in_think_block or "<think>" in content:
                 thinking_tokens += 1
-                continue
-
-            if first_token_time is None:
-                first_token_time = time.perf_counter()
-            decode_tokens += 1
-            generated_text += content
+            else:
+                output_tokens += 1
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Benchmark failed: {e}")
 
@@ -353,10 +354,12 @@ async def run_benchmark() -> dict:
 
     total_ms = round((end - start) * 1000)
     ttft_ms = round((first_token_time - start) * 1000) if first_token_time else None
-    prefill_ms = ttft_ms  # prefill = time to first token
+    prefill_ms = ttft_ms
     decode_ms = round((end - (first_token_time or start)) * 1000)
-    tok_per_sec = round(decode_tokens / max(decode_ms / 1000, 0.001), 1)
-    prefill_tok_per_sec = None  # not meaningful with short benchmark prompt
+    # tok/s based on all tokens (thinking included) — reflects true throughput
+    tok_per_sec = round(all_tokens / max(decode_ms / 1000, 0.001), 1) if all_tokens else 0.0
+    prefill_tok_per_sec = None
+    decode_tokens = output_tokens  # expose output-only count separately
 
     # Engine-specific params
     engine_params: dict = {}
@@ -495,12 +498,12 @@ async def run_benchmark_profiles(body: dict):
 
             yield f"data: {_json.dumps({'type': 'start', 'profile_id': pid, 'profile_name': profile['name'], 'index': idx, 'total': total})}\n\n"
 
-            # Disable thinking for benchmark — measures output generation, not reasoning
             messages = [{"role": "system", "content": "/no_think"}, {"role": "user", "content": profile["prompt"]}]
             start = _time.perf_counter()
             first_token_time = None
-            decode_tokens = 0
+            all_tokens = 0
             thinking_tokens = 0
+            output_tokens = 0
             generated_text = ""
             vram_used_mb = gpu.vram_used_mb if gpu else None
             in_think_block = False
@@ -523,20 +526,20 @@ async def run_benchmark_profiles(body: dict):
                     if not content:
                         continue
 
-                    # Track think blocks — don't count them as output tokens
+                    if first_token_time is None:
+                        first_token_time = _time.perf_counter()
+
                     generated_text += content
+                    all_tokens += 1
+
                     if "<think>" in content:
                         in_think_block = True
                     if "</think>" in content:
                         in_think_block = False
-                        continue
-                    if in_think_block:
+                    if in_think_block or "<think>" in content:
                         thinking_tokens += 1
-                        continue
-
-                    if first_token_time is None:
-                        first_token_time = _time.perf_counter()
-                    decode_tokens += 1
+                    else:
+                        output_tokens += 1
             except Exception as e:
                 yield f"data: {_json.dumps({'type': 'error', 'profile_id': pid, 'error': str(e)})}\n\n"
                 continue
@@ -545,7 +548,8 @@ async def run_benchmark_profiles(body: dict):
             total_ms = round((end - start) * 1000)
             ttft_ms = round((first_token_time - start) * 1000) if first_token_time else None
             decode_ms = round((end - (first_token_time or start)) * 1000)
-            tok_per_sec = round(decode_tokens / max(decode_ms / 1000, 0.001), 1)
+            tok_per_sec = round(all_tokens / max(decode_ms / 1000, 0.001), 1) if all_tokens else 0.0
+            decode_tokens = output_tokens
 
             share_lines = [
                 f"[{profile['name']}] {model.name}",
