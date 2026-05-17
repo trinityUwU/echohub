@@ -173,16 +173,25 @@ export function useChat(
     let accumulated = ''
     const assistantMsgId = crypto.randomUUID()
 
+    // Throttle UI updates — only re-render every 150ms to avoid DOM freeze on long generations
+    let lastRenderTime = 0
+    const RENDER_INTERVAL_MS = 150
+
     await chatStream(
       { messages: currentMessages, stream: true },
       params,
       (chunk) => {
         accumulated += chunk
-        setMessages((prev) => {
-          const updated = [...prev]
-          updated[updated.length - 1] = { role: 'assistant', content: accumulated, id: assistantMsgId }
-          return updated
-        })
+        const now = Date.now()
+        if (now - lastRenderTime >= RENDER_INTERVAL_MS) {
+          lastRenderTime = now
+          const snap = accumulated
+          setMessages((prev) => {
+            const updated = [...prev]
+            updated[updated.length - 1] = { role: 'assistant', content: snap, id: assistantMsgId }
+            return updated
+          })
+        }
       },
       (generationStats) => {
         setStats(generationStats)
@@ -258,16 +267,22 @@ export function useChat(
     let accumulated = ''
     const assistantMsgId = crypto.randomUUID()
 
+    let lastRenderTime2 = 0
     await chatStream(
       { messages: history, stream: true },
       params,
       (chunk) => {
         accumulated += chunk
-        setMessages(prev => {
-          const updated = [...prev]
-          updated[updated.length - 1] = { role: 'assistant', content: accumulated, id: assistantMsgId }
-          return updated
-        })
+        const now = Date.now()
+        if (now - lastRenderTime2 >= 150) {
+          lastRenderTime2 = now
+          const snap = accumulated
+          setMessages(prev => {
+            const updated = [...prev]
+            updated[updated.length - 1] = { role: 'assistant', content: snap, id: assistantMsgId }
+            return updated
+          })
+        }
       },
       (generationStats) => {
         setStats(generationStats)

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, memo } from 'react'
 import { motion } from 'framer-motion'
 import type { ChatMessage, GenerationStats } from '@/types'
 import { MarkdownContent } from './MarkdownContent'
@@ -14,7 +14,7 @@ interface MessageRowProps {
   onEditUser?: (text: string) => void
 }
 
-export function MessageRow({ message, isLast, genStats, modelName, streaming, onRegenerate, onEditUser }: MessageRowProps): React.ReactElement {
+export const MessageRow = memo(function MessageRow({ message, isLast, genStats, modelName, streaming, onRegenerate, onEditUser }: MessageRowProps): React.ReactElement {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -173,7 +173,14 @@ function ActionBtn({ onClick, title, children }: { onClick: () => void; title: s
       {children}
     </button>
   )
-}
+}, (prev, next) => {
+  // Only re-render if this specific message changed, or if streaming state changed
+  if (prev.streaming !== next.streaming) return false
+  if (prev.isLast !== next.isLast) return false
+  if (prev.message.content !== next.message.content) return false
+  if (prev.genStats !== next.genStats) return false
+  return true
+})
 
 function Avatar({ role }: { role: string }): React.ReactElement {
   const isUser = role === 'user'
