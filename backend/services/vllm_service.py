@@ -317,6 +317,28 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
     # Disable FlashInfer JIT sampling — requires nvcc which is not installed
     cmd += ["--no-enable-flashinfer-autotune"]
 
+    # Fallback chat template for models without one (e.g. older Mistral AWQ)
+    # Chatml is widely compatible and safe as fallback
+    _FALLBACK_TEMPLATE = (
+        "{% for message in messages %}"
+        "{% if message['role'] == 'system' %}<|im_start|>system\n{{ message['content'] }}<|im_end|>\n{% endif %}"
+        "{% if message['role'] == 'user' %}<|im_start|>user\n{{ message['content'] }}<|im_end|>\n<|im_start|>assistant\n{% endif %}"
+        "{% if message['role'] == 'assistant' %}{{ message['content'] }}<|im_end|>\n{% endif %}"
+        "{% endfor %}"
+    )
+    has_template = False
+    try:
+        import json as _json_check
+        tc = Path(model_path) / "tokenizer_config.json"
+        if tc.exists():
+            cfg = _json_check.loads(tc.read_text(errors="ignore"))
+            has_template = bool(cfg.get("chat_template"))
+    except Exception:
+        pass
+    if not has_template:
+        cmd += ["--chat-template", _FALLBACK_TEMPLATE]
+        logger.info("No chat template found — using chatml fallback")
+
     logger.info(f"Starting vLLM: {' '.join(cmd)}")
 
     log_path = _PROJECT_ROOT / "logs" / "vllm.log"
