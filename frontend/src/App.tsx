@@ -74,13 +74,19 @@ export default function App(): React.ReactElement {
     setPendingLoad(model)
   }
 
-  const confirmLoad = (cfg: { gpuMemoryUtilization: number; maxModelLen: number | null; enforceEager: boolean; maxCudagraphCaptureSize: number | null }): void => {
+  const confirmLoad = (cfg: {
+    gpuMemoryUtilization: number; maxModelLen: number | null
+    enforceEager: boolean; maxCudagraphCaptureSize: number | null
+    nGpuLayers?: number | null; cpuOverflow?: boolean
+  }): void => {
     if (!pendingLoad) return
     loadModel(pendingLoad.id, {
       gpuMemoryUtilization: cfg.gpuMemoryUtilization,
       maxModelLen: cfg.maxModelLen ?? undefined,
       enforceEager: cfg.enforceEager,
       maxCudagraphCaptureSize: cfg.maxCudagraphCaptureSize,
+      n_gpu_layers: cfg.nGpuLayers ?? undefined,
+      cpu_overflow: cfg.cpuOverflow ?? false,
     })
     setPendingLoad(null)
   }
@@ -168,6 +174,7 @@ export default function App(): React.ReactElement {
           model={pendingLoad}
           vramTotalGb={gpu.vram_total_mb / 1024}
           vramUsedGb={gpu.vram_used_mb / 1024}
+          gpu={gpu}
           onConfirm={confirmLoad}
           onCancel={() => setPendingLoad(null)}
         />

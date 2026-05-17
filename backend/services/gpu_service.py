@@ -1,7 +1,37 @@
 import platform
 import subprocess
 from loguru import logger
-from backend.models.schemas import GpuStats
+from backend.models.schemas import GpuStats, CpuStats
+
+
+def _get_cpu_stats() -> CpuStats:
+    try:
+        import psutil
+        ram = psutil.virtual_memory()
+        temp = None
+        try:
+            temps = psutil.sensors_temperatures()
+            for key in ("coretemp", "k10temp", "cpu_thermal", "zenpower"):
+                if key in temps and temps[key]:
+                    temp = round(temps[key][0].current, 1)
+                    break
+        except Exception:
+            pass
+        return CpuStats(
+            name=platform.processor() or "CPU",
+            cores_physical=psutil.cpu_count(logical=False) or 1,
+            cores_logical=psutil.cpu_count(logical=True) or 1,
+            usage_pct=round(psutil.cpu_percent(interval=0.1), 1),
+            ram_used_gb=round((ram.total - ram.available) / 1024**3, 2),
+            ram_total_gb=round(ram.total / 1024**3, 2),
+            temperature_c=temp,
+        )
+    except Exception:
+        import os
+        cores = os.cpu_count() or 1
+        return CpuStats(name=platform.processor() or "CPU",
+                        cores_physical=cores, cores_logical=cores,
+                        usage_pct=0.0, ram_used_gb=0.0, ram_total_gb=0.0)
 
 
 def get_gpu_stats() -> GpuStats:
@@ -33,6 +63,7 @@ def get_gpu_stats() -> GpuStats:
         name="No GPU detected (CPU inference)",
         vram_used_mb=0, vram_total_mb=0, vram_free_mb=0,
         gpu_utilization_pct=0, temperature_c=None,
+        cpu=_get_cpu_stats(),
     )
 
 
@@ -51,7 +82,8 @@ def _nvidia_stats() -> GpuStats:
     temp = int(parts[5]) if parts[5] not in ("", "[N/A]") else None
 
     stats = GpuStats(name=name, vram_used_mb=vram_used, vram_total_mb=vram_total,
-                     vram_free_mb=vram_free, gpu_utilization_pct=gpu_util, temperature_c=temp)
+                     vram_free_mb=vram_free, gpu_utilization_pct=gpu_util, temperature_c=temp,
+                     cpu=_get_cpu_stats())
     _feed_vllm_sample(vram_used)
     return stats
 
@@ -79,7 +111,7 @@ def _amd_stats() -> GpuStats:
 
     return GpuStats(name=name, vram_used_mb=vram_used_mb, vram_total_mb=vram_total_mb,
                     vram_free_mb=max(0, vram_total_mb - vram_used_mb),
-                    gpu_utilization_pct=gpu_util, temperature_c=None)
+                    gpu_utilization_pct=gpu_util, temperature_c=None, cpu=_get_cpu_stats())
 
 
 def _apple_stats() -> GpuStats:
@@ -112,6 +144,7 @@ def _apple_stats() -> GpuStats:
         name="Apple Silicon (unified memory)",
         vram_used_mb=0, vram_total_mb=vram_total_mb,
         vram_free_mb=vram_total_mb, gpu_utilization_pct=gpu_util, temperature_c=None,
+        cpu=_get_cpu_stats(),
     )
 
 

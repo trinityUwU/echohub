@@ -54,6 +54,8 @@ export interface LoadRequest {
   max_model_len?: number | null
   enforce_eager?: boolean
   max_cudagraph_capture_size?: number | null
+  n_gpu_layers?: number | null
+  cpu_overflow?: boolean
 }
 
 // OpenAI multimodal content part
@@ -148,6 +150,16 @@ export interface ChatRequest {
   stop?: string[]
 }
 
+export interface CpuStats {
+  name: string
+  cores_physical: number
+  cores_logical: number
+  usage_pct: number
+  ram_used_gb: number
+  ram_total_gb: number
+  temperature_c: number | null
+}
+
 export interface GpuStats {
   name: string
   vram_used_mb: number
@@ -155,6 +167,7 @@ export interface GpuStats {
   vram_free_mb: number
   gpu_utilization_pct: number
   temperature_c: number | null
+  cpu: CpuStats | null
 }
 
 export type DownloadState = 'pending' | 'running' | 'paused' | 'complete' | 'cancelled' | 'error'

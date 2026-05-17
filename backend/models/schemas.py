@@ -48,7 +48,9 @@ class LoadRequest(BaseModel):
     max_model_len: Optional[int] = None
     enforce_eager: bool = False
     max_cudagraph_capture_size: Optional[int] = None
-    vllm_version: Optional[str] = None  # None = use best available
+    vllm_version: Optional[str] = None
+    n_gpu_layers: Optional[int] = None  # llama.cpp only: -1=full GPU, 0=CPU, N=N layers on GPU
+    cpu_overflow: bool = False          # llama.cpp only: allow overflow to CPU RAM if VRAM exceeded
 
 
 class ChatMessage(BaseModel):
@@ -96,6 +98,16 @@ class ConversationOut(BaseModel):
     message_count: int = 0
 
 
+class CpuStats(BaseModel):
+    name: str
+    cores_physical: int
+    cores_logical: int
+    usage_pct: float
+    ram_used_gb: float
+    ram_total_gb: float
+    temperature_c: Optional[float] = None
+
+
 class GpuStats(BaseModel):
     name: str
     vram_used_mb: int
@@ -103,3 +115,4 @@ class GpuStats(BaseModel):
     vram_free_mb: int
     gpu_utilization_pct: int
     temperature_c: Optional[int] = None
+    cpu: Optional[CpuStats] = None

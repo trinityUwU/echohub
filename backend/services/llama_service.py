@@ -102,6 +102,8 @@ def load_model(
     model_id: str,
     n_ctx: int = 4096,
     gpu_type: str = "nvidia",
+    n_gpu_layers_override: int | None = None,
+    cpu_overflow: bool = False,
 ) -> None:
     """Charge le modèle GGUF. Bloquant — appelé depuis un thread."""
     global _llm, _current_model, _load_error, _eject_requested
@@ -116,29 +118,39 @@ def load_model(
         )
 
     _reset_log()
-    n_gpu = _n_gpu_layers(gpu_type)
+    # n_gpu_layers: user override > auto detection
+    n_gpu = n_gpu_layers_override if n_gpu_layers_override is not None else _n_gpu_layers(gpu_type)
     n_threads = _detect_n_threads()
 
     _log(f"[llama] Loading {model_id}")
     _log(f"[llama] File: {gguf_path}")
-    _log(f"[llama] n_gpu_layers={n_gpu} | n_ctx={n_ctx} | n_batch=512 | flash_attn={_flash_attn_enabled()} | n_threads={n_threads}")
+    _log(f"[llama] n_gpu_layers={n_gpu} | n_ctx={n_ctx} | n_batch=512 | flash_attn={_flash_attn_enabled()} | n_threads={n_threads} | cpu_overflow={cpu_overflow}")
 
     if _eject_requested:
         raise RuntimeError("Ejected by user")
 
     start = time.time()
 
-    _llm = Llama(
+    llama_kwargs: dict = dict(
         model_path=gguf_path,
         n_ctx=n_ctx,
-        n_batch=512,           # throughput critique — NE PAS baisser
-        n_gpu_layers=n_gpu,    # -1 = full GPU offload
-        flash_attn=_flash_attn_enabled(),  # configurable in Settings
-        n_threads=n_threads,   # prefill CPU
-        verbose=False,         # pas de spam stderr
-        use_mmap=True,         # mapping mémoire pour chargement rapide
-        use_mlock=False,       # pas de lock mémoire (peut échouer sans privilèges)
+        n_batch=512,
+        n_gpu_layers=n_gpu,
+        flash_attn=_flash_attn_enabled(),
+        n_threads=n_threads,
+        verbose=False,
+        use_mmap=True,
+        use_mlock=False,
     )
+    # split_mode=1 (row split) allows overflow to CPU RAM when VRAM is full
+    if cpu_overflow and n_gpu != 0:
+        try:
+            from llama_cpp import LLAMA_SPLIT_MODE_ROW
+            llama_kwargs["split_mode"] = LLAMA_SPLIT_MODE_ROW
+        except ImportError:
+            _log("[llama] cpu_overflow requested but split_mode not available in this llama-cpp version", "warn")
+
+    _llm = Llama(**llama_kwargs)
 
     elapsed = time.time() - start
     _log(f"[llama] Model loaded in {elapsed:.1f}s")
@@ -159,6 +171,8 @@ def load_model_async(
     model_id: str,
     n_ctx: int = 4096,
     gpu_type: str = "nvidia",
+    n_gpu_layers_override: int | None = None,
+    cpu_overflow: bool = False,
 ) -> None:
     """Lance le chargement dans un thread background — retourne immédiatement."""
     global _loading_model_id, _load_error, _eject_requested
@@ -169,7 +183,7 @@ def load_model_async(
     def _run() -> None:
         global _loading_model_id, _load_error
         try:
-            load_model(gguf_path, model_id, n_ctx, gpu_type)
+            load_model(gguf_path, model_id, n_ctx, gpu_type, n_gpu_layers_override, cpu_overflow)
         except Exception as e:
             if not _eject_requested:
                 _load_error = str(e)
