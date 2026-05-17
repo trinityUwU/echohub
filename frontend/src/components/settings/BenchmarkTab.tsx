@@ -208,9 +208,9 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
         {/* Top bar */}
         <div className="sticky top-0 z-10 bg-[#0f0f12]/95 backdrop-blur-sm px-5 py-3.5 flex items-center justify-between">
           <div className="flex items-center gap-2.5 min-w-0">
-            <span className="text-2xs font-semibold text-text-muted">{engineLabel}</span>
-            <span className="text-text-muted/30">·</span>
-            <span className="text-sm font-medium text-text-primary truncate">{r.model_name}</span>
+            <span className="text-2xs font-semibold text-white/50">{engineLabel}</span>
+            <span className="text-white/20">·</span>
+            <span className="text-sm font-medium text-white truncate">{r.model_name}</span>
           </div>
           <button onClick={onClose}
             className="w-7 h-7 flex items-center justify-center rounded-md hover:bg-white/6 text-text-muted hover:text-text-primary transition-colors cursor-pointer flex-shrink-0">
@@ -227,14 +227,14 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
                 <div className={`text-5xl font-black font-mono tracking-tight ${speedColor(r.tok_per_sec)}`}>
                   {r.tok_per_sec}
                 </div>
-                <div className="text-xs text-text-muted mt-1.5">tokens / second — decode</div>
+                <div className="text-xs text-white/50 mt-1.5">tokens / second — decode</div>
               </div>
               <div className="flex flex-col items-end gap-1.5">
                 <span className={`text-xs font-semibold px-2.5 py-1 rounded-md ${
                   r.tok_per_sec >= 60 ? 'bg-green/12 text-green' :
                   r.tok_per_sec >= 30 ? 'bg-yellow/12 text-yellow' : 'bg-red/12 text-red'
                 }`}>{speedLabel(r.tok_per_sec)}</span>
-                <span className="text-2xs text-text-muted/50">{date}</span>
+                <span className="text-2xs text-white/40">{date}</span>
               </div>
             </div>
             <div className="grid grid-cols-3 gap-2">
@@ -287,7 +287,7 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
               <InfoRow label="Temperature" value={r.bench_temperature != null ? String(r.bench_temperature) : '—'} />
             </div>
             {r.bench_prompt && (
-              <div className="bg-black/20 rounded-lg px-3 py-2.5 text-xs text-text-muted/60 leading-relaxed italic">
+              <div className="bg-black/20 rounded-lg px-3 py-2.5 text-xs text-white/60 leading-relaxed italic">
                 "{r.bench_prompt}"
               </div>
             )}
@@ -295,7 +295,7 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
 
           {/* Copy */}
           <button onClick={onCopy}
-            className="w-full flex items-center justify-center gap-2 py-2.5 bg-white/4 hover:bg-white/7 rounded-lg text-sm text-text-muted hover:text-text-secondary cursor-pointer transition-colors">
+            className="w-full flex items-center justify-center gap-2 py-2.5 bg-white/4 hover:bg-white/8 rounded-lg text-sm text-white/60 hover:text-white/90 cursor-pointer transition-colors">
             {copied ? (
               <><svg className="w-3.5 h-3.5 text-green" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>Copied!</>
             ) : (
@@ -312,9 +312,9 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
 function HeroStat({ label, value, sub }: { label: string; value: string; sub: string }): React.ReactElement {
   return (
     <div className="bg-black/20 rounded-lg px-3 py-2.5 text-center">
-      <div className="text-2xs text-text-muted uppercase tracking-widest mb-1">{label}</div>
-      <div className="text-sm font-bold font-mono text-text-primary">{value}</div>
-      <div className="text-2xs text-text-muted/70 mt-0.5">{sub}</div>
+      <div className="text-2xs text-white/40 uppercase tracking-widest mb-1">{label}</div>
+      <div className="text-sm font-bold font-mono text-white">{value}</div>
+      <div className="text-2xs text-white/40 mt-0.5">{sub}</div>
     </div>
   )
 }
@@ -322,7 +322,7 @@ function HeroStat({ label, value, sub }: { label: string; value: string; sub: st
 function InfoCard({ title, children }: { title: string; children: React.ReactNode }): React.ReactElement {
   return (
     <div className="bg-white/[0.025] rounded-xl p-4">
-      <div className="text-2xs font-semibold uppercase tracking-widest text-text-muted mb-3">{title}</div>
+      <div className="text-2xs font-semibold uppercase tracking-widest text-white/90 mb-3">{title}</div>
       {children}
     </div>
   )
@@ -333,9 +333,9 @@ function InfoRow({ label, value, highlight, muted }: {
 }): React.ReactElement {
   return (
     <div className="flex items-baseline justify-between py-0.5 gap-2">
-      <span className="text-xs text-text-muted flex-shrink-0">{label}</span>
+      <span className="text-xs text-white/50 flex-shrink-0">{label}</span>
       <span className={`text-xs font-mono font-medium truncate ${
-        highlight ? 'text-text-primary' : muted ? 'text-text-muted/60' : 'text-text-secondary'
+        highlight ? 'text-white' : muted ? 'text-white/40' : 'text-white/80'
       }`}>{value}</span>
     </div>
   )
