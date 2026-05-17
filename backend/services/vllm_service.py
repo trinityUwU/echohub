@@ -347,6 +347,14 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
                        gpu_memory_utilization=reduced, max_model_len=max_model_len)
             return
 
+        # Known incompatibility patterns — fail fast with clear message
+        if "input size is not aligned with the quantized weight shape" in log_content:
+            raise RuntimeError(
+                f"Model '{model_id}' is incompatible with vLLM {_vllm_version()}. "
+                "This quantization format (AWQ with custom architecture) is not supported. "
+                "Try a GGUF version of this model instead."
+            )
+
         # Extract root cause from vLLM log
         root_cause = ""
         for line in reversed(log_content.splitlines()):
@@ -486,3 +494,11 @@ def cleanup() -> None:
 # backend (including search, GPU endpoints) when vLLM crashes.
 # FastAPI lifespan handles graceful shutdown via atexit.
 atexit.register(cleanup)
+
+
+def _vllm_version() -> str:
+    try:
+        import importlib.metadata
+        return importlib.metadata.version("vllm")
+    except Exception:
+        return "unknown"
