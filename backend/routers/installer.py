@@ -119,7 +119,21 @@ async def _install_stream():
     elif managed.exists():
         yield _sse("vLLM 0.21.0 already available", "ok")
     else:
-        yield _sse("No vLLM environment found. Install from Settings → Engines after launch.", "warn")
+        # Fresh install — check if NVIDIA present, install vLLM if so
+        has_nvidia = False
+        try:
+            r = subprocess.run(["nvidia-smi"], capture_output=True, timeout=5)
+            has_nvidia = r.returncode == 0
+        except Exception:
+            pass
+
+        if has_nvidia:
+            yield _sse("NVIDIA GPU detected — installing vLLM 0.21.0 (this takes 10–30 min)…", "step")
+            yield _sse("vLLM enables AWQ/GPTQ models with maximum throughput.")
+            async for chunk in _install_vllm_async(managed):
+                yield chunk
+        else:
+            yield _sse("No NVIDIA GPU — skipping vLLM (llama-cpp-python handles GGUF models)", "warn")
 
     # Mark complete
     set_app_state("install_complete", "true")
@@ -206,3 +220,47 @@ async def _compile_llama_async(pip: Path):
         yield _sse("llama-cpp-python compiled successfully", "ok")
     else:
         yield _sse("Compilation failed — will run on CPU", "warn")
+
+
+async def _install_vllm_async(target_path: Path):
+    """Install vLLM 0.21.0 into a new venv at target_path."""
+    import asyncio as _aio
+
+    # Create venv
+    yield _sse(f"Creating vLLM venv at {target_path}…")
+    proc = await _aio.create_subprocess_exec(
+        sys.executable, "-m", "venv", str(target_path),
+        stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.STDOUT,
+    )
+    await proc.wait()
+
+    pip = target_path / "bin" / "pip"
+
+    # Install vLLM
+    yield _sse("Installing vLLM 0.21.0 (downloading ~4 GB)…")
+    still_running_count = 0
+    start_ts = time.time()
+    proc2 = await _aio.create_subprocess_exec(
+        str(pip), "install", "vllm==0.21.0", "--no-cache-dir",
+        stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.STDOUT,
+    )
+    async for line in proc2.stdout:
+        decoded = line.decode().rstrip()
+        if not decoded:
+            continue
+        if "still running" in decoded:
+            still_running_count += 1
+            elapsed = int(time.time() - start_ts)
+            if still_running_count % 5 == 1:
+                mins, secs = divmod(elapsed, 60)
+                yield _sse(f"  Installing… {mins}m{secs:02d}s elapsed")
+        else:
+            still_running_count = 0
+            yield _sse(decoded)
+    rc = await proc2.wait()
+    if rc == 0:
+        yield _sse("vLLM 0.21.0 installed successfully", "ok")
+    else:
+        yield _sse("vLLM installation failed — you can retry from Settings → Engines", "warn")
+        import shutil as _shutil
+        _shutil.rmtree(str(target_path), ignore_errors=True)
