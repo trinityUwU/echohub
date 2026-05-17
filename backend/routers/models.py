@@ -186,7 +186,8 @@ def check_compatibility(model_id: str) -> dict:
     from pathlib import Path as _P
 
     # Try local first, then HF
-    local_config = _P(f"/mnt/models/echohub/{model_id.replace('/', '--')}/config.json")
+    from backend.services.config_service import get_models_dir as _gmd
+    local_config = _gmd() / f"{model_id.replace('/', '--')}/config.json"
     try:
         if local_config.exists():
             config = _json.loads(local_config.read_text())

@@ -166,3 +166,68 @@ async def install_engine_stream(version: str):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── Path Configuration ────────────────────────────────────────────────────
+
+from backend.services import config_service, migration_service
+from fastapi.responses import StreamingResponse as _SSEResponse
+
+@router.get("/paths")
+def get_paths() -> dict:
+    return config_service.get_all_paths()
+
+
+@router.post("/paths/models-dir")
+def set_models_dir(body: dict) -> dict:
+    new_path = body.get("path", "").strip()
+    if not new_path:
+        raise HTTPException(status_code=400, detail="path is required")
+    current = config_service.get_models_dir()
+    new = Path(new_path).expanduser().resolve()
+    if current == new:
+        return {"status": "unchanged", "path": str(new)}
+    # Create migration job
+    state = migration_service.create_migration("models", str(current), str(new))
+    return {"status": "migration_pending", "source": str(current), "destination": str(new), "state": state}
+
+
+@router.post("/paths/vllm-envs-dir")
+def set_vllm_envs_dir(body: dict) -> dict:
+    new_path = body.get("path", "").strip()
+    if not new_path:
+        raise HTTPException(status_code=400, detail="path is required")
+    current = config_service.get_vllm_envs_dir()
+    new = Path(new_path).expanduser().resolve()
+    if current == new:
+        return {"status": "unchanged", "path": str(new)}
+    state = migration_service.create_migration("vllm_envs", str(current), str(new))
+    return {"status": "migration_pending", "source": str(current), "destination": str(new), "state": state}
+
+
+@router.get("/paths/migration-state")
+def get_migration_state() -> dict:
+    state = migration_service.get_pending_migration()
+    return state or {"status": "idle"}
+
+
+@router.post("/paths/migration-cancel")
+def cancel_migration() -> dict:
+    migration_service.cancel_migration()
+    return {"status": "cancelled"}
+
+
+@router.get("/paths/migrate")
+async def run_migration():
+    """SSE stream for migration execution."""
+    return _SSEResponse(
+        migration_service.run_migration_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/paths/migration-cleanup")
+def cleanup_migration() -> dict:
+    migration_service.cleanup_completed()
+    return {"status": "cleaned"}

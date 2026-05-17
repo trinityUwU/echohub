@@ -10,11 +10,16 @@ from backend.services import engine_router, hf_service
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 
-MODELS_DIR = Path("/mnt/models/echohub")
+def _get_models_dir():
+    try:
+        from backend.services.config_service import get_models_dir
+        return get_models_dir()
+    except Exception:
+        return Path("/mnt/models/echohub")
 
 
 def _resolve_model_path(model_id: str) -> str:
-    candidate = MODELS_DIR / model_id.replace("/", "--")
+    candidate = _get_models_dir() / model_id.replace("/", "--")
     if candidate.exists():
         return str(candidate)
     raise FileNotFoundError(f"Model not found locally: {model_id}")

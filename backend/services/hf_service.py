@@ -5,6 +5,16 @@ from huggingface_hub import HfApi, hf_hub_download, snapshot_download, model_inf
 from loguru import logger
 from backend.models.schemas import ModelInfo, ModelCapabilities
 
+def _get_models_dir() -> Path:
+    try:
+        from backend.services.config_service import get_models_dir
+        return get_models_dir()
+    except Exception:
+        p = Path(os.getenv("MODELS_DIR", "/mnt/models/echohub"))
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+# Backward compat — use _get_models_dir() for all path operations
 MODELS_DIR = Path(os.getenv("MODELS_DIR", "/mnt/models/echohub"))
 _api = HfApi()
 
@@ -334,7 +344,7 @@ def _extract_more_from_author(author: str, current_id: str) -> Optional[list[dic
 
 
 def _model_dir(model_id: str) -> Path:
-    return MODELS_DIR / model_id.replace("/", "--")
+    return _get_models_dir() / model_id.replace("/", "--")
 
 
 def _is_downloaded(model_id: str) -> bool:

@@ -5,6 +5,7 @@ import type { ConversationSummary, ModelInfo, GpuStats, ChatMessage } from '@/ty
 import { ConvSidebar } from '@/components/nav/ConvSidebar'
 import { ChatTopBar } from './ChatTopBar'
 import { CpuBanner } from './CpuBanner'
+import { MigrationBanner } from '@/components/shared/MigrationBanner'
 import { MessageRow } from './MessageRow'
 import { InputBar } from './InputBar'
 import { RightPanel } from './RightPanel'
@@ -85,6 +86,7 @@ export function ChatPage({
           onEject={onEject}
         />
         {!hasCuda && <CpuBanner onGoToSettings={onGoToSettings} />}
+        <MigrationBanner onGoToSettings={onGoToSettings} />
         <div className="flex-1 overflow-y-auto py-6">
           {messages.map((msg, i) => (
             <MessageRow

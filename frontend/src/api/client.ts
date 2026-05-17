@@ -288,3 +288,50 @@ export function installEngineStream(
   })
   return () => { cancelled = true }
 }
+
+// ── Path configuration & migration ────────────────────────────────────────
+
+export const getPaths = (): Promise<{
+  models_dir: string; vllm_envs_dir: string; user_data_dir: string; db_path: string
+  models_dir_is_default: boolean; vllm_envs_dir_is_default: boolean
+}> => apiRequest('/settings/paths')
+
+export const setModelsDir = (path: string): Promise<{
+  status: string; source?: string; destination?: string; state?: object
+}> => apiRequest('/settings/paths/models-dir', { method: 'POST', body: JSON.stringify({ path }) })
+
+export const setVllmEnvsDir = (path: string): Promise<{
+  status: string; source?: string; destination?: string; state?: object
+}> => apiRequest('/settings/paths/vllm-envs-dir', { method: 'POST', body: JSON.stringify({ path }) })
+
+export const getMigrationState = (): Promise<{
+  status: string; migration_type?: string; source?: string; destination?: string
+  files_total?: number; files_done?: number; bytes_total?: number; bytes_done?: number
+  files_failed?: string[]
+}> => apiRequest('/settings/paths/migration-state')
+
+export const cancelMigration = (): Promise<{ status: string }> =>
+  apiRequest('/settings/paths/migration-cancel', { method: 'POST' })
+
+export const cleanupMigration = (): Promise<{ status: string }> =>
+  apiRequest('/settings/paths/migration-cleanup', { method: 'POST' })
+
+export function runMigrationStream(
+  onLine: (data: { level: string; msg: string }) => void,
+  onDone: (result: { success: boolean; reason: string }) => void,
+): () => void {
+  let cancelled = false
+  apiUrl('/settings/paths/migrate').then(url => {
+    if (cancelled) return
+    const es = new EventSource(url)
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        if (data.done) { onDone(data); es.close() }
+        else onLine(data)
+      } catch { /* ignore */ }
+    }
+    es.onerror = () => { onDone({ success: false, reason: 'connection_error' }); es.close() }
+  })
+  return () => { cancelled = true }
+}

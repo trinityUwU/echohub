@@ -31,9 +31,13 @@ LEGACY_VENV = Path("/mnt/projects/echohub/.venv-vllm")
 
 
 def get_envs_dir() -> Path:
-    d = get_user_data_dir() / ENVS_DIR_NAME
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    try:
+        from backend.services.config_service import get_vllm_envs_dir
+        return get_vllm_envs_dir()
+    except Exception:
+        d = get_user_data_dir() / ENVS_DIR_NAME
+        d.mkdir(parents=True, exist_ok=True)
+        return d
 
 
 def _venv_path(version: str) -> Path:
