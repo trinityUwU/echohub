@@ -9,6 +9,7 @@ import { MigrationBanner } from '@/components/shared/MigrationBanner'
 import { MessageRow } from './MessageRow'
 import { InputBar } from './InputBar'
 import { RightPanel } from './RightPanel'
+import { clearMessages } from '@/api/client'
 
 interface ChatPageProps {
   loadedModel: ModelInfo | null
@@ -75,7 +76,11 @@ export function ChatPage({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const handleClear = (): void => { setMessages([]); setActiveMessages([]) }
+  const handleClear = (): void => {
+    setMessages([])
+    setActiveMessages([])
+    if (activeId) clearMessages(activeId).catch(() => {})
+  }
 
   const handleRegenerate = (): void => {
     const lastAssistant = [...messages].reverse().findIndex(m => m.role === 'assistant')
