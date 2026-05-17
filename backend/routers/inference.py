@@ -422,6 +422,7 @@ async def run_benchmark() -> dict:
 @router.post("/benchmark/run-profiles")
 async def run_benchmark_profiles(body: dict):
     """SSE stream — runs multiple benchmark profiles sequentially."""
+    import json as _json
     import re as _re
     import time as _time
     import importlib.metadata
@@ -474,10 +475,10 @@ async def run_benchmark_profiles(body: dict):
         for idx, pid in enumerate(profile_ids):
             profile = get_benchmark_profile(pid)
             if not profile:
-                yield f"data: {json.dumps({'type': 'skip', 'profile_id': pid, 'reason': 'not found'})}\n\n"
+                yield f"data: {_json.dumps({'type': 'skip', 'profile_id': pid, 'reason': 'not found'})}\n\n"
                 continue
 
-            yield f"data: {json.dumps({'type': 'start', 'profile_id': pid, 'profile_name': profile['name'], 'index': idx, 'total': total})}\n\n"
+            yield f"data: {_json.dumps({'type': 'start', 'profile_id': pid, 'profile_name': profile['name'], 'index': idx, 'total': total})}\n\n"
 
             messages = [{"role": "user", "content": profile["prompt"]}]
             start = _time.perf_counter()
@@ -506,7 +507,7 @@ async def run_benchmark_profiles(body: dict):
                         first_token_time = _time.perf_counter()
                     decode_tokens += 1
             except Exception as e:
-                yield f"data: {json.dumps({'type': 'error', 'profile_id': pid, 'error': str(e)})}\n\n"
+                yield f"data: {_json.dumps({'type': 'error', 'profile_id': pid, 'error': str(e)})}\n\n"
                 continue
 
             end = _time.perf_counter()
@@ -549,9 +550,9 @@ async def run_benchmark_profiles(body: dict):
                 "share_text": "\n".join(share_lines),
             }
             result["_db_id"] = save_benchmark(result)
-            yield f"data: {json.dumps({'type': 'result', 'profile_id': pid, 'profile_name': profile['name'], 'index': idx, 'total': total, 'result': result})}\n\n"
+            yield f"data: {_json.dumps({'type': 'result', 'profile_id': pid, 'profile_name': profile['name'], 'index': idx, 'total': total, 'result': result})}\n\n"
 
-        yield f"data: {json.dumps({'type': 'done', 'total': total})}\n\n"
+        yield f"data: {_json.dumps({'type': 'done', 'total': total})}\n\n"
 
     return StreamingResponse(_stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
