@@ -258,7 +258,7 @@ export const checkModelCompatibility = (modelId: string): Promise<{
 export const listEngines = (): Promise<{
   versions: Array<{
     version: string; path: string; installed: boolean; operational: boolean
-    size_gb: number; arch_count: number; is_legacy: boolean
+    size_gb: number; arch_count: number; is_legacy: boolean; is_builtin: boolean
   }>
   coverage_warning: string | null
   total_versions: number

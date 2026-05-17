@@ -26,8 +26,8 @@ from loguru import logger
 from backend.services.user_data import get_user_data_dir
 
 ENVS_DIR_NAME = "vllm-envs"
-# Legacy path shipped with v0.1
-LEGACY_VENV = Path("/mnt/projects/echohub/.venv-vllm")
+# Legacy path shipped with v0.1 — relative to project root
+LEGACY_VENV = Path(__file__).resolve().parents[3] / ".venv-vllm"
 
 
 def get_envs_dir() -> Path:
@@ -126,19 +126,26 @@ def list_versions() -> list[dict]:
         })
 
     # Check legacy venv
-    if LEGACY_VENV.exists() and not any(v["version"] == "0.21.0" for v in versions):
+    if LEGACY_VENV.exists():
         meta = _get_installed_version_from_metadata(LEGACY_VENV)
-        size_gb = _dir_size_gb(LEGACY_VENV)
-        operational = _is_operational_legacy()
-        versions.insert(0, {
-            "version": meta or "0.21.0",
-            "path": str(LEGACY_VENV),
-            "installed": True,
-            "operational": operational,
-            "size_gb": size_gb,
-            "arch_count": _get_supported_arch_count_legacy() if operational else 0,
-            "is_legacy": True,
-        })
+        legacy_version = meta or "0.21.0"
+        if not any(v["version"] == legacy_version for v in versions):
+            size_gb = _dir_size_gb(LEGACY_VENV)
+            operational = _is_operational_legacy()
+            versions.insert(0, {
+                "version": legacy_version,
+                "path": str(LEGACY_VENV),
+                "installed": True,
+                "operational": operational,
+                "size_gb": size_gb,
+                "arch_count": _get_supported_arch_count_legacy() if operational else 0,
+                "is_legacy": True,
+                "is_builtin": True,
+            })
+
+    # Add builtin flag to all entries that don't have it
+    for v in versions:
+        v.setdefault("is_builtin", False)
 
     return versions
 

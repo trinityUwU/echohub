@@ -4,7 +4,7 @@ import { useDialog } from '@/components/shared/Dialog'
 
 interface EngineVersion {
   version: string; path: string; installed: boolean; operational: boolean
-  size_gb: number; arch_count: number; is_legacy: boolean
+  size_gb: number; arch_count: number; is_legacy: boolean; is_builtin: boolean
 }
 
 interface EnginesData {
@@ -64,6 +64,7 @@ export function EnginesTab(): React.ReactElement {
 
   const installedVersions = new Set(data?.versions.map(v => v.version) ?? [])
   const suggested = SUGGESTED_VERSIONS.filter(v => !installedVersions.has(v))
+  const operationalCount = data?.versions.filter(v => v.operational).length ?? 0
 
   return (
     <div className="flex flex-col gap-6">
@@ -92,7 +93,7 @@ export function EnginesTab(): React.ReactElement {
           {data?.versions.map(v => (
             <VersionCard
               key={v.version} v={v}
-              canDelete={!v.operational || (data?.versions.filter(x => x.operational).length ?? 0) > 1}
+              canDelete={!v.is_builtin && (!v.operational || operationalCount > 1)}
               onDelete={() => handleDelete(v.version)}
             />
           ))}
@@ -178,7 +179,10 @@ function VersionCard({ v, canDelete, onDelete }: {
           <span className="text-sm font-semibold text-text-primary font-mono">
             vLLM {v.version}
           </span>
-          {v.is_legacy && (
+          {v.is_builtin && (
+            <span className="text-2xs px-1.5 py-px rounded bg-accent/15 text-accent">default</span>
+          )}
+          {v.is_legacy && !v.is_builtin && (
             <span className="text-2xs px-1.5 py-px rounded bg-yellow/12 text-yellow">legacy</span>
           )}
           <span className={`text-2xs px-1.5 py-px rounded ${
@@ -196,7 +200,7 @@ function VersionCard({ v, canDelete, onDelete }: {
       <button
         onClick={onDelete}
         disabled={!canDelete}
-        title={canDelete ? 'Delete this version' : 'Cannot delete — last installation'}
+        title={canDelete ? 'Delete this version' : v.is_builtin ? 'Cannot delete — default installation' : 'Cannot delete — last installation'}
         className="w-8 h-8 flex items-center justify-center rounded-sm border border-border hover:border-red/30 hover:bg-red/10 text-text-muted hover:text-red transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0">
         <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
