@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useDialog } from '@/components/shared/Dialog'
 import { Accordion } from '@/components/shared/Accordion'
 import { Slider } from '@/components/shared/Slider'
 import { Toggle } from '@/components/shared/Toggle'
@@ -53,12 +54,14 @@ function ProfileSection({ params, profiles }: ProfileSectionProps): React.ReactE
   const { profiles: list, activeId, selectProfile, saveProfile, deleteProfile } = profiles
   const [naming, setNaming] = useState(false)
   const [newName, setNewName] = useState('')
+  const { confirm, element: dialogEl } = useDialog()
 
   const handleSelect = (id: string): void => { selectProfile(id) }
 
-  const handleSaveCurrent = (): void => {
+  const handleSaveCurrent = async (): Promise<void> => {
     const name = list.find(p => p.id === activeId)?.name ?? 'Profile'
-    if (!window.confirm(`Overwrite "${name}" with current settings?`)) return
+    const ok = await confirm(`Overwrite "${name}"?`, 'This will replace the profile with your current settings.')
+    if (!ok) return
     saveProfile(activeId, name, params)
   }
 
@@ -72,6 +75,7 @@ function ProfileSection({ params, profiles }: ProfileSectionProps): React.ReactE
 
   return (
     <div className="flex flex-col gap-2.5">
+      {dialogEl}
       <ProfileDropdown list={list} activeId={activeId} onSelect={handleSelect} onDelete={deleteProfile} />
 
       {!naming ? (
@@ -142,16 +146,17 @@ function ProfileDropdown({ list, activeId, onSelect, onDelete }: {
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  const handleDelete = (e: React.MouseEvent, p: import('@/types').ChatProfile): void => {
+  const { confirm: dlgConfirm, element: dlgEl } = useDialog()
+
+  const handleDelete = async (e: React.MouseEvent, p: import('@/types').ChatProfile): Promise<void> => {
     e.stopPropagation()
-    if (window.confirm(`Delete "${p.name}"?`)) {
-      onDelete(p.id)
-      setOpen(false)
-    }
+    const ok = await dlgConfirm(`Delete "${p.name}"?`, 'This profile will be permanently removed.', 'Delete')
+    if (ok) { onDelete(p.id); setOpen(false) }
   }
 
   return (
     <div className="relative" ref={ref}>
+      {dlgEl}
       <button
         onClick={() => setOpen(v => !v)}
         className="w-full flex items-center justify-between gap-2 bg-elevated border border-border hover:border-border-hover rounded-sm px-2.5 py-2 text-sm text-text-primary cursor-pointer transition-colors"

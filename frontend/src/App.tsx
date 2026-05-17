@@ -12,10 +12,12 @@ import { DownloadsPage } from '@/components/downloads/DownloadsPage'
 import { SettingsPage } from '@/components/settings/SettingsPage'
 import { LoadModelModal } from '@/components/modals/LoadModelModal'
 import { ModelPickerModal } from '@/components/modals/ModelPickerModal'
+import { useDialog } from '@/components/shared/Dialog'
 
 type Page = 'chat' | 'library' | 'discover' | 'downloads' | 'settings'
 
 export default function App(): React.ReactElement {
+  const { confirm, element: dialogEl } = useDialog()
   const [page, setPage] = useState<Page>('chat')
   const [pendingLoad, setPendingLoad] = useState<ModelInfo | null>(null)
   const [showPicker, setShowPicker] = useState(false)
@@ -113,7 +115,8 @@ export default function App(): React.ReactElement {
           <LibraryPage
             models={downloaded}
             onDelete={async (id) => {
-              if (!window.confirm(`Delete this model? This cannot be undone.`)) return
+              const ok = await confirm('Delete model?', 'This will permanently remove the model files from disk. This cannot be undone.', 'Delete')
+              if (!ok) return
               try { await deleteModel(id); refresh() } catch { /* TODO error toast */ }
             }}
             onAddModel={() => setPage('discover')}
@@ -164,6 +167,7 @@ export default function App(): React.ReactElement {
           Load failed: {loadError}
         </div>
       )}
+      {dialogEl}
     </div>
   )
 }

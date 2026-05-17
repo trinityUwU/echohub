@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listEngines, deleteEngine, installEngineStream } from '@/api/client'
+import { useDialog } from '@/components/shared/Dialog'
 
 interface EngineVersion {
   version: string; path: string; installed: boolean; operational: boolean
@@ -16,6 +17,7 @@ interface EnginesData {
 const SUGGESTED_VERSIONS = ['0.21.0', '0.8.5', '0.14.0']
 
 export function EnginesTab(): React.ReactElement {
+  const { confirm, alert: showAlert, element: dialogEl } = useDialog()
   const [data, setData] = useState<EnginesData | null>(null)
   const [loading, setLoading] = useState(true)
   const [installing, setInstalling] = useState<string | null>(null)
@@ -50,12 +52,13 @@ export function EnginesTab(): React.ReactElement {
   }
 
   const handleDelete = async (version: string): Promise<void> => {
-    if (!window.confirm(`Delete vLLM ${version}? This cannot be undone.`)) return
+    const ok = await confirm('Delete vLLM ' + version, 'This will remove the vLLM environment and all its files. This cannot be undone.', 'Delete')
+    if (!ok) return
     try {
       await deleteEngine(version)
       refresh()
     } catch (e) {
-      alert(String(e))
+      showAlert('Delete failed', String(e), 'error')
     }
   }
 
@@ -158,6 +161,7 @@ export function EnginesTab(): React.ReactElement {
         </div>
       )}
 
+      {dialogEl}
     </div>
   )
 }
