@@ -74,11 +74,19 @@ def _response_length_score(text: str, min_words: int, max_words: int) -> float:
 # ── Code scorer ───────────────────────────────────────────────────────────────
 
 def _extract_python_blocks(text: str) -> list[str]:
-    """Extract all Python code blocks from markdown response"""
-    blocks = re.findall(r'```(?:python|py)?\n(.*?)```', text, re.DOTALL)
+    """Extract all Python code blocks from markdown response.
+    Handles both real newlines and literal \\n sequences from SSE chunks.
+    """
+    # Normalize literal \n sequences to real newlines
+    normalized = text.replace('\\n', '\n').replace('\\t', '\t')
+
+    blocks = re.findall(r'```(?:python|py)?\n(.*?)```', normalized, re.DOTALL)
+    if not blocks:
+        # Try without language tag
+        blocks = re.findall(r'```\n(.*?)```', normalized, re.DOTALL)
     if not blocks:
         # Try to find indented code
-        lines = text.split('\n')
+        lines = normalized.split('\n')
         code_lines = [l for l in lines if l.startswith('    ') or l.startswith('\t')]
         if code_lines:
             blocks = ['\n'.join(code_lines)]
