@@ -1,9 +1,10 @@
 # TODO — EchoHub
-*Dernière mise à jour : 2026-05-17 (session 10)*
+*Dernière mise à jour : 2026-05-17 (session 11)*
 
 ## En cours
 - [ ] Construction karma Reddit (r/LocalLLaMA) — participation genuïne, pas de promo avant 3-4 semaines
-- [ ] Préparer assets lancement : benchmark screenshot, GIF VRAM preview, GIF Engine install
+- [x] Screenshots lancement : Qwen3.5-9B 15K tokens sur RTX 3060, footer stats, GPU sidebar — DONE
+- [ ] Rédiger post Reddit/HN avec Chris autour de la démo Qwen3.5-9B (matériel prêt)
 
 ## À faire (priorité)
 
@@ -42,6 +43,12 @@
 - [ ] Modèle juge fiable (après fine-tuning + évaluation)
 - [ ] Multi-GPU support vLLM (tensor_parallel_size)
 - [ ] Python sidecar WebSocket (SSE fonctionne, pas urgent)
+
+## Terminé ✅ (session 11 — 2026-05-17)
+- [x] Throttle streaming 150ms — fix freeze sur longues générations (15K tokens)
+- [x] memo() MessageRow — messages précédents ne re-rendent plus pendant stream
+- [x] Code blocks overflow-x-auto — ne débordent plus de la bulle de message
+- [x] Démo Qwen3.5-9B GGUF → 15K tokens, 20K ctx, RTX 3060 — matériel lancement validé
 
 ## Terminé ✅ (session 10 — 2026-05-17)
 - [x] quality_scorer.py — 6 scorers algorithmiques sans LLM juge

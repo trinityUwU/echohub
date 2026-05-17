@@ -1,9 +1,23 @@
 # STATE — EchoHub
-*Dernière mise à jour : 2026-05-17 (session 10)*
+*Dernière mise à jour : 2026-05-17 (session 11)*
 
 ## Résumé de l'état actuel
 
-Application Tauri v2 native pleinement fonctionnelle. Dual-engine llama-cpp (GGUF) + vLLM (AWQ/GPTQ). Benchmark complet avec 10 profils, scoring qualité algorithmique (6 scorers sans LLM juge), leaderboard par profil/onglet. Discover avec multi-filtres toggle + sort + pagination. Modal chargement avec hardware live CPU+GPU, slider compute split GPU/CPU, CPU overflow. Chat vLLM stable (fallback chat template, filtre messages vides).
+Application Tauri v2 native pleinement fonctionnelle. Dual-engine llama-cpp (GGUF) + vLLM (AWQ/GPTQ). Benchmark complet avec 10 profils, scoring qualité algorithmique, leaderboard par profil. Chat stable sans freeze même sur 15K tokens (throttle 150ms + memo React). Démo validée : Qwen3.5-9B-Claude-4.6-Opus GGUF → 15K tokens en 814s sur RTX 3060, 8.5GB VRAM, 18.5 tok/s. Matériel de lancement Reddit/HN prêt.
+
+## Ce qui a été fait — session du 2026-05-17 (session 11)
+
+### Performance streaming — fix freeze longues générations
+- `useChat.ts` : throttle `setMessages` à 150ms pendant le stream (était à chaque token → freeze à 15K)
+- `MessageRow` : wrapped dans `memo()` avec comparateur custom — les messages précédents ne re-rendent plus pendant la génération
+- `MarkdownContent` : `overflow-hidden` → `overflow-x-auto` sur le container code block
+- `MessageRow` container : ajout `min-w-0 overflow-hidden` pour contenir les longs code blocks
+
+### Démo Qwen3.5-9B-Claude-4.6-Opus — matériel lancement
+- Test réel : prompt 500 tokens → 15,088 tokens générés, 18.5 tok/s, 814s, 8.5/12GB VRAM
+- 20K context window sur RTX 3060 — impossible sur LM Studio (OOM ou ctx tronqué)
+- Screenshots sauvegardés : topbar modèle + GPU sidebar + footer stats
+- Argument de vente principal : performance + contexte long sans configuration complexe
 
 ## Ce qui a été fait — session du 2026-05-17 (session 10)
 
