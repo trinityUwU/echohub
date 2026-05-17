@@ -20,7 +20,7 @@ interface BenchResult {
   vram_used_gb: number | null; gpu_util_pct: number | null
   engine_params: EngineParams
   bench_prompt: string; bench_max_tokens: number; bench_temperature: number
-  generated_text?: string
+  generated_text?: string; thinking_tokens?: number | null
   timestamp: number; share_text: string; _db_id?: number
   _name?: string; _archived?: boolean
 }
@@ -340,6 +340,7 @@ function DetailModal({ result: r, onClose, onCopy, copied }: {
             <InfoCard title="Throughput">
               <InfoRow label="Decode" value={`${r.tok_per_sec} tok/s`} highlight />
               <InfoRow label="Out tokens" value={String(r.tokens_generated)} />
+              {r.thinking_tokens != null && <InfoRow label="Think tokens" value={String(r.thinking_tokens)} muted />}
               <InfoRow label="In tokens" value={`~${r.prompt_tokens}`} muted />
             </InfoCard>
             <InfoCard title="Hardware">

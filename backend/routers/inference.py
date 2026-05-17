@@ -305,11 +305,13 @@ async def run_benchmark() -> dict:
     PROMPT_TOKENS = 35  # approximate — llama.cpp tokenizer not exposed here
     MAX_TOKENS = 200
 
-    messages = [{"role": "user", "content": BENCH_PROMPT}]
+    messages = [{"role": "system", "content": "/no_think"}, {"role": "user", "content": BENCH_PROMPT}]
     start = time.perf_counter()
     first_token_time = None
     decode_tokens = 0
+    thinking_tokens = 0
     generated_text = ""
+    in_think_block = False
 
     try:
         async for chunk in engine_router.generate(
@@ -320,7 +322,6 @@ async def run_benchmark() -> dict:
         ):
             if not chunk:
                 continue
-            # Extract content from SSE string: data: {"choices":[{"delta":{"content":"X"}}]}
             content = ""
             if isinstance(chunk, str) and '"content"' in chunk:
                 m = _re.search(r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', chunk)
@@ -329,7 +330,17 @@ async def run_benchmark() -> dict:
                 content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "") or ""
 
             if not content:
-                continue  # skip empty deltas, usage chunks, etc.
+                continue
+
+            generated_text += content
+            if "<think>" in content:
+                in_think_block = True
+            if "</think>" in content:
+                in_think_block = False
+                continue
+            if in_think_block:
+                thinking_tokens += 1
+                continue
 
             if first_token_time is None:
                 first_token_time = time.perf_counter()
@@ -413,6 +424,7 @@ async def run_benchmark() -> dict:
         "bench_max_tokens": MAX_TOKENS,
         "bench_temperature": 0.0,
         "generated_text": generated_text,
+        "thinking_tokens": thinking_tokens if thinking_tokens > 0 else None,
         "timestamp": int(time.time()),
         "share_text": "\n".join(share_lines),
     }
@@ -483,12 +495,15 @@ async def run_benchmark_profiles(body: dict):
 
             yield f"data: {_json.dumps({'type': 'start', 'profile_id': pid, 'profile_name': profile['name'], 'index': idx, 'total': total})}\n\n"
 
-            messages = [{"role": "user", "content": profile["prompt"]}]
+            # Disable thinking for benchmark — measures output generation, not reasoning
+            messages = [{"role": "system", "content": "/no_think"}, {"role": "user", "content": profile["prompt"]}]
             start = _time.perf_counter()
             first_token_time = None
             decode_tokens = 0
+            thinking_tokens = 0
             generated_text = ""
             vram_used_mb = gpu.vram_used_mb if gpu else None
+            in_think_block = False
 
             try:
                 async for chunk in _er.generate(
@@ -507,10 +522,21 @@ async def run_benchmark_profiles(body: dict):
                         content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "") or ""
                     if not content:
                         continue
+
+                    # Track think blocks — don't count them as output tokens
+                    generated_text += content
+                    if "<think>" in content:
+                        in_think_block = True
+                    if "</think>" in content:
+                        in_think_block = False
+                        continue
+                    if in_think_block:
+                        thinking_tokens += 1
+                        continue
+
                     if first_token_time is None:
                         first_token_time = _time.perf_counter()
                     decode_tokens += 1
-                    generated_text += content
             except Exception as e:
                 yield f"data: {_json.dumps({'type': 'error', 'profile_id': pid, 'error': str(e)})}\n\n"
                 continue
@@ -552,6 +578,7 @@ async def run_benchmark_profiles(body: dict):
                 "bench_max_tokens": profile["max_tokens"],
                 "bench_temperature": profile["temperature"],
                 "generated_text": generated_text,
+                "thinking_tokens": thinking_tokens if thinking_tokens > 0 else None,
                 "timestamp": int(_time.time()),
                 "share_text": "\n".join(share_lines),
             }
