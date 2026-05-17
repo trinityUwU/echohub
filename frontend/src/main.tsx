@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import { InstallerApp } from './installer/InstallerApp'
+import { ContextMenuProvider } from './components/shared/ContextMenu'
 import './index.css'
 import 'highlight.js/styles/atom-one-dark.css'
 
@@ -44,7 +45,9 @@ async function bootstrap(): Promise<void> {
 
   root.render(
     <React.StrictMode>
-      {showInstaller ? <InstallerApp /> : <App />}
+      <ContextMenuProvider>
+        {showInstaller ? <InstallerApp /> : <App />}
+      </ContextMenuProvider>
     </React.StrictMode>,
   )
 }

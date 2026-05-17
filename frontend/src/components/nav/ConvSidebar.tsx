@@ -1,9 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { ConversationSummary, GpuStats } from '@/types'
+import { useContextMenu } from '@/components/shared/ContextMenu'
 
 type Filter = 'active' | 'archived'
-
-interface ContextMenu { x: number; y: number; conv: ConversationSummary; isArchived: boolean }
 
 interface ConvSidebarProps {
   conversations: ConversationSummary[]
@@ -20,40 +19,23 @@ interface ConvSidebarProps {
 
 export function ConvSidebar({ conversations, archivedConversations, activeId, onSelect, onNew, onDelete, onArchive, onUnarchive, onRename, gpu }: ConvSidebarProps): React.ReactElement {
   const [filter, setFilter] = useState<Filter>('active')
-  const [ctx, setCtx] = useState<ContextMenu | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
+  const { open: openCtx } = useContextMenu()
   const list = filter === 'active' ? conversations : archivedConversations
 
-  const closeCtx = useCallback(() => setCtx(null), [])
-
-  useEffect(() => {
-    if (!ctx) return
-    const handler = (e: MouseEvent) => {
-      const target = e.target as HTMLElement
-      if (!target.closest('[data-ctx-menu]')) closeCtx()
-    }
-    window.addEventListener('mousedown', handler)
-    return () => window.removeEventListener('mousedown', handler)
-  }, [ctx, closeCtx])
-
   const handleContextMenu = (e: React.MouseEvent, conv: ConversationSummary, isArchived: boolean): void => {
-    e.preventDefault()
-    setCtx({ x: e.clientX, y: e.clientY, conv, isArchived })
-  }
+    const RenameIcon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    const ArchiveIcon = isArchived
+      ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.01"/></svg>
+      : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+    const DeleteIcon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/></svg>
 
-  const startRename = (id: string): void => {
-    closeCtx()
-    setRenamingId(id)
-  }
-
-  const handleArchive = (id: string, isArchived: boolean): void => {
-    closeCtx()
-    isArchived ? onUnarchive(id) : onArchive(id)
-  }
-
-  const handleDelete = (id: string): void => {
-    closeCtx()
-    onDelete(id)
+    openCtx(e, [
+      { label: 'Rename', icon: RenameIcon, onClick: () => setRenamingId(conv.id) },
+      { label: isArchived ? 'Unarchive' : 'Archive', icon: ArchiveIcon, onClick: () => isArchived ? onUnarchive(conv.id) : onArchive(conv.id) },
+      { label: '', separator: true, onClick: () => {} },
+      { label: 'Delete', icon: DeleteIcon, danger: true, onClick: () => onDelete(conv.id) },
+    ])
   }
 
   return (
@@ -93,9 +75,9 @@ export function ConvSidebar({ conversations, archivedConversations, activeId, on
             renaming={renamingId === conv.id}
             onClick={() => { if (renamingId !== conv.id) onSelect(conv.id) }}
             onContextMenu={e => handleContextMenu(e, conv, filter === 'archived')}
-            onDelete={() => handleDelete(conv.id)}
-            onArchive={() => handleArchive(conv.id, filter === 'archived')}
-            onRenameStart={() => startRename(conv.id)}
+            onDelete={() => onDelete(conv.id)}
+            onArchive={() => filter === 'archived' ? onUnarchive(conv.id) : onArchive(conv.id)}
+            onRenameStart={() => setRenamingId(conv.id)}
             onRenameSubmit={title => { setRenamingId(null); onRename(conv.id, title) }}
             onRenameCancel={() => setRenamingId(null)}
           />
@@ -103,53 +85,7 @@ export function ConvSidebar({ conversations, archivedConversations, activeId, on
       </div>
 
       {gpu && <GpuSection gpu={gpu} />}
-
-      {/* Context menu */}
-      {ctx && (
-        <div data-ctx-menu
-          className="fixed z-50 bg-elevated border border-border rounded-md shadow-xl py-1 min-w-[160px]"
-          style={{ left: ctx.x, top: ctx.y }}>
-          <CtxItem onClick={() => startRename(ctx.conv.id)}>
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-            </svg>
-            Rename
-          </CtxItem>
-          <CtxItem onClick={() => handleArchive(ctx.conv.id, ctx.isArchived)}>
-            {ctx.isArchived ? (
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.01"/>
-              </svg>
-            ) : (
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>
-              </svg>
-            )}
-            {ctx.isArchived ? 'Unarchive' : 'Archive'}
-          </CtxItem>
-          <div className="border-t border-border/50 my-1" />
-          <CtxItem danger onClick={() => handleDelete(ctx.conv.id)}>
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
-              <path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/>
-            </svg>
-            Delete
-          </CtxItem>
-        </div>
-      )}
     </aside>
-  )
-}
-
-function CtxItem({ onClick, danger, children }: { onClick: () => void; danger?: boolean; children: React.ReactNode }): React.ReactElement {
-  return (
-    <button onClick={onClick}
-      className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-sm cursor-pointer transition-colors ${
-        danger ? 'text-red hover:bg-red/10' : 'text-text-secondary hover:bg-overlay hover:text-text-primary'
-      }`}>
-      {children}
-    </button>
   )
 }
 
