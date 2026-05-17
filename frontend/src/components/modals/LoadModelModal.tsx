@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Modal } from '@/components/shared/Modal'
 import { Slider } from '@/components/shared/Slider'
 import { Btn } from '@/components/shared/Btn'
-import { canLoadModel } from '@/api/client'
 import type { ModelInfo } from '@/types'
 
 interface CanLoadResult {
@@ -32,12 +31,21 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCa
   const [cudaGraphs, setCudaGraphs] = useState<'default' | 'limited' | 'disabled'>('default')
   const [maxCaptureSize, setMaxCaptureSize] = useState(512)
   const [check, setCheck] = useState<CanLoadResult | null>(null)
-  const [checking, setChecking] = useState(true)
 
   useEffect(() => {
-    setChecking(true)
-    canLoadModel(model.id)
-      .then(setCheck).catch(() => setCheck(null)).finally(() => setChecking(false))
+    // Model is already downloaded — we have vram_estimate_gb and quantization from ModelInfo.
+    // No need to wait for canLoadModel; derive engine from quantization directly.
+    const isGguf = model.quantization?.toLowerCase().includes('gguf') ||
+                   model.arch_tag?.toLowerCase().includes('gguf')
+    setCheck({
+      engine: isGguf ? 'llama' : 'vllm',
+      format: isGguf ? 'gguf' : 'vllm',
+      feasible: true,
+      reason: null,
+      vram_estimate_gb: model.vram_estimate_gb,
+      gpu_type: 'nvidia',
+      vllm_available: true,
+    })
   }, [model.id])
 
   const gpuUtil   = gpuUtilPct / 100
@@ -66,7 +74,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCa
     ? Math.min(model.max_context_window ?? 131072, Math.floor(safeCtxK) * 1000)
     : (model.max_context_window ?? 131072)
 
-  const canSubmit = !checking && (check?.feasible ?? false) && !isOom
+  const canSubmit = (check?.feasible ?? false) && !isOom
 
   return (
     <Modal title="Load model" onClose={onCancel} footer={
@@ -79,7 +87,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCa
             enforceEager: cudaGraphs === 'disabled',
             maxCudagraphCaptureSize: cudaGraphs === 'limited' ? maxCaptureSize : null,
           })}>
-          {checking ? 'Checking…' : 'Load model'}
+          {'Load model'}
         </Btn>
       </>
     }>
