@@ -101,7 +101,8 @@ async def _install_stream():
     if "ok" in result.stdout:
         yield _sse("llama-cpp-python already installed", "ok")
     else:
-        yield from _compile_llama(pip)
+        async for chunk in _compile_llama_async(pip):
+            yield chunk
 
     # Check vLLM
     yield _step("vLLM environment")
@@ -140,8 +141,8 @@ async def _run_cmd(cmd: list[str]):
     await proc.wait()
 
 
-def _compile_llama(pip: Path):
-    """Generator for llama-cpp-python compilation."""
+async def _compile_llama_async(pip: Path):
+    """Async generator for llama-cpp-python compilation."""
     import subprocess as sp
     env = dict(os.environ)
 
@@ -176,28 +177,18 @@ def _compile_llama(pip: Path):
     yield _sse("This is the longest step — the terminal is working, please wait.")
 
     # Run as sync in thread since this is a generator (can't be async here easily)
-    import threading
-    lines_out = []
-    def run():
-        proc = sp.Popen(
-            [str(pip), "install", "llama-cpp-python", "--no-cache-dir"],
-            stdout=sp.PIPE, stderr=sp.STDOUT, env=env, text=True
-        )
-        for line in proc.stdout:
-            lines_out.append(line.rstrip())
-        proc.wait()
-        lines_out.append(f"__returncode__{proc.returncode}")
-
-    t = threading.Thread(target=run)
-    t.start()
-    t.join()
-
-    for line in lines_out:
-        if line.startswith("__returncode__"):
-            rc = int(line.replace("__returncode__", ""))
-            if rc == 0:
-                yield _sse("llama-cpp-python compiled successfully", "ok")
-            else:
-                yield _sse("Compilation failed — will run on CPU", "warn")
-        elif line:
-            yield _sse(line)
+    import asyncio as _aio
+    proc2 = await _aio.create_subprocess_exec(
+        str(pip), "install", "llama-cpp-python", "--no-cache-dir",
+        stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.STDOUT,
+        env=env,
+    )
+    async for line in proc2.stdout:
+        decoded = line.decode().rstrip()
+        if decoded:
+            yield _sse(decoded)
+    rc = await proc2.wait()
+    if rc == 0:
+        yield _sse("llama-cpp-python compiled successfully", "ok")
+    else:
+        yield _sse("Compilation failed — will run on CPU", "warn")
