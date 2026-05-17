@@ -61,8 +61,11 @@ export function ChatPage({
     activeId ?? undefined,
   )
 
-  // Only reset messages when switching conversations, not during streaming
-  useEffect(() => { setMessages(activeMessages) }, [activeId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Sync messages when conversation changes OR when activeMessages loads from DB
+  // streaming flag prevents reset mid-generation
+  useEffect(() => {
+    if (!streaming) setMessages(activeMessages)
+  }, [activeId, activeMessages]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
