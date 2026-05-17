@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getInferenceSettings, setInferenceSetting } from '@/api/client'
+import { getInferenceSettings, setInferenceSetting, checkForUpdates } from '@/api/client'
 import { apiRequest } from '@/api/base'
 import { Toggle } from '@/components/shared/Toggle'
 import { EnginesTab } from './EnginesTab'
@@ -207,16 +207,30 @@ function ModelsSection(): React.ReactElement {
 
 function AboutSection(): React.ReactElement {
   const [resetting, setResetting] = useState(false)
-  const [done, setDone] = useState(false)
+  const [updateState, setUpdateState] = useState<{checking: boolean; result: string | null}>({ checking: false, result: null })
 
   const resetOnboarding = async (): Promise<void> => {
     setResetting(true)
     try {
       await apiRequest('/settings/onboarding/reset', { method: 'POST' })
-      setDone(true)
-      setTimeout(() => window.location.reload(), 1200)
-    } catch { /* ignore */ }
-    finally { setResetting(false) }
+      setTimeout(() => window.location.reload(), 800)
+    } catch { setResetting(false) }
+  }
+
+  const checkUpdates = async (): Promise<void> => {
+    setUpdateState({ checking: true, result: null })
+    try {
+      const r = await checkForUpdates()
+      if (r.error) {
+        setUpdateState({ checking: false, result: 'Could not check — verify your internet connection.' })
+      } else if (r.up_to_date) {
+        setUpdateState({ checking: false, result: `Up to date (${r.local_sha})` })
+      } else {
+        setUpdateState({ checking: false, result: `${r.commits_behind} update${r.commits_behind > 1 ? 's' : ''} available — check the notification bar.` })
+      }
+    } catch {
+      setUpdateState({ checking: false, result: 'Check failed.' })
+    }
   }
 
   return (
@@ -228,10 +242,18 @@ function AboutSection(): React.ReactElement {
           github.com/trinityUwU/echohub
         </a>
       </SettingsRow>
-      <SettingsRow label="Onboarding tutorial" desc="Replay the setup guide">
-        <button onClick={resetOnboarding} disabled={resetting || done}
+      <SettingsRow label="Updates" desc={updateState.result ?? "Check for new commits on GitHub"}>
+        <button onClick={checkUpdates} disabled={updateState.checking}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-sm border border-border hover:bg-overlay text-text-secondary cursor-pointer transition-colors disabled:opacity-50">
-          {done ? '✓ Reloading…' : resetting ? 'Resetting…' : 'Replay tutorial'}
+          {updateState.checking ? (
+            <><span className="w-3 h-3 border-2 border-text-muted/30 border-t-text-muted rounded-full animate-spin" />Checking…</>
+          ) : 'Check for updates'}
+        </button>
+      </SettingsRow>
+      <SettingsRow label="Onboarding tutorial" desc="Replay the setup guide">
+        <button onClick={resetOnboarding} disabled={resetting}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-sm border border-border hover:bg-overlay text-text-secondary cursor-pointer transition-colors disabled:opacity-50">
+          {resetting ? 'Reloading…' : 'Replay tutorial'}
         </button>
       </SettingsRow>
     </SettingsGroup>

@@ -1,3 +1,4 @@
+import json
 import os
 import platform
 import subprocess
@@ -316,3 +317,124 @@ def validate_hf_token() -> dict:
             return {"valid": False, "reason": f"HF API returned {r.status_code}", "username": None}
     except Exception as e:
         return {"valid": False, "reason": f"Network error: {e}", "username": None}
+
+
+# ── Update system ──────────────────────────────────────────────────────────
+
+import subprocess as _sp
+from pathlib import Path as _P
+
+_APP_ROOT = _P(__file__).resolve().parents[2]
+
+
+@router.get("/update/check")
+def check_for_updates() -> dict:
+    """Check if the local git repo is behind origin/master."""
+    try:
+        _sp.run(["git", "fetch", "origin"], cwd=str(_APP_ROOT), capture_output=True, timeout=15)
+        result = _sp.run(
+            ["git", "rev-list", "HEAD..origin/master", "--count"],
+            cwd=str(_APP_ROOT), capture_output=True, text=True, timeout=10
+        )
+        commits_behind = int(result.stdout.strip() or "0")
+
+        local = _sp.run(["git", "rev-parse", "--short", "HEAD"],
+                        cwd=str(_APP_ROOT), capture_output=True, text=True).stdout.strip()
+        remote = _sp.run(["git", "rev-parse", "--short", "origin/master"],
+                         cwd=str(_APP_ROOT), capture_output=True, text=True).stdout.strip()
+
+        # Get latest commit message from origin
+        log = _sp.run(
+            ["git", "log", "HEAD..origin/master", "--oneline", "--no-merges", "-20"],
+            cwd=str(_APP_ROOT), capture_output=True, text=True
+        ).stdout.strip()
+
+        return {
+            "up_to_date": commits_behind == 0,
+            "commits_behind": commits_behind,
+            "local_sha": local,
+            "remote_sha": remote,
+            "changelog": log.splitlines() if log else [],
+        }
+    except Exception as e:
+        return {"error": str(e), "up_to_date": True, "commits_behind": 0, "changelog": []}
+
+
+@router.get("/update/run")
+async def run_update():
+    """SSE stream for git pull + rebuild notification."""
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        _update_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _update_stream():
+    import asyncio, json, time
+
+    def sse(msg: str, level: str = "info") -> str:
+        return f"data: {json.dumps({'level': level, 'msg': msg, 'ts': time.time()})}\n\n"
+
+    yield sse("Pulling latest changes from GitHub…", "step")
+
+    proc = await asyncio.create_subprocess_exec(
+        "git", "pull", "--ff-only", "origin", "master",
+        cwd=str(_APP_ROOT),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    async for line in proc.stdout:
+        decoded = line.decode().rstrip()
+        if decoded:
+            yield sse(decoded)
+    rc = await proc.wait()
+
+    if rc != 0:
+        yield sse("git pull failed — check your connection or resolve conflicts manually.", "error")
+        yield f"data: {json.dumps({'done': True, 'success': False})}\n\n"
+        return
+
+    yield sse("Update downloaded successfully", "ok")
+
+    # Get what changed
+    log = _sp.run(
+        ["git", "log", "-5", "--oneline", "--no-merges"],
+        cwd=str(_APP_ROOT), capture_output=True, text=True
+    ).stdout.strip()
+    if log:
+        yield sse("Recent changes:", "step")
+        for line in log.splitlines():
+            yield sse(f"  {line}")
+
+    yield sse("Ready to restart — click Restart now to apply the update.", "ok")
+    yield f"data: {json.dumps({'done': True, 'success': True})}\n\n"
+
+
+@router.post("/update/save-changelog")
+def save_changelog(body: dict) -> dict:
+    """Persist changelog to show on next launch."""
+    from backend.services.db import set_app_state
+    changelog = body.get("changelog", [])
+    set_app_state("pending_changelog", json.dumps(changelog))
+    return {"status": "ok"}
+
+
+@router.get("/update/pending-changelog")
+def get_pending_changelog() -> dict:
+    from backend.services.db import get_app_state
+    raw = get_app_state("pending_changelog")
+    if not raw:
+        return {"changelog": []}
+    try:
+        return {"changelog": json.loads(raw)}
+    except Exception:
+        return {"changelog": []}
+
+
+@router.post("/update/clear-changelog")
+def clear_changelog() -> dict:
+    from backend.services.db import set_app_state
+    set_app_state("pending_changelog", "")
+    return {"status": "ok"}

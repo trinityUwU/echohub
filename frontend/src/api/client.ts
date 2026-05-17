@@ -383,3 +383,39 @@ export const unarchiveConversation = (id: string): Promise<{ status: string }> =
 
 export const getArchivedConversations = (): Promise<ConversationSummary[]> =>
   apiRequest('/conversations?archived=1')
+
+// ── Update system ──────────────────────────────────────────────────────────
+
+export const checkForUpdates = (): Promise<{
+  up_to_date: boolean; commits_behind: number
+  local_sha: string; remote_sha: string; changelog: string[]; error?: string
+}> => apiRequest('/settings/update/check')
+
+export function runUpdate(
+  onLine: (data: { level: string; msg: string }) => void,
+  onDone: (result: { success: boolean }) => void,
+): () => void {
+  let cancelled = false
+  apiUrl('/settings/update/run').then(url => {
+    if (cancelled) return
+    const es = new EventSource(url)
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        if (data.done) { onDone(data); es.close() }
+        else onLine(data)
+      } catch {}
+    }
+    es.onerror = () => { onDone({ success: false }); es.close() }
+  })
+  return () => { cancelled = true }
+}
+
+export const saveChangelog = (changelog: string[]): Promise<{ status: string }> =>
+  apiRequest('/settings/update/save-changelog', { method: 'POST', body: JSON.stringify({ changelog }) })
+
+export const getPendingChangelog = (): Promise<{ changelog: string[] }> =>
+  apiRequest('/settings/update/pending-changelog')
+
+export const clearChangelog = (): Promise<{ status: string }> =>
+  apiRequest('/settings/update/clear-changelog', { method: 'POST' })

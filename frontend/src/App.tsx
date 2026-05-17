@@ -13,6 +13,8 @@ import { SettingsPage } from '@/components/settings/SettingsPage'
 import { LoadModelModal } from '@/components/modals/LoadModelModal'
 import { ModelPickerModal } from '@/components/modals/ModelPickerModal'
 import { useDialog } from '@/components/shared/Dialog'
+import { UpdateBanner } from '@/components/shared/UpdateBanner'
+import { ChangelogNotification } from '@/components/shared/ChangelogNotification'
 import { OnboardingWizard } from '@/components/onboarding/OnboardingWizard'
 import { getOnboardingStatus } from '@/api/client'
 
@@ -100,7 +102,9 @@ export default function App(): React.ReactElement {
     <div className="flex h-screen bg-base text-text-primary overflow-hidden">
       <NavRail active={page} onNavigate={setPage} downloadsBadge={activeJobs > 0} />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-col flex-1 overflow-hidden">
+        <UpdateBanner />
+        <div className="flex flex-1 overflow-hidden">
         <div className={`flex flex-1 overflow-hidden ${page === 'chat' ? 'animate-fade-in' : 'hidden'}`}>
           <ChatPage
             loadedModel={loadedModel}
@@ -182,6 +186,8 @@ export default function App(): React.ReactElement {
       )}
       {showOnboarding && <OnboardingWizard onComplete={() => setShowOnboarding(false)} />}
       {dialogEl}
+      <ChangelogNotification />
+        </div>
     </div>
   )
 }
