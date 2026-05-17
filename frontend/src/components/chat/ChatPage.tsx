@@ -123,6 +123,7 @@ export function ChatPage({
               key={msg.id ?? i}
               message={msg}
               genStats={i === messages.length - 1 && msg.role === 'assistant' ? stats : undefined}
+              modelName={loadedModel?.name ?? null}
             />
           ))}
           <div ref={bottomRef} />

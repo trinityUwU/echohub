@@ -6,9 +6,10 @@ import { ThinkingBlock } from './ThinkingBlock'
 interface MessageRowProps {
   message: ChatMessage
   genStats?: GenerationStats | null
+  modelName?: string | null
 }
 
-export function MessageRow({ message, genStats }: MessageRowProps): React.ReactElement {
+export function MessageRow({ message, genStats, modelName }: MessageRowProps): React.ReactElement {
   const isUser = message.role === 'user'
   const text = typeof message.content === 'string'
     ? message.content
@@ -48,8 +49,8 @@ export function MessageRow({ message, genStats }: MessageRowProps): React.ReactE
         } text-text-primary`}>
           {visibleText ? <MarkdownContent content={visibleText} /> : <span className="text-text-muted animate-pulse">…</span>}
         </div>
-        {genStats && !isUser && <GenStatsRow stats={genStats} />}
-        {!genStats && message.stats && !isUser && <MsgStatsRow stats={message.stats} />}
+        {genStats && !isUser && <GenStatsRow stats={genStats} modelName={modelName} />}
+        {!genStats && message.stats && !isUser && <MsgStatsRow stats={message.stats} modelName={modelName} />}
       </div>
     </motion.div>
   )
@@ -78,22 +79,24 @@ function Avatar({ role }: { role: string }): React.ReactElement {
   )
 }
 
-function GenStatsRow({ stats }: { stats: GenerationStats }): React.ReactElement {
+function GenStatsRow({ stats, modelName }: { stats: GenerationStats; modelName?: string | null }): React.ReactElement {
   return (
-    <div className="flex gap-2.5 px-0.5 text-xs text-text-muted">
+    <div className="flex gap-2.5 px-0.5 text-xs text-text-muted items-center">
       <span>{stats.tokensGenerated} tokens</span>
       <span className="text-green">{stats.tokensPerSecond.toFixed(1)} tok/s</span>
       <span>{(stats.timeMs / 1000).toFixed(2)}s</span>
+      {modelName && <span className="text-text-muted/50 truncate max-w-[160px]">· {modelName}</span>}
     </div>
   )
 }
 
-function MsgStatsRow({ stats }: { stats: MessageStats }): React.ReactElement {
+function MsgStatsRow({ stats, modelName }: { stats: MessageStats; modelName?: string | null }): React.ReactElement {
   return (
-    <div className="flex gap-2.5 px-0.5 text-xs text-text-muted">
+    <div className="flex gap-2.5 px-0.5 text-xs text-text-muted items-center">
       <span>{stats.tokens} tokens</span>
       <span className="text-green">{stats.tok_per_sec.toFixed(1)} tok/s</span>
       <span>{(stats.time_ms / 1000).toFixed(2)}s</span>
+      {modelName && <span className="text-text-muted/50 truncate max-w-[160px]">· {modelName}</span>}
     </div>
   )
 }
