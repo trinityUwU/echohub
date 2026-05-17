@@ -1,3 +1,4 @@
+import { motion } from 'framer-motion'
 import type { ChatMessage, GenerationStats, MessageStats } from '@/types'
 import { MarkdownContent } from './MarkdownContent'
 import { ThinkingBlock } from './ThinkingBlock'
@@ -25,7 +26,11 @@ export function MessageRow({ message, genStats }: MessageRowProps): React.ReactE
       : text
 
   return (
-    <div className={`flex px-5 py-1.5 gap-3 hover:bg-white/[0.02] transition-colors animate-slide-up ${isUser ? 'flex-row-reverse' : ''}`}>
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+      className={`flex px-5 py-1.5 gap-3 hover:bg-white/[0.02] transition-colors ${isUser ? 'flex-row-reverse' : ''}`}>
       <Avatar role={message.role} />
       <div className={`max-w-[680px] flex flex-col gap-1 ${isUser ? 'items-end' : ''}`}>
         {images.length > 0 && (
@@ -46,7 +51,7 @@ export function MessageRow({ message, genStats }: MessageRowProps): React.ReactE
         {genStats && !isUser && <GenStatsRow stats={genStats} />}
         {!genStats && message.stats && !isUser && <MsgStatsRow stats={message.stats} />}
       </div>
-    </div>
+    </motion.div>
   )
 }
 

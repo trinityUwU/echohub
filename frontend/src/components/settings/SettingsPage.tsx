@@ -128,10 +128,10 @@ function HfTokenRow(): React.ReactElement {
 }
 
 function HardwareSection(): React.ReactElement {
-  const [settings, setSettings] = useState<{ flash_attn: boolean; keep_model_in_memory: boolean; gpu: { name: string; vram_gb: number } } | null>(null)
+  const [settings, setSettings] = useState<{ flash_attn: boolean; keep_model_in_memory: boolean; gpu: { name: string; vram_gb: number; type: string }; gpu_vram_limit_gb: number | null; gpu_util_limit_pct: number | null; cpu_threads: number | null } | null>(null)
 
   useEffect(() => {
-    getInferenceSettings().then(setSettings).catch(() => {})
+    getInferenceSettings().then(s => setSettings(s as typeof s & { gpu_vram_limit_gb: number|null; gpu_util_limit_pct: number|null; cpu_threads: number|null })).catch(() => {})
   }, [])
 
   const toggle = async (key: string, val: boolean): Promise<void> => {
@@ -155,6 +155,40 @@ function HardwareSection(): React.ReactElement {
         </SettingsRow>
         <SettingsRow label="Keep model in memory" desc="Don't unload when starting a new chat.">
           <Toggle on={settings?.keep_model_in_memory ?? false} onChange={v => toggle('keep_model_in_memory', v)} />
+        </SettingsRow>
+      </SettingsGroup>
+      <SettingsGroup title="Resource limits" desc="Cap VRAM and GPU utilization. Applies to all model loads. Leave blank to use all available resources.">
+        <SettingsRow label="VRAM limit" desc={`Available: ${settings?.gpu.vram_gb ?? '?'} GB — set a lower cap if you share the GPU`}>
+          <div className="flex items-center gap-2">
+            <input
+              type="number" min="1" max={settings?.gpu.vram_gb ?? 24} step="0.5"
+              value={settings?.gpu_vram_limit_gb ?? ''}
+              onChange={e => {
+                const v = e.target.value ? parseFloat(e.target.value) : null
+                setSettings(prev => prev ? { ...prev, gpu_vram_limit_gb: v } : prev)
+                setInferenceSetting('gpu_vram_limit_gb', v as number).catch(() => {})
+              }}
+              placeholder="e.g. 8"
+              className="w-20 bg-elevated border border-border focus:border-accent rounded-sm px-2.5 py-1.5 text-sm font-mono text-text-primary outline-none transition-colors"
+            />
+            <span className="text-xs text-text-muted">GB</span>
+          </div>
+        </SettingsRow>
+        <SettingsRow label="Max GPU utilization" desc="Sets the ceiling for vLLM memory allocation">
+          <div className="flex items-center gap-2">
+            <input
+              type="number" min="50" max="95" step="1"
+              value={settings?.gpu_util_limit_pct ?? ''}
+              onChange={e => {
+                const v = e.target.value ? parseInt(e.target.value) : null
+                setSettings(prev => prev ? { ...prev, gpu_util_limit_pct: v } : prev)
+                setInferenceSetting('gpu_util_limit_pct', v as number).catch(() => {})
+              }}
+              placeholder="e.g. 80"
+              className="w-20 bg-elevated border border-border focus:border-accent rounded-sm px-2.5 py-1.5 text-sm font-mono text-text-primary outline-none transition-colors"
+            />
+            <span className="text-xs text-text-muted">%</span>
+          </div>
         </SettingsRow>
       </SettingsGroup>
     </>

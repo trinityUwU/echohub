@@ -18,7 +18,7 @@ router = APIRouter(prefix="/models", tags=["models"])
 
 @router.get("/search", response_model=list[ModelInfo])
 def search_models(
-    q: str = Query(..., min_length=1),
+    q: str = Query("", min_length=0),
     filters: Optional[str] = Query(None, description="Comma-separated: awq,gptq,gguf"),
     page: int = Query(0, ge=0),
     page_size: int = Query(20, ge=5, le=50),

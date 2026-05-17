@@ -93,6 +93,9 @@ def reset_to_default(key: str) -> None:
 INFERENCE_DEFAULTS = {
     "flash_attn": True,
     "keep_model_in_memory": False,
+    "gpu_vram_limit_gb": None,       # None = use all available VRAM
+    "gpu_util_limit_pct": None,      # None = auto-calculate (72% default in modal)
+    "cpu_threads": None,             # None = os.cpu_count()
 }
 
 

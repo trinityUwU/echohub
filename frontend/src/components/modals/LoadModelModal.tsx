@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Modal } from '@/components/shared/Modal'
 import { Slider } from '@/components/shared/Slider'
 import { Btn } from '@/components/shared/Btn'
+import { getInferenceSettings } from '@/api/client'
 import type { ModelInfo } from '@/types'
 
 interface CanLoadResult {
@@ -27,6 +28,15 @@ function kvCacheGb(ctxLen: number, paramsBillion: number): number {
 
 export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCancel }: LoadModelModalProps): React.ReactElement {
   const [gpuUtilPct, setGpuUtilPct] = useState(72)
+  const [vramLimitGb, setVramLimitGb] = useState<number | null>(null)
+
+  useEffect(() => {
+    getInferenceSettings().then(s => {
+      const ext = s as unknown as { gpu_util_limit_pct?: number | null; gpu_vram_limit_gb?: number | null }
+      if (ext.gpu_util_limit_pct) setGpuUtilPct(ext.gpu_util_limit_pct)
+      if (ext.gpu_vram_limit_gb) setVramLimitGb(ext.gpu_vram_limit_gb)
+    }).catch(() => {})
+  }, [])
   const [ctxLen, setCtxLen] = useState(Math.min(model.max_context_window ?? 16384, 16384))
   const [cudaGraphs, setCudaGraphs] = useState<'default' | 'limited' | 'disabled'>('default')
   const [maxCaptureSize, setMaxCaptureSize] = useState(512)
@@ -61,7 +71,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, onConfirm, onCa
 
   // nvidia-smi reports in MiB, frontend already divides by 1024 → vramTotalGb is GiB
   // No additional conversion needed.
-  const vramCudaGib = vramTotalGb
+  const vramCudaGib = vramLimitGb ? Math.min(vramTotalGb, vramLimitGb) : vramTotalGb
   const budgetGb    = vramCudaGib * gpuUtil
   // vLLM checks: free >= budget. free = vramCuda - vramUsed
   const cudaFreeGib = vramCudaGib - vramUsedGb

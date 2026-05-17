@@ -26,6 +26,7 @@ export function DiscoverPage({ onLoad, onDownloaded, downloadJobs, vramTotalGb, 
   const { favorites, isFavorite, toggleFavorite } = useFavorites()
 
   const doSearch = useCallback(async (q: string): Promise<void> => {
+    if (!q.trim() && filter === 'All') return  // don't search on empty query with no filter
     try {
       const data = await searchModels(q, filter === 'All' ? undefined : filter.toLowerCase())
       setResults(data)

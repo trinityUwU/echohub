@@ -348,7 +348,7 @@ function CompatBanner({ compat, installing, onInstall }: {
   compat: NonNullable<CompatResult>; installing: boolean; onInstall: () => void
 }): React.ReactElement {
   const ok = compat.compatible_vllm || compat.compatible_llama
-  const issues = compat.vllm_issues
+  const issues = compat.vllm_issues ?? []
   const required = compat.required_vllm_version
   const installed = compat.installed_vllm_versions ?? []
   const needsInstall = required && required !== 'future' && !installed.includes(required)

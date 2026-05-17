@@ -365,3 +365,12 @@ export function isThinkingControllable(modelId: string | undefined): boolean {
   const m = modelId.toLowerCase()
   return m.includes('qwen3') || m.includes('qwq')
 }
+
+export const getGpuLimits = (): Promise<{
+  gpu_vram_limit_gb: number | null
+  gpu_util_limit_pct: number | null
+  cpu_threads: number | null
+}> => apiRequest('/settings/inference')
+
+export const setGpuLimit = (key: string, value: number | null): Promise<{ status: string }> =>
+  apiRequest(`/settings/inference/${key}`, { method: 'POST', body: JSON.stringify({ value }) })
