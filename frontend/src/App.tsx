@@ -31,7 +31,7 @@ export default function App(): React.ReactElement {
 
   const { downloaded, loadedModel, loadingModelId, loadError, unloading, refresh, loadModel, unloadModel } = useModels()
   const gpu = useGpu()
-  const { conversations, activeId, activeMessages, newConversation, selectConversation, setActiveMessages } = useConversations()
+  const { conversations, archivedConversations, activeId, activeMessages, newConversation, selectConversation, deleteConversation, archiveConversation, unarchiveConversation, setActiveMessages } = useConversations()
 
   useEffect(() => {
     const unsub = subscribeDownloads(jobs => {
@@ -109,10 +109,14 @@ export default function App(): React.ReactElement {
             gpu={gpu}
             hasCuda={hasCuda}
             conversations={conversations}
+            archivedConversations={archivedConversations}
             activeId={activeId}
             activeMessages={activeMessages}
             onNewConversation={() => { newConversation().catch(console.error) }}
             onSelectConversation={selectConversation}
+            onDeleteConversation={id => deleteConversation(id).catch(console.error)}
+            onArchiveConversation={id => archiveConversation(id).catch(console.error)}
+            onUnarchiveConversation={id => unarchiveConversation(id).catch(console.error)}
             onOpenPicker={() => setShowPicker(true)}
             onEject={unloadModel}
             onGoToSettings={() => setPage('settings')}
@@ -139,6 +143,7 @@ export default function App(): React.ReactElement {
             downloadJobs={Object.fromEntries(downloadJobs.map(j => [j.model_id, j]))}
             vramTotalGb={gpu ? gpu.vram_total_mb / 1024 : 0}
             vramFreeGb={gpu ? gpu.vram_free_mb / 1024 : 0}
+            onGoToEngines={() => setPage('settings')}
           />
         </div>
         <div className={`flex flex-1 overflow-hidden ${page === 'downloads' ? 'animate-fade-in' : 'hidden'}`}>

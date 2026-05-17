@@ -20,9 +20,10 @@ interface ModelDetailPanelProps {
   onDownloaded: () => void
   onToggleFavorite?: (model: ModelInfo) => void
   onSelectRelated?: (id: string) => void
+  onGoToEngines?: (version?: string) => void
 }
 
-export function ModelDetailPanel({ model, loading, vramFreeGb, job, isFavorite, onClose, onLoad, onDownloaded, onToggleFavorite, onSelectRelated }: ModelDetailPanelProps): React.ReactElement {
+export function ModelDetailPanel({ model, loading, vramFreeGb, job, isFavorite, onClose, onLoad, onDownloaded, onToggleFavorite, onSelectRelated, onGoToEngines }: ModelDetailPanelProps): React.ReactElement {
   const [tab, setTab] = useState<Tab>('info')
   const [selectedGguf, setSelectedGguf] = useState<GgufFile | null>(
     model.gguf_files?.find(f => f.variant.includes('Q4_K_M')) ?? model.gguf_files?.[0] ?? null
@@ -144,7 +145,7 @@ export function ModelDetailPanel({ model, loading, vramFreeGb, job, isFavorite, 
         {tab === 'info' && (
           loading
             ? <div className="flex items-center justify-center h-24 text-text-muted text-sm animate-pulse">Loading details…</div>
-            : <InfoTab model={model} selectedGguf={selectedGguf} onSelectGguf={setSelectedGguf} vramFreeGb={vramFreeGb} onSelectRelated={onSelectRelated} compat={compat} installingEngine={installingEngine} onInstallEngine={() => setInstallingEngine(true)} />
+            : <InfoTab model={model} selectedGguf={selectedGguf} onSelectGguf={setSelectedGguf} vramFreeGb={vramFreeGb} onSelectRelated={onSelectRelated} compat={compat} installingEngine={installingEngine} onInstallEngine={() => { setInstallingEngine(true); onGoToEngines?.(compat?.required_vllm_version ?? undefined) }} />
         )}
         {tab === 'readme' && <ReadmeTab content={readme} loading={readmeLoading} />}
       </div>
@@ -396,8 +397,9 @@ function CompatBanner({ compat, installing, onInstall }: {
         </div>
         {action === 'install' && (
           <button onClick={onInstall} disabled={installing}
-            className="text-2xs px-2.5 py-1 rounded-sm bg-accent hover:bg-accent-hover disabled:opacity-50 text-white cursor-pointer transition-colors flex-shrink-0 font-medium">
-            {installing ? 'Installing…' : actionLabel.install}
+            className="text-2xs px-2.5 py-1 rounded-sm bg-accent hover:bg-accent-hover disabled:opacity-50 text-white cursor-pointer transition-colors flex-shrink-0 font-medium flex items-center gap-1">
+            <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            {installing ? 'Opening Settings…' : `Install vLLM ${required}`}
           </button>
         )}
         {action !== 'install' && (

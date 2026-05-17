@@ -14,9 +14,10 @@ interface DiscoverPageProps {
   downloadJobs: Record<string, DownloadJob>
   vramTotalGb: number
   vramFreeGb: number
+  onGoToEngines?: (version?: string) => void
 }
 
-export function DiscoverPage({ onLoad, onDownloaded, downloadJobs, vramTotalGb, vramFreeGb }: DiscoverPageProps): React.ReactElement {
+export function DiscoverPage({ onLoad, onDownloaded, downloadJobs, vramTotalGb, vramFreeGb, onGoToEngines }: DiscoverPageProps): React.ReactElement {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('All')
   const [showFavs, setShowFavs] = useState(false)
@@ -100,6 +101,7 @@ export function DiscoverPage({ onLoad, onDownloaded, downloadJobs, vramTotalGb, 
           onLoad={() => { onLoad(selected.id); closePanel() }}
           onDownloaded={onDownloaded}
           onToggleFavorite={toggleFavorite}
+          onGoToEngines={onGoToEngines}
           onSelectRelated={(id) => {
             const stub: ModelInfo = { id, name: id.split('/').pop() ?? id, author: id.split('/')[0] ?? null, size_gb: null, quantization: null, params_billion: null, vram_estimate_gb: null, max_context_window: null, description: null, last_modified: null, pipeline_tag: null, arch_tag: null, gguf_files: null, more_from_author: null, downloads: null, likes: null, downloaded: false, loaded: false, gated: false, capabilities: { thinking: false, vision: false, code: false, multilingual: false, tools: false } }
             selectModel(stub)

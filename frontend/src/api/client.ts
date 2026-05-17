@@ -374,3 +374,12 @@ export const getGpuLimits = (): Promise<{
 
 export const setGpuLimit = (key: string, value: number | null): Promise<{ status: string }> =>
   apiRequest(`/settings/inference/${key}`, { method: 'POST', body: JSON.stringify({ value }) })
+
+export const archiveConversation = (id: string): Promise<{ status: string }> =>
+  apiRequest(`/conversations/${id}/archive`, { method: 'PATCH' })
+
+export const unarchiveConversation = (id: string): Promise<{ status: string }> =>
+  apiRequest(`/conversations/${id}/unarchive`, { method: 'PATCH' })
+
+export const getArchivedConversations = (): Promise<ConversationSummary[]> =>
+  apiRequest('/conversations?archived=1')

@@ -10,6 +10,20 @@ from backend.services import db
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
+@router.get("", response_model=list)
+def list_conversations_filtered(archived: int = 0):
+    """Return conversations filtered by archived status (0=active, 1=archived)."""
+    with db._lock:
+        conn = db._get_conn()
+        rows = conn.execute(
+            "SELECT c.*, COUNT(m.id) AS message_count FROM conversations c "
+            "LEFT JOIN messages m ON m.conversation_id = c.id "
+            "WHERE c.archived = ? "
+            "GROUP BY c.id ORDER BY c.updated_at DESC",
+            (archived,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
 
 class CreateConversationBody(BaseModel):
     id: str
@@ -112,3 +126,23 @@ def clear_messages(conv_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Conversation not found")
     db.delete_messages(conv_id)
     return {"status": "cleared"}
+
+
+@router.patch("/{conv_id}/archive")
+def archive_conversation(conv_id: str) -> dict:
+    with db._lock:
+        conn = db._get_conn()
+        conn.execute("UPDATE conversations SET archived=1, updated_at=? WHERE id=?",
+                     (datetime.utcnow().isoformat(), conv_id))
+        conn.commit()
+    return {"status": "archived", "id": conv_id}
+
+
+@router.patch("/{conv_id}/unarchive")
+def unarchive_conversation(conv_id: str) -> dict:
+    with db._lock:
+        conn = db._get_conn()
+        conn.execute("UPDATE conversations SET archived=0, updated_at=? WHERE id=?",
+                     (datetime.utcnow().isoformat(), conv_id))
+        conn.commit()
+    return {"status": "unarchived", "id": conv_id}

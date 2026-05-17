@@ -17,10 +17,14 @@ interface ChatPageProps {
   gpu: GpuStats | null
   hasCuda: boolean
   conversations: ConversationSummary[]
+  archivedConversations: ConversationSummary[]
   activeId: string | null
   activeMessages: ChatMessage[]
   onNewConversation: () => void | Promise<void>
   onSelectConversation: (id: string) => void
+  onDeleteConversation: (id: string) => void
+  onArchiveConversation: (id: string) => void
+  onUnarchiveConversation: (id: string) => void
   onOpenPicker: () => void
   onEject: () => void
   onGoToSettings: () => void
@@ -29,8 +33,9 @@ interface ChatPageProps {
 
 export function ChatPage({
   loadedModel, loading, loadingPct, gpu, hasCuda,
-  conversations, activeId, activeMessages,
+  conversations, archivedConversations, activeId, activeMessages,
   onNewConversation, onSelectConversation,
+  onDeleteConversation, onArchiveConversation, onUnarchiveConversation,
   onOpenPicker, onEject, onGoToSettings,
   setActiveMessages,
 }: ChatPageProps): React.ReactElement {
@@ -88,9 +93,13 @@ export function ChatPage({
     <div className="flex flex-1 overflow-hidden">
       <ConvSidebar
         conversations={conversations}
+        archivedConversations={archivedConversations}
         activeId={activeId}
         onSelect={onSelectConversation}
         onNew={onNewConversation}
+        onDelete={onDeleteConversation}
+        onArchive={onArchiveConversation}
+        onUnarchive={onUnarchiveConversation}
         gpu={gpu}
       />
       <div className="flex flex-col flex-1 overflow-hidden">

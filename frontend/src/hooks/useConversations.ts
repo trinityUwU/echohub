@@ -3,6 +3,9 @@ import {
   createConversation,
   deleteConversation as apiDeleteConversation,
   getConversations,
+  getArchivedConversations,
+  archiveConversation as apiArchive,
+  unarchiveConversation as apiUnarchive,
   getMessages,
   updateConversation,
 } from '@/api/client'
@@ -21,14 +24,16 @@ function chatMessageFromStored(stored: import('@/types').StoredMessage): ChatMes
 
 export function useConversations() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
+  const [archivedConversations, setArchivedConversations] = useState<ConversationSummary[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [activeMessages, setActiveMessages] = useState<ChatMessage[]>([])
   const [loading, setLoading] = useState(true)
 
   // Load conversation list at mount
   useEffect(() => {
-    getConversations()
-      .then(convs => {
+    Promise.all([getConversations(), getArchivedConversations().catch(() => [])])
+      .then(([convs, archived]) => {
+        setArchivedConversations(archived)
         setConversations(convs)
         if (convs.length > 0) {
           const first = convs[0]
@@ -88,6 +93,25 @@ export function useConversations() {
     })
   }, [activeId])
 
+  const archiveConversation = useCallback(async (id: string) => {
+    await apiArchive(id)
+    const conv = conversations.find(c => c.id === id)
+    if (conv) {
+      setConversations(prev => prev.filter(c => c.id !== id))
+      setArchivedConversations(prev => [conv, ...prev])
+      if (activeId === id) { setActiveId(null); setActiveMessages([]) }
+    }
+  }, [conversations, activeId])
+
+  const unarchiveConversation = useCallback(async (id: string) => {
+    await apiUnarchive(id)
+    const conv = archivedConversations.find(c => c.id === id)
+    if (conv) {
+      setArchivedConversations(prev => prev.filter(c => c.id !== id))
+      setConversations(prev => [conv, ...prev])
+    }
+  }, [archivedConversations])
+
   const renameConversation = useCallback(async (id: string, title: string) => {
     const updated = await updateConversation(id, { title })
     setConversations(prev => prev.map(c => c.id === id ? updated : c))
@@ -108,6 +132,9 @@ export function useConversations() {
     selectConversation,
     updateMessages,
     deleteConversation,
+    archiveConversation,
+    unarchiveConversation,
+    archivedConversations,
     renameConversation,
     setActiveMessages,
   }

@@ -61,8 +61,11 @@ def init_db() -> None:
                 title TEXT NOT NULL DEFAULT 'New Chat',
                 model_id TEXT,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                archived INTEGER NOT NULL DEFAULT 0
             );
+            -- Add archived column if missing (migration)
+            PRAGMA table_info(conversations);
 
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
