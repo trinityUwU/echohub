@@ -311,7 +311,7 @@ def _auto_bench_name(data: dict) -> str:
     profile = data.get("profile_name", "")
     ts = data.get("timestamp")
     dt = datetime.utcfromtimestamp(ts) if ts else datetime.utcnow()
-    date_str = dt.strftime("%Y%m%d-%H%M")
+    date_str = dt.strftime("%d %b %H:%M")
     if profile:
         return f"{short_model}-{profile}-{date_str}"
     return f"{short_model}-{date_str}"
