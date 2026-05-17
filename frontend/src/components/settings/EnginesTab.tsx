@@ -89,7 +89,7 @@ export function EnginesTab(): React.ReactElement {
           {data?.versions.map(v => (
             <VersionCard
               key={v.version} v={v}
-              canDelete={(data?.versions.filter(x => x.operational).length ?? 0) > 1}
+              canDelete={!v.operational || (data?.versions.filter(x => x.operational).length ?? 0) > 1}
               onDelete={() => handleDelete(v.version)}
             />
           ))}

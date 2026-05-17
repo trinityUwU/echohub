@@ -208,8 +208,12 @@ def get_default_python() -> Path:
 
 
 def can_delete(version: str) -> tuple[bool, str]:
-    """Returns (can_delete, reason). Protected if it's the last version."""
+    """Returns (can_delete, reason). Only protects last *operational* version."""
     versions = list_versions()
+    target = next((v for v in versions if v["version"] == version), None)
+    # Non-operational versions can always be deleted
+    if target and not target["operational"]:
+        return True, ""
     operational = [v for v in versions if v["operational"]]
     if len(operational) <= 1:
         return False, "Cannot delete the last operational vLLM installation"
