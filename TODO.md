@@ -2,64 +2,64 @@
 *Dernière mise à jour : 2026-05-17*
 
 ## En cours
-- [ ] **Multi-venv vLLM** — architecture venvs isolés par version, Settings/Engines, compatibility routing
+- [ ] **Onboarding wizard** — premier lancement, wizard multi-étapes
+- [ ] **start.sh universel** — depuis clone, détection OS, build complet
+
+## Terminé cette session ✅ (v0.2 en cours)
+- [x] vllm_manager.py — scan, taille, validation, install SSE, delete guard
+- [x] Settings/Engines — liste versions, install, delete, coverage warning
+- [x] config_service.py — models_dir, vllm_envs_dir, inference settings persistés
+- [x] migration_service.py — state machine, resume crash, copy+verify
+- [x] PathsTab.tsx — edit paths, migration panel logs live
+- [x] MigrationBanner — popup chat si migration pending
+- [x] engine_router — vllm_version param, routing par version
+- [x] CompatBanner — bouton Install vLLM X.Y si version requise absente
+- [x] Dialog.tsx — remplace alert/confirm natifs
+- [x] Flash attention + keep_model_in_memory toggles
+- [x] README grand public, docs/v0.1-foundation, docs/v0.2-multi-vllm
 
 ## À faire (priorité)
 
-### Multi-venv vLLM (P1 — session en cours)
-- [ ] `vllm_manager.py` — scan venvs `~/.local/share/echohub/vllm-envs/`, taille disque, statut
-- [ ] Settings > onglet "Engines" — liste versions installées, taille, statut opérationnel
-- [ ] Protection : impossible de supprimer la dernière version installée
-- [ ] Warning si version unique couvre < 20% des architectures communes
-- [ ] Install nouvelle version depuis Settings — SSE logs temps réel, progress, durée estimée
-- [ ] `engine_router.py` — sélection venv python selon version vLLM requise par modèle
-- [ ] DB — persister version vLLM utilisée par modèle chargé
-- [ ] `compatibility` endpoint — retourner version vLLM minimale requise
-- [ ] ModelDetailPanel — badge version requise + bouton "Install vLLM X.Y" si absent
+### Onboarding (P1 — en cours)
+- [ ] DB flag `onboarding_complete` — premier lancement détecté
+- [ ] Wizard 6 étapes : Welcome → Storage → Hardware → Engines → Compatibility → Done
+- [ ] Transparent sur espace disque (~5-8 GB par vLLM env, ~2-70 GB par modèle)
+- [ ] Opt-in install vLLM supplémentaires depuis l'onboarding
+- [ ] Backend `/settings/onboarding` GET/POST
 
-### Onboarding (P2)
-- [ ] Tutoriel premier lancement — explique la plus-value, gestion dépendances, multi-venv
-- [ ] Doit être explicite sur l'espace disque (~5-8 GB par version vLLM)
-- [ ] Choix opt-in pour installer plusieurs versions dès l'onboarding
+### start.sh universel (P1 — en cours)
+- [ ] Détection OS : Debian/Ubuntu, Arch, Fedora, macOS
+- [ ] Install deps système par OS (webkit2gtk, gcc, cmake, python3, etc.)
+- [ ] Vérifie/installe Rust (rustup) + Bun
+- [ ] Crée backend/.venv + compile llama-cpp selon GPU (CUDA/ROCm/Metal/CPU)
+- [ ] Init vllm-envs/0.21.0 ou migration depuis legacy .venv-vllm
+- [ ] `cargo tauri build` ou `tauri dev` selon flag
+- [ ] Ouvre l'app → premier lancement = onboarding automatique
 
-### start.sh universel (P2)
-- [ ] Détection OS (Debian/Ubuntu, Arch, Fedora, macOS)
-- [ ] Build complet automatique selon OS : deps système, venv Python, llama-cpp CUDA/ROCm/Metal
-- [ ] Lance l'app Tauri à la fin
-- [ ] Première ouverture = onboarding automatique
-
-### Backend (P3 — en attente)
-- [ ] Test load GGUF réel avec llama-cpp CUDA
-- [ ] Badge engine dans l'UI (llama/vLLM visible sur modèle chargé)
+### Backend (P2)
+- [ ] DB : persister vllm_version utilisée par modèle chargé
+- [ ] Badge engine dans l'UI (llama/vLLM + version visible sur modèle chargé)
 - [ ] GPU service : fallback AMD (rocm-smi) et Mac (powermetrics)
 
-### Features (P3)
+### Features (P2)
 - [ ] HF_TOKEN : feedback si token invalide
 - [ ] Chat export (markdown)
-- [ ] Multi-GPU support vLLM (tensor_parallel_size)
 
-### Packaging (P4)
+### Packaging (P3)
 - [ ] .AppImage / .deb / .dmg
 - [ ] Python sidecar WebSocket (remplacer SSE pour streaming)
 
 ## Backlog
 - [ ] MCP server EchoHub → Claude Code pilote les modèles locaux
 - [ ] EchoForge ↔ EchoHub API locale
-- [ ] Orchestrateur cloud (Groq/Mistral) qui pilote agents locaux
+- [ ] Multi-GPU support vLLM (tensor_parallel_size)
 
-## Terminé ✅
-- [x] Maquette HTML complète (mockup/index.html)
-- [x] Tauri v2 init + composants React (NavRail, Chat, Library, Discover, Downloads, Settings)
-- [x] Sidecar Python — Rust spawne uvicorn, port dynamique, kill à fermeture
-- [x] Backend dual-engine : llama-cpp-python CUDA + vLLM
-- [x] SQLite conversations + messages + stats
-- [x] Favoris modèles (localStorage)
-- [x] ModelDetailPanel — tabs Info/README, GGUF variants avec VRAM, lien HF
-- [x] Compatibility check avant download (AWQ+vision détecté)
-- [x] CUDA Graphs control dans modal Load (default/limited/disabled)
-- [x] Support images dans le chat (vision models)
-- [x] Profils chat avec save/load/delete
-- [x] Pages persistent entre navigations (CSS hidden)
-- [x] SSE stream flush fix (tokens/stats affichés)
-- [x] LoadModelModal VRAM preview réactive
+## Terminé ✅ (v0.1 stable)
+- [x] App Tauri native + sidecar Python port dynamique
+- [x] Dual-engine GGUF/AWQ, SQLite conversations, profils chat
+- [x] Discover : search HF, download, favorites, compat check
+- [x] Library, Downloads, Settings
+- [x] LoadModal VRAM preview réactive, CUDA graphs control
+- [x] Support images vision models
+- [x] Pages persistent entre navigations
 - [x] GitHub public : https://github.com/trinityUwU/echohub

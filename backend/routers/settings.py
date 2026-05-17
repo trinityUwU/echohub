@@ -269,3 +269,26 @@ def _get_gpu_info() -> dict:
         parts = result.stdout.strip().split(", ")
         return {"name": parts[0], "vram_gb": round(int(parts[1]) / 1024, 1), "type": "nvidia"}
     return {"name": "No GPU", "vram_gb": 0, "type": "cpu"}
+
+
+# ── Onboarding ─────────────────────────────────────────────────────────────
+
+@router.get("/onboarding")
+def get_onboarding_status() -> dict:
+    from backend.services.db import get_app_state
+    done = get_app_state("onboarding_complete") == "true"
+    return {"complete": done}
+
+
+@router.post("/onboarding/complete")
+def complete_onboarding() -> dict:
+    from backend.services.db import set_app_state
+    set_app_state("onboarding_complete", "true")
+    return {"status": "ok"}
+
+
+@router.post("/onboarding/reset")
+def reset_onboarding() -> dict:
+    from backend.services.db import set_app_state
+    set_app_state("onboarding_complete", "false")
+    return {"status": "reset"}

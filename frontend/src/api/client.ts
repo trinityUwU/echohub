@@ -343,3 +343,9 @@ export const getInferenceSettings = (): Promise<{
 
 export const setInferenceSetting = (key: string, value: boolean | number | string): Promise<{ status: string }> =>
   apiRequest(`/settings/inference/${key}`, { method: 'POST', body: JSON.stringify({ value }) })
+
+export const getOnboardingStatus = (): Promise<{ complete: boolean }> =>
+  apiRequest('/settings/onboarding')
+
+export const completeOnboarding = (): Promise<{ status: string }> =>
+  apiRequest('/settings/onboarding/complete', { method: 'POST' })

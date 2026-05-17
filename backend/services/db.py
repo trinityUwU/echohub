@@ -75,6 +75,11 @@ def init_db() -> None:
             );
 
             CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id);
+
+            CREATE TABLE IF NOT EXISTS app_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
         """)
         conn.commit()
     logger.info("DB initialized at {}", get_db_path())
@@ -215,4 +220,22 @@ def delete_messages(conv_id: str) -> None:
     with _lock:
         conn = _get_conn()
         conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conv_id,))
+        conn.commit()
+
+
+def get_app_state(key: str) -> str | None:
+    with _lock:
+        conn = _get_conn()
+        row = conn.execute("SELECT value FROM app_state WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_app_state(key: str, value: str) -> None:
+    with _lock:
+        conn = _get_conn()
+        conn.execute(
+            "INSERT INTO app_state (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value)
+        )
         conn.commit()

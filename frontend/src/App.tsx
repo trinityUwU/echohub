@@ -13,11 +13,14 @@ import { SettingsPage } from '@/components/settings/SettingsPage'
 import { LoadModelModal } from '@/components/modals/LoadModelModal'
 import { ModelPickerModal } from '@/components/modals/ModelPickerModal'
 import { useDialog } from '@/components/shared/Dialog'
+import { OnboardingWizard } from '@/components/onboarding/OnboardingWizard'
+import { getOnboardingStatus } from '@/api/client'
 
 type Page = 'chat' | 'library' | 'discover' | 'downloads' | 'settings'
 
 export default function App(): React.ReactElement {
   const { confirm, element: dialogEl } = useDialog()
+  const [showOnboarding, setShowOnboarding] = useState(false)
   const [page, setPage] = useState<Page>('chat')
   const [pendingLoad, setPendingLoad] = useState<ModelInfo | null>(null)
   const [showPicker, setShowPicker] = useState(false)
@@ -56,6 +59,12 @@ export default function App(): React.ReactElement {
     }
     return () => clearInterval(loadPctTimer.current ?? undefined)
   }, [loadingModelId])
+
+  useEffect(() => {
+    getOnboardingStatus()
+      .then(r => { if (!r.complete) setShowOnboarding(true) })
+      .catch(() => {})
+  }, [])
 
   const requestLoad = (modelId: string): void => {
     const model = downloaded.find(m => m.id === modelId)
@@ -167,6 +176,7 @@ export default function App(): React.ReactElement {
           Load failed: {loadError}
         </div>
       )}
+      {showOnboarding && <OnboardingWizard onComplete={() => setShowOnboarding(false)} />}
       {dialogEl}
     </div>
   )
