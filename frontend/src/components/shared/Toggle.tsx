@@ -9,7 +9,7 @@ export function Toggle({ on, onChange }: ToggleProps): React.ReactElement {
       role="switch"
       aria-checked={on}
       onClick={() => onChange(!on)}
-      className={`relative w-[30px] h-4 rounded-full cursor-pointer transition-colors duration-200 ${
+      className={`relative w-[30px] h-4 rounded-full cursor-pointer transition-colors duration-200 outline-none focus:outline-none ${
         on ? 'bg-accent' : 'bg-overlay'
       }`}
     >
