@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import type { ConversationSummary, GpuStats } from '@/types'
-import { useContextMenu } from '@/components/shared/ContextMenu'
+import { useContextMenu } from '@/components/shared/useContextMenu'
 
 type Filter = 'active' | 'archived'
 

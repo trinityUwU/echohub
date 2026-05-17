@@ -1,4 +1,4 @@
-import { createContext, useContext, useCallback, useEffect, useState, useRef } from 'react'
+import { createContext, useCallback, useEffect, useState, useRef } from 'react'
 
 export interface ContextMenuItem {
   label: string
@@ -14,15 +14,11 @@ interface MenuState {
   items: ContextMenuItem[]
 }
 
-interface ContextMenuCtx {
+export interface ContextMenuCtxType {
   open: (e: React.MouseEvent, items: ContextMenuItem[]) => void
 }
 
-const Ctx = createContext<ContextMenuCtx>({ open: () => {} })
-
-export function useContextMenu(): ContextMenuCtx {
-  return useContext(Ctx)
-}
+export const ContextMenuCtx = createContext<ContextMenuCtxType>({ open: () => {} })
 
 export function ContextMenuProvider({ children }: { children: React.ReactNode }): React.ReactElement {
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -34,14 +30,12 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
     setMenu({ x: e.clientX, y: e.clientY, items })
   }, [])
 
-  // Block native context menu everywhere
   useEffect(() => {
     const block = (e: MouseEvent) => e.preventDefault()
     window.addEventListener('contextmenu', block)
     return () => window.removeEventListener('contextmenu', block)
   }, [])
 
-  // Close on outside click or Escape
   useEffect(() => {
     if (!menu) return
     const close = (e: MouseEvent) => {
@@ -53,7 +47,6 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
     return () => { window.removeEventListener('mousedown', close); window.removeEventListener('keydown', esc) }
   }, [menu])
 
-  // Adjust position if menu would go off-screen
   const adjustedPos = menu ? (() => {
     const W = window.innerWidth
     const H = window.innerHeight
@@ -66,7 +59,7 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
   })() : null
 
   return (
-    <Ctx.Provider value={{ open }}>
+    <ContextMenuCtx.Provider value={{ open }}>
       {children}
       {menu && adjustedPos && (
         <div
@@ -96,6 +89,6 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
           )}
         </div>
       )}
-    </Ctx.Provider>
+    </ContextMenuCtx.Provider>
   )
 }
