@@ -26,6 +26,10 @@ from loguru import logger
 from backend.services.user_data import get_user_data_dir
 
 ENVS_DIR_NAME = "vllm-envs"
+
+# Cache operational checks — importing vLLM takes 30-60s cold
+_operational_cache: dict[str, tuple[bool, float]] = {}  # version → (result, timestamp)
+_OPERATIONAL_TTL = 120  # seconds
 # Legacy path shipped with v0.1 — relative to project root
 LEGACY_VENV = Path(__file__).resolve().parents[3] / ".venv-vllm"
 
@@ -63,7 +67,11 @@ def _dir_size_gb(path: Path) -> float:
 
 
 def _is_operational(version: str) -> bool:
-    """Check that vLLM can be imported — quick subprocess test."""
+    """Check that vLLM can be imported — cached subprocess test."""
+    cached = _operational_cache.get(version)
+    if cached and (time.time() - cached[1]) < _OPERATIONAL_TTL:
+        return cached[0]
+
     py = _python(version)
     if not py.exists():
         return False
@@ -72,9 +80,20 @@ def _is_operational(version: str) -> bool:
             [str(py), "-c", "from vllm.model_executor.models import ModelRegistry; print('ok')"],
             capture_output=True, text=True, timeout=30,
         )
-        return result.returncode == 0 and "ok" in result.stdout
+        ok = result.returncode == 0 and "ok" in result.stdout
     except Exception:
-        return False
+        ok = False
+
+    _operational_cache[version] = (ok, time.time())
+    return ok
+
+
+def invalidate_operational_cache(version: str | None = None) -> None:
+    """Force re-check on next list_versions call."""
+    if version:
+        _operational_cache.pop(version, None)
+    else:
+        _operational_cache.clear()
 
 
 def _get_supported_arch_count(version: str) -> int:
@@ -360,6 +379,7 @@ async def install_version_stream(version: str) -> AsyncGenerator[str, None]:
     if result.returncode == 0:
         yield _sse(output, "ok")
         size_gb = _dir_size_gb(venv_dir)
+        invalidate_operational_cache(version)
         yield _sse(f"Installation complete — {size_gb} GB on disk", "ok")
         yield f"data: {{\"done\": true, \"success\": true, \"version\": \"{version}\", \"size_gb\": {size_gb}}}\n\n"
     else:

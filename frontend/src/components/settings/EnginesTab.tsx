@@ -82,10 +82,20 @@ export function EnginesTab(): React.ReactElement {
 
       {/* Installed versions */}
       <div>
-        <div className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-3">
-          Installed versions ({data?.operational_count ?? 0} operational)
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-xs font-semibold uppercase tracking-widest text-text-muted">
+            Installed versions ({data?.operational_count ?? 0} operational)
+          </div>
+          <button onClick={refresh} disabled={loading}
+            className="flex items-center gap-1 text-xs text-text-muted hover:text-text-secondary cursor-pointer transition-colors disabled:opacity-40">
+            {loading
+              ? <span className="w-3 h-3 border-2 border-text-muted/30 border-t-text-muted rounded-full animate-spin" />
+              : <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.01"/></svg>
+            }
+            Refresh
+          </button>
         </div>
-        {loading && <div className="text-sm text-text-muted animate-pulse">Loading...</div>}
+        {loading && <div className="text-sm text-text-muted animate-pulse">Checking versions…</div>}
         {data?.versions.length === 0 && !loading && (
           <div className="text-sm text-red">No vLLM installation found</div>
         )}
