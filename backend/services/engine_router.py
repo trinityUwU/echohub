@@ -117,19 +117,19 @@ def detect_gpu() -> dict:
 
 
 def is_vllm_available() -> bool:
-    """Check vLLM installation via file presence — no subprocess, no timeout risk."""
-    import glob as _glob
-    candidates = [
-        Path("/mnt/projects/echohub/.venv-vllm"),
-        Path(__file__).resolve().parents[3] / ".venv-vllm",
-    ]
-    for venv in candidates:
-        if not (venv / "bin" / "python").exists():
-            continue
-        for sp in venv.glob("lib/python*/site-packages"):
-            if (sp / "vllm").is_dir() or _glob.glob(str(sp / "vllm-*.dist-info")):
-                return True
-    return False
+    """Check vLLM availability via vllm_manager (supports multi-venv)."""
+    try:
+        from backend.services.vllm_manager import list_versions
+        return any(v["installed"] for v in list_versions())
+    except Exception:
+        # Fallback: check legacy path
+        import glob as _glob
+        legacy = Path("/mnt/projects/echohub/.venv-vllm")
+        if (legacy / "bin" / "python").exists():
+            for sp in legacy.glob("lib/python*/site-packages"):
+                if (sp / "vllm").is_dir() or _glob.glob(str(sp / "vllm-*.dist-info")):
+                    return True
+        return False
 
 
 # ──────────────────────────────────────────────────────────────────────────────

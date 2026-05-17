@@ -252,3 +252,39 @@ export const checkModelCompatibility = (modelId: string): Promise<{
   vllm_version: string
   error?: string
 }> => apiRequest(`/models/compatibility/${encodeURIComponent(modelId)}`)
+
+// ── Engine management ──────────────────────────────────────────────────────
+
+export const listEngines = (): Promise<{
+  versions: Array<{
+    version: string; path: string; installed: boolean; operational: boolean
+    size_gb: number; arch_count: number; is_legacy: boolean
+  }>
+  coverage_warning: string | null
+  total_versions: number
+  operational_count: number
+}> => apiRequest('/settings/engines')
+
+export const deleteEngine = (version: string): Promise<{ status: string; version: string }> =>
+  apiRequest(`/settings/engines/${encodeURIComponent(version)}`, { method: 'DELETE' })
+
+export function installEngineStream(
+  version: string,
+  onLine: (data: { level: string; msg: string; ts: number }) => void,
+  onDone: (result: { success: boolean; version?: string; size_gb?: number }) => void,
+): () => void {
+  let cancelled = false
+  apiUrl(`/settings/engines/install/${encodeURIComponent(version)}`).then(url => {
+    if (cancelled) return
+    const es = new EventSource(url)
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        if (data.done) { onDone(data); es.close() }
+        else onLine(data)
+      } catch { /* ignore */ }
+    }
+    es.onerror = () => { onDone({ success: false }); es.close() }
+  })
+  return () => { cancelled = true }
+}

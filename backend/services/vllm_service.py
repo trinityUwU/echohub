@@ -15,6 +15,24 @@ from backend.models.schemas import ModelInfo
 VLLM_PID_FILE = Path("/tmp/echohub_vllm.pid")
 VLLM_PORT = 37823
 VLLM_BASE_URL = f"http://127.0.0.1:{VLLM_PORT}"
+def _get_vllm_python(version: Optional[str] = None) -> Path:
+    """Get vLLM python for a specific version, or the default."""
+    try:
+        from backend.services.vllm_manager import get_python_for_version, get_default_python
+        if version:
+            py = get_python_for_version(version)
+            if py:
+                return py
+        return get_default_python()
+    except Exception:
+        # Fallback to legacy path
+        legacy = Path("/mnt/projects/echohub/.venv-vllm/bin/python")
+        if legacy.exists():
+            return legacy
+        raise FileNotFoundError("No vLLM installation found")
+
+
+# Kept for backward compat — actual path resolved dynamically
 VLLM_PYTHON = Path("/mnt/projects/echohub/.venv-vllm/bin/python")
 VRAM_SAFETY_MARGIN = 0.03   # 3% of total reserved
 VRAM_FIXED_OVERHEAD_MB = 1536  # 1.5GB fixed: vLLM process startup, NCCL, CUDA graphs
@@ -269,7 +287,7 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
     }
 
     cmd = [
-        str(VLLM_PYTHON), "-m", "vllm.entrypoints.openai.api_server",
+        str(_get_vllm_python()), "-m", "vllm.entrypoints.openai.api_server",
         "--model", model_path,
         "--served-model-name", model_id,  # expose HF id, not local path
         "--port", str(VLLM_PORT),

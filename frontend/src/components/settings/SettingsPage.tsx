@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { Toggle } from '@/components/shared/Toggle'
 import { Btn } from '@/components/shared/Btn'
+import { EnginesTab } from './EnginesTab'
 
-type Section = 'setup' | 'hardware' | 'models' | 'about'
+type Section = 'setup' | 'engines' | 'hardware' | 'models' | 'about'
 
 const NAV: { id: Section; label: string; icon: string }[] = [
   { id: 'setup',    label: 'Setup',    icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
+  { id: 'engines',  label: 'Engines',  icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
   { id: 'hardware', label: 'Hardware', icon: 'M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18' },
   { id: 'models',   label: 'Models',   icon: 'M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20' },
   { id: 'about',    label: 'About',    icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 7v4m0 4h.01' },
@@ -36,6 +38,7 @@ export function SettingsPage(): React.ReactElement {
         </nav>
         <div className="flex-1 overflow-y-auto px-7 py-6">
           {section === 'setup'    && <SetupSection />}
+          {section === 'engines'  && <EnginesTab />}
           {section === 'hardware' && <HardwareSection />}
           {section === 'models'   && <ModelsSection />}
           {section === 'about'    && <AboutSection />}

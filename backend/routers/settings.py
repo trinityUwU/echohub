@@ -124,3 +124,45 @@ def _detect_gpu_backend() -> dict:
 def get_gpu_backend() -> dict:
     """Retourne le backend GPU actif pour llama-cpp-python."""
     return _detect_gpu_backend()
+
+
+# ── vLLM Engine Management ─────────────────────────────────────────────────
+
+from backend.services import vllm_manager
+
+@router.get("/engines")
+def list_engines() -> dict:
+    """List all installed vLLM versions with metadata."""
+    versions = vllm_manager.list_versions()
+    warning = vllm_manager.get_coverage_warning()
+    return {
+        "versions": versions,
+        "coverage_warning": warning,
+        "total_versions": len(versions),
+        "operational_count": sum(1 for v in versions if v["operational"]),
+    }
+
+
+@router.delete("/engines/{version:path}")
+def delete_engine(version: str) -> dict:
+    ok, reason = vllm_manager.can_delete(version)
+    if not ok:
+        raise HTTPException(status_code=409, detail=reason)
+    try:
+        vllm_manager.delete_version(version)
+        return {"status": "deleted", "version": version}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/engines/install/{version:path}")
+async def install_engine_stream(version: str):
+    """SSE stream for vLLM installation progress."""
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        vllm_manager.install_version_stream(version),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
