@@ -67,7 +67,7 @@ def _dir_size_gb(path: Path) -> float:
 
 
 def _is_operational(version: str) -> bool:
-    """Check that vLLM can be imported — cached subprocess test."""
+    """Check vLLM is installed via pip show (fast, no CUDA init)."""
     cached = _operational_cache.get(version)
     if cached and (time.time() - cached[1]) < _OPERATIONAL_TTL:
         return cached[0]
@@ -77,10 +77,10 @@ def _is_operational(version: str) -> bool:
         return False
     try:
         result = subprocess.run(
-            [str(py), "-c", "from vllm.model_executor.models import ModelRegistry; print('ok')"],
-            capture_output=True, text=True, timeout=30,
+            [str(py), "-m", "pip", "show", "vllm"],
+            capture_output=True, timeout=15,
         )
-        ok = result.returncode == 0 and "ok" in result.stdout
+        ok = result.returncode == 0
     except Exception:
         ok = False
 
@@ -175,10 +175,10 @@ def _is_operational_legacy() -> bool:
         return False
     try:
         result = subprocess.run(
-            [str(py), "-c", "from vllm.model_executor.models import ModelRegistry; print('ok')"],
-            capture_output=True, text=True, timeout=30,
+            [str(py), "-m", "pip", "show", "vllm"],
+            capture_output=True, timeout=15,
         )
-        return result.returncode == 0 and "ok" in result.stdout
+        return result.returncode == 0
     except Exception:
         return False
 

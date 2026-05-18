@@ -27,11 +27,12 @@ def is_unsloth_available() -> bool:
     py = get_unsloth_python()
     if not py.exists():
         return False
+    # Check via pip show — faster than import (avoids torch CUDA init ~5-10s)
     try:
         result = subprocess.run(
-            [str(py), "-c", "import unsloth"],
+            [str(py), "-m", "pip", "show", "unsloth"],
             capture_output=True,
-            timeout=10,
+            timeout=15,
         )
         return result.returncode == 0
     except Exception:
