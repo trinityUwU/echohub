@@ -443,7 +443,12 @@ async def _full_pipeline_inner(job_id: str, job: dict, cfg: dict, pairs: list[di
         return
 
     # ── Step 3: eval after ─────────────────────────────────────────────────
+    # Re-read output_path from DB (closure may have threading visibility issues)
+    refreshed = db.get_finetune_job(job_id)
+    lora_output_dir = refreshed.get("output_path") if refreshed else lora_output_dir
+
     if not (eval_after and lora_output_dir and profile_id and eval_gguf_model_id and eval_gguf_file):
+        yield f"data: {json.dumps({'type': 'log', 'text': f'Skipping after-eval: eval_after={eval_after} lora_dir={lora_output_dir} profile={profile_id}'})}\n\n"
         return
 
     # Export LoRA → GGUF first
