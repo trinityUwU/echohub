@@ -293,34 +293,29 @@ async def generate(
     )
 
     if stream:
-        # Compute real prompt token count using the model's chat template
-        # llama-cpp-python applies_apply_chat_template internally, so we probe with max_tokens=1
-        try:
-            probe = _llm.create_chat_completion(
-                messages=messages, max_tokens=1, stream=False,
-                temperature=0.0,
-            )
-            prompt_tokens = probe.get("usage", {}).get("prompt_tokens", 0)
-        except Exception:
-            prompt_tokens = 0
+        # prompt_tokens sera mis à jour depuis le chunk natif llama-cpp (finish_reason)
+        prompt_tokens = 0
 
         # Streaming via thread + queue
         queue: asyncio.Queue = asyncio.Queue()
         completion_tokens = 0
         USAGE_INTERVAL = 10  # envoyer un chunk usage tous les N tokens générés
 
-        generated_text = ""
-
         def _stream_sync() -> None:
-            nonlocal completion_tokens, generated_text
+            nonlocal completion_tokens, prompt_tokens
             try:
                 for chunk in _llm.create_chat_completion(stream=True, **common_kwargs):
                     if _eject_requested:
                         break
-                    delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                    finish = chunk.get("choices", [{}])[0].get("finish_reason")
+                    choice = chunk.get("choices", [{}])[0]
+                    delta = choice.get("delta", {}).get("content", "")
+                    finish = choice.get("finish_reason")
+                    # Chunk final avec usage natif = source de vérité
+                    native_usage = chunk.get("usage")
+                    if native_usage:
+                        completion_tokens = native_usage.get("completion_tokens", completion_tokens)
+                        prompt_tokens = native_usage.get("prompt_tokens", prompt_tokens)
                     if delta:
-                        generated_text += delta
                         completion_tokens += 1
                         payload = json.dumps({
                             "choices": [{"delta": {"content": delta}, "finish_reason": None}]
@@ -345,13 +340,10 @@ async def generate(
         while True:
             item = await queue.get()
             if item is None:
-                # Tokeniser le texte généré pour avoir le vrai compte de completion tokens
-                try:
-                    real_completion = len(_llm.tokenize(generated_text.encode("utf-8"), add_bos=False))
-                except Exception:
-                    real_completion = completion_tokens
+                # Envoyer usage final — prompt_tokens et completion_tokens mis à jour
+                # depuis le chunk natif llama-cpp (finish_reason) si disponible
                 usage_payload = json.dumps({
-                    "usage": {"completion_tokens": real_completion, "prompt_tokens": prompt_tokens}
+                    "usage": {"completion_tokens": completion_tokens, "prompt_tokens": prompt_tokens}
                 })
                 yield f"data: {usage_payload}"
                 break
