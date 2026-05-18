@@ -177,7 +177,9 @@ export function EvalPanel({ profileId, jobId, selectedModelId, onEvalDone }: Eva
         />
       </div>
 
-      {beforeEval && afterEval && <EvalComparison before={beforeEval} after={afterEval} />}
+      {(beforeEval || afterEval) && (
+        <EvalResultsExpanded before={beforeEval} after={afterEval} />
+      )}
     </div>
   )
 }
@@ -380,40 +382,92 @@ function DeltaArrow({ before, after }: { before: FinetuneEval | null; after: Fin
   )
 }
 
-// ── EvalComparison ────────────────────────────────────────────────────────────
+// ── EvalResultsExpanded ───────────────────────────────────────────────────────
 
-function EvalComparison({ before, after }: { before: FinetuneEval; after: FinetuneEval }): React.ReactElement {
-  const afterMap = Object.fromEntries(after.results.map(r => [r.prompt_id, r]))
+function EvalResultsExpanded({ before, after }: {
+  before: FinetuneEval | null; after: FinetuneEval | null
+}): React.ReactElement {
+  const [expanded, setExpanded] = useState(true)
+  const results = before?.results ?? after?.results ?? []
+  const afterMap = Object.fromEntries((after?.results ?? []).map(r => [r.prompt_id, r]))
+  const hasComparison = !!before && !!after
+
   return (
-    <div className="space-y-3">
-      <span className="text-xs font-semibold text-text-muted uppercase tracking-wider block">Per-prompt comparison</span>
-      {before.results.map(br => {
-        const ar = afterMap[br.prompt_id]
-        if (!ar) return null
-        return <PromptRow key={br.prompt_id} before={br} after={ar} />
-      })}
+    <div className="border border-white/[0.06] rounded-md overflow-hidden">
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center justify-between px-3 py-2 bg-white/[0.02] hover:bg-white/[0.04] cursor-pointer transition-colors"
+      >
+        <span className="text-[10px] text-text-muted uppercase tracking-widest font-medium">
+          {hasComparison ? 'Before / After comparison' : before ? 'Before eval results' : 'After eval results'}
+          <span className="ml-2 text-text-muted/50">({results.length} prompts)</span>
+        </span>
+        <svg className={`w-3 h-3 text-text-muted/40 transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`}
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+
+      {expanded && (
+        <div className="divide-y divide-white/[0.04]">
+          {results.map((br, i) => {
+            const ar = afterMap[br.prompt_id]
+            return (
+              <PromptRow
+                key={br.prompt_id ?? i}
+                prompt={br.prompt}
+                before={before ? br : null}
+                after={after ? (ar ?? null) : null}
+              />
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
 
-function PromptRow({ before, after }: { before: EvalResult; after: EvalResult }): React.ReactElement {
+function PromptRow({ prompt, before, after }: {
+  prompt: string; before: EvalResult | null; after: EvalResult | null
+}): React.ReactElement {
+  const hasBoth = !!before && !!after
   return (
-    <div className="bg-surface border border-white/[0.06] rounded-md p-3 text-xs">
-      <p className="text-text-secondary mb-2 font-medium">{before.prompt}</p>
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <span className="text-text-muted block mb-1">
-            Before{before.score != null && <span className="ml-1 text-amber-400">{before.score.toFixed(0)}</span>}
-          </span>
-          <p className="text-text-primary leading-relaxed whitespace-pre-wrap">{before.response}</p>
-        </div>
-        <div>
-          <span className="text-text-muted block mb-1">
-            After{after.score != null && <span className="ml-1 text-green-400">{after.score.toFixed(0)}</span>}
-          </span>
-          <p className="text-text-primary leading-relaxed whitespace-pre-wrap">{after.response}</p>
-        </div>
+    <div className="px-3 py-3 text-xs">
+      <p className="text-text-muted font-medium mb-2 leading-relaxed">{prompt}</p>
+      <div className={hasBoth ? 'grid grid-cols-2 gap-3' : 'flex flex-col gap-2'}>
+        {before && (
+          <ResponseBlock
+            label="Before"
+            response={before.response}
+            score={before.score}
+            scoreColor="text-amber-400"
+          />
+        )}
+        {after && (
+          <ResponseBlock
+            label="After"
+            response={after.response}
+            score={after.score}
+            scoreColor="text-green-400"
+          />
+        )}
       </div>
+    </div>
+  )
+}
+
+function ResponseBlock({ label, response, score, scoreColor }: {
+  label: string; response: string; score: number | null; scoreColor: string
+}): React.ReactElement {
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 mb-1">
+        <span className="text-text-muted/60 uppercase tracking-wider text-[10px]">{label}</span>
+        {score != null && <span className={`text-[10px] font-bold ${scoreColor}`}>{score.toFixed(0)}</span>}
+      </div>
+      <p className="text-text-primary leading-relaxed whitespace-pre-wrap bg-white/[0.02] rounded px-2 py-1.5">
+        {response || <span className="text-text-muted/40 italic">No response</span>}
+      </p>
     </div>
   )
 }
