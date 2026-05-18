@@ -107,8 +107,8 @@ export function FTLoadModal({
 
   const handleStart = async (): Promise<void> => {
     if (!config) return
-    if ((evalBefore || evalAfter) && (!selectedGguf || !selectedGgufFile)) {
-      setError('Find a GGUF model before starting eval')
+    if (evalBefore && (!selectedGguf || !selectedGgufFile)) {
+      setError('Find a GGUF base model before running before-eval')
       return
     }
     setStarting(true); setError(null)
@@ -117,8 +117,8 @@ export function FTLoadModal({
         model_id: modelId, profile_id: profileId, ...config,
         eval_before: evalBefore,
         eval_after: evalAfter,
-        eval_gguf_model_id: (evalBefore || evalAfter) ? selectedGguf?.id : undefined,
-        eval_gguf_file: (evalBefore || evalAfter) ? selectedGgufFile ?? undefined : undefined,
+        eval_gguf_model_id: evalBefore ? selectedGguf?.id : undefined,
+        eval_gguf_file: evalBefore ? selectedGgufFile ?? undefined : undefined,
       })
       onJobCreated(job.id); onClose()
     } catch (e) {
@@ -130,7 +130,7 @@ export function FTLoadModal({
     const willEnable = which === 'before' ? !evalBefore : !evalAfter
     if (which === 'before') setEvalBefore(v => !v)
     else setEvalAfter(v => !v)
-    if (willEnable && !selectedGguf && !searchingGguf) void handleFindGguf()
+    if (willEnable && which === 'before' && !selectedGguf && !searchingGguf) void handleFindGguf()
   }
 
   const vramUsed = config && paramsBillion
@@ -331,18 +331,27 @@ export function FTLoadModal({
                 </button>
               </div>
 
-              {(evalBefore || evalAfter) && (
+              {evalBefore && (
                 <EvalGgufPicker
                   searching={searchingGguf}
                   candidates={ggufCandidates}
                   selected={selectedGguf}
                   selectedFile={selectedGgufFile}
-                  evalAfter={evalAfter}
                   onFind={handleFindGguf}
                   onReset={() => { setGgufCandidates(null); setSelectedGguf(null); setSelectedGgufFile(null) }}
                   onSelectCandidate={(c) => { setSelectedGguf(c); setSelectedGgufFile(c.recommended_file ?? null) }}
                   onSelectFile={setSelectedGgufFile}
                 />
+              )}
+              {evalAfter && !evalBefore && (
+                <p className="text-[10px] text-text-muted/60">
+                  After eval uses the GGUF exported from this training run — no download needed
+                </p>
+              )}
+              {evalAfter && evalBefore && (
+                <p className="text-[10px] text-text-muted/60">
+                  After eval uses the exported GGUF from this training run (same quantization as above)
+                </p>
               )}
             </div>
           </div>
@@ -373,7 +382,6 @@ interface EvalGgufPickerProps {
   candidates: GgufCandidate[] | null
   selected: GgufCandidate | null
   selectedFile: string | null
-  evalAfter: boolean
   onFind: () => void
   onReset: () => void
   onSelectCandidate: (c: GgufCandidate) => void
@@ -381,7 +389,7 @@ interface EvalGgufPickerProps {
 }
 
 function EvalGgufPicker({
-  searching, candidates, selected, selectedFile, evalAfter,
+  searching, candidates, selected, selectedFile,
   onFind, onReset, onSelectCandidate, onSelectFile,
 }: EvalGgufPickerProps): React.ReactElement {
   return (
@@ -436,11 +444,6 @@ function EvalGgufPicker({
         </div>
       )}
 
-      {evalAfter && (
-        <p className="text-[10px] text-text-muted/60">
-          After eval uses the exported GGUF from this training run
-        </p>
-      )}
     </div>
   )
 }
