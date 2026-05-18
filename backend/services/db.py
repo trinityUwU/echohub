@@ -98,6 +98,28 @@ def init_db() -> None:
                 builtin INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS training_pairs (
+                id TEXT PRIMARY KEY,
+                prompt TEXT NOT NULL,
+                chosen TEXT NOT NULL,
+                rejected TEXT NOT NULL,
+                source_conv_id TEXT,
+                source_msg_id TEXT,
+                model_id TEXT,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS finetune_jobs (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'pending',
+                model_id TEXT NOT NULL,
+                output_path TEXT,
+                config TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                error TEXT
+            );
         """)
         conn.commit()
         # Migrations — add columns/tables missing from older DBs
@@ -135,6 +157,34 @@ def init_db() -> None:
                     temperature REAL NOT NULL DEFAULT 0.0,
                     builtin INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
+                )
+            """)
+            conn.commit()
+        if "training_pairs" not in existing_tables:
+            conn.execute("""
+                CREATE TABLE training_pairs (
+                    id TEXT PRIMARY KEY,
+                    prompt TEXT NOT NULL,
+                    chosen TEXT NOT NULL,
+                    rejected TEXT NOT NULL,
+                    source_conv_id TEXT,
+                    source_msg_id TEXT,
+                    model_id TEXT,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            conn.commit()
+        if "finetune_jobs" not in existing_tables:
+            conn.execute("""
+                CREATE TABLE finetune_jobs (
+                    id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    model_id TEXT NOT NULL,
+                    output_path TEXT,
+                    config TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    error TEXT
                 )
             """)
             conn.commit()
@@ -399,6 +449,155 @@ def clear_benchmarks() -> None:
         conn = _get_conn()
         conn.execute("DELETE FROM benchmarks")
         conn.commit()
+
+
+# ── Training pairs ────────────────────────────────────────────────────────
+
+def create_training_pair(
+    id: str,
+    prompt: str,
+    chosen: str,
+    rejected: str,
+    source_conv_id: str | None,
+    source_msg_id: str | None,
+    model_id: str | None,
+) -> dict:
+    now = _now()
+    with _lock:
+        conn = _get_conn()
+        conn.execute(
+            "INSERT INTO training_pairs (id, prompt, chosen, rejected, source_conv_id, source_msg_id, model_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (id, prompt, chosen, rejected, source_conv_id, source_msg_id, model_id, now),
+        )
+        conn.commit()
+    return {
+        "id": id,
+        "prompt": prompt,
+        "chosen": chosen,
+        "rejected": rejected,
+        "source_conv_id": source_conv_id,
+        "source_msg_id": source_msg_id,
+        "model_id": model_id,
+        "created_at": now,
+    }
+
+
+def get_training_pairs(limit: int = 200) -> list[dict]:
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT * FROM training_pairs ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def delete_training_pair(pair_id: str) -> bool:
+    with _lock:
+        conn = _get_conn()
+        cur = conn.execute("DELETE FROM training_pairs WHERE id = ?", (pair_id,))
+        conn.commit()
+    return cur.rowcount > 0
+
+
+def get_training_pair_count() -> int:
+    with _lock:
+        conn = _get_conn()
+        row = conn.execute("SELECT COUNT(*) FROM training_pairs").fetchone()
+    return row[0]
+
+
+# ── Finetune jobs ─────────────────────────────────────────────────────────
+
+def create_finetune_job(id: str, model_id: str, config: dict) -> dict:
+    import json as _json
+    now = _now()
+    with _lock:
+        conn = _get_conn()
+        conn.execute(
+            "INSERT INTO finetune_jobs (id, status, model_id, config, created_at, updated_at) "
+            "VALUES (?, 'pending', ?, ?, ?, ?)",
+            (id, model_id, _json.dumps(config), now, now),
+        )
+        conn.commit()
+    return {
+        "id": id,
+        "status": "pending",
+        "model_id": model_id,
+        "config": config,
+        "output_path": None,
+        "error": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def update_finetune_job(
+    job_id: str,
+    status: str | None = None,
+    output_path: str | None = None,
+    error: str | None = None,
+) -> dict | None:
+    import json as _json
+    now = _now()
+    fields: list[str] = ["updated_at = ?"]
+    values: list[Any] = [now]
+    if status is not None:
+        fields.append("status = ?")
+        values.append(status)
+    if output_path is not None:
+        fields.append("output_path = ?")
+        values.append(output_path)
+    if error is not None:
+        fields.append("error = ?")
+        values.append(error)
+    values.append(job_id)
+    with _lock:
+        conn = _get_conn()
+        conn.execute(f"UPDATE finetune_jobs SET {', '.join(fields)} WHERE id = ?", values)
+        conn.commit()
+        row = conn.execute("SELECT * FROM finetune_jobs WHERE id = ?", (job_id,)).fetchone()
+    if not row:
+        return None
+    d = _row_to_dict(row)
+    try:
+        d["config"] = _json.loads(d["config"])
+    except Exception:
+        pass
+    return d
+
+
+def get_finetune_job(job_id: str) -> dict | None:
+    import json as _json
+    with _lock:
+        conn = _get_conn()
+        row = conn.execute("SELECT * FROM finetune_jobs WHERE id = ?", (job_id,)).fetchone()
+    if not row:
+        return None
+    d = _row_to_dict(row)
+    try:
+        d["config"] = _json.loads(d["config"])
+    except Exception:
+        pass
+    return d
+
+
+def get_finetune_jobs(limit: int = 20) -> list[dict]:
+    import json as _json
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT * FROM finetune_jobs ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    result = []
+    for row in rows:
+        d = _row_to_dict(row)
+        try:
+            d["config"] = _json.loads(d["config"])
+        except Exception:
+            pass
+        result.append(d)
+    return result
 
 
 _BUILTIN_PROFILES = [

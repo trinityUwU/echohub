@@ -1,4 +1,4 @@
-type Page = 'chat' | 'library' | 'discover' | 'downloads' | 'settings'
+type Page = 'chat' | 'library' | 'discover' | 'downloads' | 'finetune' | 'settings'
 
 interface NavRailProps {
   active: Page
@@ -32,6 +32,14 @@ export function NavRail({ active, onNavigate, downloadsBadge }: NavRailProps): R
       <NavItem id="downloads" title="Downloads" active={active === 'downloads'} onClick={() => onNavigate('downloads')} badge={downloadsBadge}>
         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
         <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+      </NavItem>
+      <NavItem id="finetune" title="Fine-tune" active={active === 'finetune'} onClick={() => onNavigate('finetune')}>
+        <line x1="4" y1="6" x2="20" y2="6"/>
+        <line x1="4" y1="12" x2="20" y2="12"/>
+        <line x1="4" y1="18" x2="20" y2="18"/>
+        <circle cx="8" cy="6" r="2" fill="currentColor" stroke="none"/>
+        <circle cx="16" cy="12" r="2" fill="currentColor" stroke="none"/>
+        <circle cx="10" cy="18" r="2" fill="currentColor" stroke="none"/>
       </NavItem>
 
       <div className="flex-1" />

@@ -470,3 +470,44 @@ export const getPendingChangelog = (): Promise<{ changelog: string[] }> =>
 
 export const clearChangelog = (): Promise<{ status: string }> =>
   apiRequest('/settings/update/clear-changelog', { method: 'POST' })
+
+// ── Fine-tuning ─────────────────────────────────────────────────────────────
+
+export const getFtStatus = (): Promise<import('@/types').FtStatus> =>
+  apiRequest('/finetune/status')
+
+export const listTrainingPairs = (): Promise<import('@/types').TrainingPair[]> =>
+  apiRequest('/finetune/pairs')
+
+export const createTrainingPair = (data: {
+  prompt: string; chosen: string; rejected: string
+  source_conv_id?: string | null; source_msg_id?: string | null; model_id?: string | null
+}): Promise<import('@/types').TrainingPair> =>
+  apiRequest('/finetune/pairs', { method: 'POST', body: JSON.stringify(data) })
+
+export const deleteTrainingPair = (id: string): Promise<void> =>
+  apiRequest(`/finetune/pairs/${id}`, { method: 'DELETE' })
+
+export const listFinetuneJobs = (): Promise<import('@/types').FinetuneJob[]> =>
+  apiRequest('/finetune/jobs')
+
+export const createFinetuneJob = (config: import('@/types').FinetuneConfig): Promise<import('@/types').FinetuneJob> =>
+  apiRequest('/finetune/jobs', { method: 'POST', body: JSON.stringify(config) })
+
+export const cancelFinetuneJob = (id: string): Promise<{ cancelled: boolean }> =>
+  apiRequest(`/finetune/jobs/${id}/cancel`, { method: 'DELETE' })
+
+export const getVramEstimate = (paramsBillion: number): Promise<{ vram_gb: number }> =>
+  apiRequest(`/finetune/vram-estimate?params_billion=${paramsBillion}`)
+
+export async function ftJobStreamUrl(jobId: string): Promise<string> {
+  return apiUrl(`/finetune/jobs/${jobId}/stream`)
+}
+
+export async function ftExportStreamUrl(jobId: string): Promise<string> {
+  return apiUrl(`/finetune/jobs/${jobId}/export/stream`)
+}
+
+export async function ftInstallStreamUrl(): Promise<string> {
+  return apiUrl('/finetune/install/stream')
+}

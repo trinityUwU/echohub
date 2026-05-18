@@ -1,0 +1,177 @@
+"""Fine-tuning API router."""
+from __future__ import annotations
+
+import uuid
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from backend.services import db
+from backend.services import finetune_service as ft
+
+router = APIRouter(prefix="/finetune", tags=["finetune"])
+
+
+# ── Schemas ────────────────────────────────────────────────────────────────
+
+class TrainingPairCreate(BaseModel):
+    prompt: str
+    chosen: str
+    rejected: str
+    source_conv_id: Optional[str] = None
+    source_msg_id: Optional[str] = None
+    model_id: Optional[str] = None
+
+
+class FinetuneJobCreate(BaseModel):
+    model_id: str
+    model_path: str
+    lora_rank: int = 16
+    lora_alpha: int = 16
+    target_modules: list[str] = ["q_proj", "v_proj", "k_proj", "o_proj"]
+    num_epochs: int = 3
+    learning_rate: float = 2e-4
+    pair_ids: Optional[list[str]] = None  # None = use all pairs
+
+
+# ── Training pairs ─────────────────────────────────────────────────────────
+
+@router.get("/pairs")
+def list_pairs() -> list[dict]:
+    return db.get_training_pairs()
+
+
+@router.post("/pairs")
+def create_pair(body: TrainingPairCreate) -> dict:
+    return db.create_training_pair(
+        id=str(uuid.uuid4()),
+        prompt=body.prompt,
+        chosen=body.chosen,
+        rejected=body.rejected,
+        source_conv_id=body.source_conv_id,
+        source_msg_id=body.source_msg_id,
+        model_id=body.model_id,
+    )
+
+
+@router.delete("/pairs/{pair_id}")
+def delete_pair(pair_id: str) -> dict:
+    ok = db.delete_training_pair(pair_id)
+    if not ok:
+        raise HTTPException(404, "Pair not found")
+    return {"status": "deleted"}
+
+
+# ── Status ─────────────────────────────────────────────────────────────────
+
+@router.get("/status")
+def get_status() -> dict:
+    return {
+        "unsloth_available": ft.is_unsloth_available(),
+        "unsloth_venv": str(ft.get_unsloth_python()),
+        "pair_count": db.get_training_pair_count(),
+    }
+
+
+# ── Install Unsloth ────────────────────────────────────────────────────────
+
+@router.get("/install/stream")
+def install_stream() -> StreamingResponse:
+    return StreamingResponse(
+        ft.install_unsloth_sse(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ── Fine-tune jobs ─────────────────────────────────────────────────────────
+
+@router.get("/jobs")
+def list_jobs() -> list[dict]:
+    return db.get_finetune_jobs()
+
+
+@router.post("/jobs")
+def create_job(body: FinetuneJobCreate) -> dict:
+    job_id = str(uuid.uuid4())
+    config = body.model_dump()
+    return db.create_finetune_job(job_id, body.model_id, config)
+
+
+@router.delete("/jobs/{job_id}/cancel")
+def cancel_job(job_id: str) -> dict:
+    cancelled = ft.cancel_finetune(job_id)
+    if cancelled:
+        db.update_finetune_job(job_id, status="cancelled")
+    return {"cancelled": cancelled}
+
+
+@router.get("/jobs/{job_id}/stream")
+def run_job_stream(job_id: str) -> StreamingResponse:
+    job = db.get_finetune_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    cfg = job["config"]
+    all_pairs = db.get_training_pairs()
+
+    pair_ids = cfg.get("pair_ids")
+    if pair_ids:
+        pairs = [p for p in all_pairs if p["id"] in set(pair_ids)]
+    else:
+        pairs = all_pairs
+
+    if not pairs:
+        raise HTTPException(400, "No training pairs available")
+
+    def on_status(status: str, output_path: str | None) -> None:
+        db.update_finetune_job(job_id, status=status, output_path=output_path)
+
+    gen = ft.run_finetune_sse(
+        job_id=job_id,
+        model_path=cfg["model_path"],
+        pairs=pairs,
+        lora_rank=cfg.get("lora_rank", 16),
+        lora_alpha=cfg.get("lora_alpha", 16),
+        target_modules=cfg.get("target_modules", ["q_proj", "v_proj"]),
+        num_epochs=cfg.get("num_epochs", 3),
+        learning_rate=cfg.get("learning_rate", 2e-4),
+        on_status=on_status,
+    )
+    return StreamingResponse(
+        gen,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ── Export GGUF ────────────────────────────────────────────────────────────
+
+@router.get("/jobs/{job_id}/export/stream")
+def export_job_stream(job_id: str) -> StreamingResponse:
+    job = db.get_finetune_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job["status"] != "done":
+        raise HTTPException(400, "Job not completed")
+
+    from backend.services.user_data import get_user_data_dir
+    lora_path = str(get_user_data_dir() / "finetune" / job_id / "lora")
+
+    def on_done(gguf_path: str) -> None:
+        db.update_finetune_job(job_id, output_path=gguf_path)
+
+    return StreamingResponse(
+        ft.export_gguf_sse(job_id=job_id, lora_path=lora_path, on_done=on_done),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ── VRAM estimation ────────────────────────────────────────────────────────
+
+@router.get("/vram-estimate")
+def vram_estimate(params_billion: float) -> dict:
+    return {"vram_gb": ft.estimate_qlora_vram_gb(params_billion)}

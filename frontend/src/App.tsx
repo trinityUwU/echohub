@@ -10,6 +10,7 @@ import { LibraryPage } from '@/components/library/LibraryPage'
 import { DiscoverPage } from '@/components/discover/DiscoverPage'
 import { DownloadsPage } from '@/components/downloads/DownloadsPage'
 import { SettingsPage } from '@/components/settings/SettingsPage'
+import { FineTunePage } from '@/components/finetune/FineTunePage'
 import { LoadModelModal } from '@/components/modals/LoadModelModal'
 import { ModelPickerModal } from '@/components/modals/ModelPickerModal'
 import { useDialog } from '@/components/shared/Dialog'
@@ -18,7 +19,7 @@ import { ChangelogNotification } from '@/components/shared/ChangelogNotification
 import { OnboardingWizard } from '@/components/onboarding/OnboardingWizard'
 import { getOnboardingStatus } from '@/api/client'
 
-type Page = 'chat' | 'library' | 'discover' | 'downloads' | 'settings'
+type Page = 'chat' | 'library' | 'discover' | 'downloads' | 'finetune' | 'settings'
 
 export default function App(): React.ReactElement {
   const { confirm, element: dialogEl } = useDialog()
@@ -162,6 +163,12 @@ export default function App(): React.ReactElement {
             jobs={downloadJobs}
             onCancel={handleCancelDownload}
             onLoad={id => { requestLoad(id); setPage('chat') }}
+          />
+        </div>
+        <div className={`flex flex-1 overflow-hidden ${page === 'finetune' ? 'animate-fade-in' : 'hidden'}`}>
+          <FineTunePage
+            vramTotalGb={gpu ? gpu.vram_total_mb / 1024 : 0}
+            vramFreeGb={gpu ? gpu.vram_free_mb / 1024 : 0}
           />
         </div>
         <div className={`flex flex-1 overflow-hidden ${page === 'settings' ? 'animate-fade-in' : 'hidden'}`}>

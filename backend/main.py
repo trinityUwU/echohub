@@ -10,7 +10,7 @@ from loguru import logger
 
 load_dotenv()
 
-from backend.routers import conversations, inference, installer, models, settings, system
+from backend.routers import conversations, finetune, inference, installer, models, settings, system
 from backend.services import db, engine_router, vllm_service
 
 
@@ -55,6 +55,7 @@ app.include_router(inference.router)
 app.include_router(system.router)
 app.include_router(settings.router)
 app.include_router(conversations.router)
+app.include_router(finetune.router)
 
 
 @app.get("/health")

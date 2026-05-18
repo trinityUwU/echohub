@@ -1,0 +1,329 @@
+"""Fine-tuning service — Unsloth/LoRA via dedicated venv."""
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import subprocess
+import sys
+from collections.abc import AsyncIterator, Callable
+from pathlib import Path
+
+from loguru import logger
+
+from backend.services.user_data import get_user_data_dir
+
+_UNSLOTH_VENV = Path.home() / ".local" / "share" / "echohub" / "unsloth-env"
+_active_jobs: dict[str, asyncio.subprocess.Process] = {}
+
+
+def get_unsloth_python() -> Path:
+    if sys.platform == "win32":
+        return _UNSLOTH_VENV / "Scripts" / "python.exe"
+    return _UNSLOTH_VENV / "bin" / "python"
+
+
+def is_unsloth_available() -> bool:
+    py = get_unsloth_python()
+    if not py.exists():
+        return False
+    try:
+        result = subprocess.run(
+            [str(py), "-c", "import unsloth"],
+            capture_output=True,
+            timeout=10,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def estimate_qlora_vram_gb(params_billion: float) -> float:
+    """QLoRA 4bit: ~0.5 GB/B params + 2 GB overhead for optimizer + activations."""
+    return round(params_billion * 0.5 + 2.0, 1)
+
+
+async def install_unsloth_sse() -> AsyncIterator[str]:
+    """Stream installation logs via SSE."""
+    _UNSLOTH_VENV.mkdir(parents=True, exist_ok=True)
+    py = get_unsloth_python()
+
+    steps = [
+        ([sys.executable, "-m", "venv", str(_UNSLOTH_VENV)], "Creating venv"),
+        ([str(py), "-m", "pip", "install", "--upgrade", "pip"], "Upgrading pip"),
+        (
+            [
+                str(py), "-m", "pip", "install",
+                "unsloth[cu121]", "trl", "transformers", "peft", "accelerate",
+                "bitsandbytes", "--no-deps",
+            ],
+            "Installing Unsloth + deps",
+        ),
+        (
+            [
+                str(py), "-m", "pip", "install",
+                "torch", "torchvision",
+                "--index-url", "https://download.pytorch.org/whl/cu121",
+            ],
+            "Installing PyTorch CUDA",
+        ),
+    ]
+
+    for cmd, label in steps:
+        yield f"data: {json.dumps({'type': 'step', 'label': label})}\n\n"
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        assert proc.stdout is not None
+        async for line_b in proc.stdout:
+            line = line_b.decode(errors="replace").rstrip()
+            if line:
+                yield f"data: {json.dumps({'type': 'log', 'text': line})}\n\n"
+        await proc.wait()
+        if proc.returncode != 0:
+            yield f"data: {json.dumps({'type': 'error', 'text': f'{label} failed (code {proc.returncode})'})}\n\n"
+            return
+
+    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+
+def _build_train_script(
+    model_path: str,
+    dataset_path: str,
+    output_dir: str,
+    lora_rank: int,
+    lora_alpha: int,
+    target_modules: list[str],
+    num_epochs: int,
+    learning_rate: float,
+) -> str:
+    targets_repr = repr(target_modules)
+    return f"""
+import torch
+from unsloth import FastLanguageModel
+from trl import SFTTrainer
+from transformers import TrainingArguments
+from datasets import Dataset
+import json, os
+
+max_seq_length = 2048
+dtype = None
+load_in_4bit = True
+
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name="{model_path}",
+    max_seq_length=max_seq_length,
+    dtype=dtype,
+    load_in_4bit=load_in_4bit,
+)
+
+model = FastLanguageModel.get_peft_model(
+    model,
+    r={lora_rank},
+    target_modules={targets_repr},
+    lora_alpha={lora_alpha},
+    lora_dropout=0,
+    bias="none",
+    use_gradient_checkpointing="unsloth",
+    random_state=42,
+)
+
+with open("{dataset_path}") as f:
+    pairs = json.load(f)
+
+def fmt(p):
+    return {{"text": f"### Human: {{p['prompt']}}\\n### Assistant: {{p['chosen']}}"}}
+
+dataset = Dataset.from_list([fmt(p) for p in pairs])
+
+trainer = SFTTrainer(
+    model=model,
+    tokenizer=tokenizer,
+    train_dataset=dataset,
+    dataset_text_field="text",
+    max_seq_length=max_seq_length,
+    dataset_num_proc=2,
+    args=TrainingArguments(
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=4,
+        warmup_steps=5,
+        num_train_epochs={num_epochs},
+        learning_rate={learning_rate},
+        fp16=not torch.cuda.is_bf16_supported(),
+        bf16=torch.cuda.is_bf16_supported(),
+        logging_steps=1,
+        optim="adamw_8bit",
+        weight_decay=0.01,
+        lr_scheduler_type="linear",
+        seed=42,
+        output_dir="{output_dir}/checkpoints",
+        report_to="none",
+    ),
+)
+
+print("Training started", flush=True)
+trainer.train()
+print("Training complete — saving LoRA", flush=True)
+
+model.save_pretrained("{output_dir}/lora")
+tokenizer.save_pretrained("{output_dir}/lora")
+print("LoRA saved to {output_dir}/lora", flush=True)
+"""
+
+
+async def run_finetune_sse(
+    job_id: str,
+    model_path: str,
+    pairs: list[dict],
+    lora_rank: int,
+    lora_alpha: int,
+    target_modules: list[str],
+    num_epochs: int,
+    learning_rate: float,
+    on_status: Callable[[str, str | None], None],
+) -> AsyncIterator[str]:
+    output_dir = str(get_user_data_dir() / "finetune" / job_id)
+    os.makedirs(output_dir, exist_ok=True)
+
+    dataset_path = os.path.join(output_dir, "dataset.json")
+    with open(dataset_path, "w") as f:
+        json.dump(pairs, f)
+
+    script_path = os.path.join(output_dir, "train.py")
+    script = _build_train_script(
+        model_path=model_path,
+        dataset_path=dataset_path,
+        output_dir=output_dir,
+        lora_rank=lora_rank,
+        lora_alpha=lora_alpha,
+        target_modules=target_modules,
+        num_epochs=num_epochs,
+        learning_rate=learning_rate,
+    )
+    with open(script_path, "w") as f:
+        f.write(script)
+
+    py = get_unsloth_python()
+    yield f"data: {json.dumps({'type': 'start', 'output_dir': output_dir})}\n\n"
+    on_status("running", None)
+
+    proc = await asyncio.create_subprocess_exec(
+        str(py), script_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+    )
+    _active_jobs[job_id] = proc
+
+    assert proc.stdout is not None
+    async for line_b in proc.stdout:
+        line = line_b.decode(errors="replace").rstrip()
+        if line:
+            yield f"data: {json.dumps({'type': 'log', 'text': line})}\n\n"
+
+    del _active_jobs[job_id]
+    await proc.wait()
+
+    if proc.returncode == 0:
+        yield f"data: {json.dumps({'type': 'done', 'output_dir': output_dir})}\n\n"
+        on_status("done", output_dir)
+    else:
+        yield f"data: {json.dumps({'type': 'error', 'text': f'Training failed (code {proc.returncode})'})}\n\n"
+        on_status("error", None)
+
+
+def cancel_finetune(job_id: str) -> bool:
+    proc = _active_jobs.get(job_id)
+    if proc is None:
+        return False
+    proc.terminate()
+    return True
+
+
+async def export_gguf_sse(
+    job_id: str,
+    lora_path: str,
+    on_done: Callable[[str], None],
+) -> AsyncIterator[str]:
+    output_dir = str(get_user_data_dir() / "finetune" / job_id)
+    merged_path = os.path.join(output_dir, "merged")
+    gguf_path = os.path.join(output_dir, "model.Q4_K_M.gguf")
+
+    py = get_unsloth_python()
+
+    merge_script = f"""
+from unsloth import FastLanguageModel
+model, tokenizer = FastLanguageModel.from_pretrained("{lora_path}", load_in_4bit=True)
+model.save_pretrained_merged("{merged_path}", tokenizer, save_method="merged_16bit")
+print("Merge complete", flush=True)
+"""
+    merge_path = os.path.join(output_dir, "merge.py")
+    with open(merge_path, "w") as f:
+        f.write(merge_script)
+
+    yield f"data: {json.dumps({'type': 'step', 'label': 'Merging LoRA into base model'})}\n\n"
+    proc = await asyncio.create_subprocess_exec(
+        str(py), merge_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    assert proc.stdout is not None
+    async for line_b in proc.stdout:
+        line = line_b.decode(errors="replace").rstrip()
+        if line:
+            yield f"data: {json.dumps({'type': 'log', 'text': line})}\n\n"
+    await proc.wait()
+    if proc.returncode != 0:
+        yield f"data: {json.dumps({'type': 'error', 'text': 'Merge failed'})}\n\n"
+        return
+
+    llama_cpp = _find_llama_convert()
+    if llama_cpp is None:
+        yield f"data: {json.dumps({'type': 'error', 'text': 'llama.cpp convert script not found'})}\n\n"
+        return
+
+    yield f"data: {json.dumps({'type': 'step', 'label': 'Quantizing to GGUF Q4_K_M'})}\n\n"
+    convert_cmd = [
+        sys.executable, str(llama_cpp),
+        merged_path, "--outfile", gguf_path, "--outtype", "q4_k_m",
+    ]
+    proc2 = await asyncio.create_subprocess_exec(
+        *convert_cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    assert proc2.stdout is not None
+    async for line_b in proc2.stdout:
+        line = line_b.decode(errors="replace").rstrip()
+        if line:
+            yield f"data: {json.dumps({'type': 'log', 'text': line})}\n\n"
+    await proc2.wait()
+    if proc2.returncode != 0:
+        yield f"data: {json.dumps({'type': 'error', 'text': 'Quantization failed'})}\n\n"
+        return
+
+    yield f"data: {json.dumps({'type': 'done', 'gguf_path': gguf_path})}\n\n"
+    on_done(gguf_path)
+
+
+def _find_llama_convert() -> Path | None:
+    candidates = [
+        Path(__file__).parents[2] / "vendor" / "llama.cpp" / "convert_hf_to_gguf.py",
+        Path.home() / ".local" / "share" / "echohub" / "llama.cpp" / "convert_hf_to_gguf.py",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    try:
+        result = subprocess.run(
+            ["find", str(Path.home()), "-name", "convert_hf_to_gguf.py", "-maxdepth", "6"],
+            capture_output=True, text=True, timeout=5,
+        )
+        lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        if lines:
+            return Path(lines[0])
+    except Exception:
+        pass
+    return None

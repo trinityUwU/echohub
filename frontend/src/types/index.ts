@@ -188,3 +188,44 @@ export interface DownloadJob {
   progress: number | null  // 0.0–1.0
   error: string | null
 }
+
+// ── Fine-tuning ─────────────────────────────────────────────────────────────
+
+export interface TrainingPair {
+  id: string
+  prompt: string
+  chosen: string
+  rejected: string
+  source_conv_id: string | null
+  source_msg_id: string | null
+  model_id: string | null
+  created_at: string
+}
+
+export interface FinetuneConfig {
+  model_id: string
+  model_path: string
+  lora_rank: 8 | 16 | 32 | 64
+  lora_alpha: number
+  target_modules: string[]
+  num_epochs: number
+  learning_rate: number
+  pair_ids?: string[] | null
+}
+
+export interface FinetuneJob {
+  id: string
+  status: 'pending' | 'running' | 'done' | 'error' | 'cancelled'
+  model_id: string
+  output_path: string | null
+  config: FinetuneConfig
+  created_at: string
+  updated_at: string
+  error: string | null
+}
+
+export interface FtStatus {
+  unsloth_available: boolean
+  unsloth_venv: string
+  pair_count: number
+}

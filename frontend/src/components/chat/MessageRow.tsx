@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, memo } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import type { ChatMessage, GenerationStats } from '@/types'
 import { MarkdownContent } from './MarkdownContent'
 import { ThinkingBlock } from './ThinkingBlock'
+import { PairEditor } from '@/components/finetune/PairEditor'
 
 interface MessageRowProps {
   message: ChatMessage
@@ -12,13 +13,18 @@ interface MessageRowProps {
   streaming?: boolean
   onRegenerate?: () => void
   onEditUser?: (text: string) => void
+  promptForPair?: string
+  sourceConvId?: string
+  sourceMsgId?: string
+  loadedModelId?: string | null
 }
 
-function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRegenerate, onEditUser }: MessageRowProps): React.ReactElement {
+function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRegenerate, onEditUser, promptForPair, sourceConvId, sourceMsgId, loadedModelId }: MessageRowProps): React.ReactElement {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState('')
+  const [savingPair, setSavingPair] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const text = typeof message.content === 'string'
@@ -185,8 +191,31 @@ function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRe
                 </svg>
               </ActionBtn>
             )}
+
+            {!isUser && promptForPair && (
+              <ActionBtn onClick={() => setSavingPair(v => !v)} title="Save as training pair">
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                </svg>
+              </ActionBtn>
+            )}
           </div>
         )}
+
+        <AnimatePresence>
+          {savingPair && promptForPair && !isUser && (
+            <PairEditor
+              key="pair-editor"
+              prompt={promptForPair}
+              assistantContent={visibleText}
+              sourceConvId={sourceConvId}
+              sourceMsgId={sourceMsgId}
+              modelId={loadedModelId ?? undefined}
+              onSave={() => setSavingPair(false)}
+              onClose={() => setSavingPair(false)}
+            />
+          )}
+        </AnimatePresence>
 
         {/* Stats always visible on last assistant message while streaming */}
         {!isUser && streaming && isLast && genStats && (
