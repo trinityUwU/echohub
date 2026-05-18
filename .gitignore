@@ -16,3 +16,4 @@ frontend/.env.development
 docs/private/
 docs/market-research.md
 scripts/
+unsloth_compiled_cache/

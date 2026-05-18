@@ -143,9 +143,13 @@ def _build_train_script(
     optim: str = "adamw_8bit",
 ) -> str:
     targets_repr = repr(target_modules)
+    cache_dir = str(Path.home() / ".cache" / "unsloth")
     return f"""
 import os, json, torch
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+# Redirect Unsloth compile cache away from the project tree (avoids Tauri watcher loop)
+os.environ["UNSLOTH_COMPILE_LOCATION"] = "{cache_dir}"
+os.makedirs("{cache_dir}", exist_ok=True)
 
 from unsloth import FastLanguageModel
 from trl import SFTTrainer, SFTConfig
