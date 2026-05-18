@@ -27,22 +27,26 @@ function estimateVram(paramsBillion: number, rank: number, seqLen: number): numb
 }
 
 function VramBar({ used, total }: { used: number; total: number }): React.ReactElement {
-  const pct    = total > 0 ? Math.min((used / total) * 100, 100) : 0
-  const color  = pct > 90 ? 'bg-red-400' : pct > 70 ? 'bg-yellow' : 'bg-green-400'
-  const fits   = total === 0 || used <= total * 0.92
+  const pct   = total > 0 ? Math.min((used / total) * 100, 100) : 0
+  const fits  = total === 0 || used <= total * 0.92
+  const barColor = pct > 90 ? '#f87171' : pct > 70 ? '#eab308' : '#4ade80'
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between text-xs">
         <span className="text-text-muted">VRAM estimate</span>
         <div className="flex items-center gap-2">
-          <span className="font-mono text-text-primary">{used} GB <span className="text-text-muted">/ {total > 0 ? total : '?'} GB</span></span>
-          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${fits ? 'bg-green-400/15 text-green-400' : 'bg-red-400/15 text-red-400'}`}>
+          <span className="font-mono text-text-primary">
+            {used} GB <span className="text-text-muted">/ {total > 0 ? total : '?'} GB</span>
+          </span>
+          <span style={{ backgroundColor: `${barColor}20`, color: barColor }}
+            className="text-[10px] px-1.5 py-0.5 rounded font-medium">
             {fits ? 'fits' : 'OOM risk'}
           </span>
         </div>
       </div>
-      <div className="h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
-        <div className={`h-full rounded-full transition-all duration-300 ${color}`} style={{ width: `${pct}%` }} />
+      <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }}>
+        <div className="h-full rounded-full transition-all duration-300"
+          style={{ width: `${pct}%`, backgroundColor: barColor }} />
       </div>
     </div>
   )
