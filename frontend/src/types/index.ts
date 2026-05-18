@@ -267,6 +267,28 @@ export interface FtStatus {
   pair_count: number
 }
 
+export interface FtTrainingConfig {
+  max_seq_length: number
+  per_device_train_batch_size: number
+  gradient_accumulation_steps: number
+  lora_rank: 8 | 16 | 32 | 64
+  lora_alpha: number
+  num_epochs: number
+  learning_rate: number
+  optim: string
+  target_modules: string[]
+}
+
+export interface FtRecommendedConfig {
+  gpu_name: string
+  vram_total_gb: number
+  has_gpu: boolean
+  qlora_vram_estimate_gb: number | null
+  model_fits: boolean
+  recommended: FtTrainingConfig
+  rationale: string
+}
+
 export interface DownloadHistoryEntry {
   id: number
   model_id: string

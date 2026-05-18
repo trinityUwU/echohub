@@ -500,8 +500,15 @@ export const listFinetuneJobs = (): Promise<import('@/types').FinetuneJob[]> =>
 
 export const createFinetuneJob = (data: {
   model_id: string; profile_id?: string | null
+  max_seq_length?: number; per_device_train_batch_size?: number
+  gradient_accumulation_steps?: number; lora_rank?: number; lora_alpha?: number
+  num_epochs?: number; learning_rate?: number; optim?: string
+  target_modules?: string[]
 }): Promise<import('@/types').FinetuneJob> =>
   apiRequest('/finetune/jobs', { method: 'POST', body: JSON.stringify(data) })
+
+export const getRecommendedConfig = (paramsBillion?: number): Promise<import('@/types').FtRecommendedConfig> =>
+  apiRequest(`/finetune/recommended-config${paramsBillion ? `?params_billion=${paramsBillion}` : ''}`)
 
 export const cancelFinetuneJob = (id: string): Promise<{ cancelled: boolean }> =>
   apiRequest(`/finetune/jobs/${id}/cancel`, { method: 'DELETE' })

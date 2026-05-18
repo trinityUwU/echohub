@@ -137,6 +137,10 @@ def _build_train_script(
     target_modules: list[str],
     num_epochs: int,
     learning_rate: float,
+    max_seq_length: int = 512,
+    per_device_train_batch_size: int = 1,
+    gradient_accumulation_steps: int = 8,
+    optim: str = "adamw_8bit",
 ) -> str:
     targets_repr = repr(target_modules)
     return f"""
@@ -147,9 +151,8 @@ from unsloth import FastLanguageModel
 from trl import SFTTrainer, SFTConfig
 from datasets import Dataset
 
-# RTX 3060 12GB safety settings
-MAX_SEQ_LENGTH = 512          # 2048 would OOM on 9B QLoRA
-VRAM_LIMIT_GB  = 10.0         # leave 2GB headroom for OS + other processes
+MAX_SEQ_LENGTH = {max_seq_length}
+VRAM_LIMIT_GB  = 10.0
 
 if torch.cuda.is_available():
     vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
@@ -183,7 +186,7 @@ def fmt(p):
     return {{"text": f"### Human: {{p['prompt']}}\\n### Assistant: {{p['chosen']}}"}}
 
 dataset = Dataset.from_list([fmt(p) for p in pairs])
-print(f"Dataset: {{len(dataset)}} pairs — seq_length cap: {{MAX_SEQ_LENGTH}}", flush=True)
+print(f"Dataset: {{len(dataset)}} pairs — seq_length={max_seq_length} batch={per_device_train_batch_size}", flush=True)
 
 trainer = SFTTrainer(
     model=model,
@@ -192,8 +195,8 @@ trainer = SFTTrainer(
     args=SFTConfig(
         dataset_text_field="text",
         max_seq_length=MAX_SEQ_LENGTH,
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=8,
+        per_device_train_batch_size={per_device_train_batch_size},
+        gradient_accumulation_steps={gradient_accumulation_steps},
         gradient_checkpointing=True,
         warmup_steps=3,
         num_train_epochs={num_epochs},
@@ -201,7 +204,7 @@ trainer = SFTTrainer(
         fp16=not torch.cuda.is_bf16_supported(),
         bf16=torch.cuda.is_bf16_supported(),
         logging_steps=1,
-        optim="adamw_8bit",
+        optim="{optim}",
         weight_decay=0.01,
         lr_scheduler_type="linear",
         seed=42,
@@ -231,6 +234,10 @@ async def run_finetune_sse(
     num_epochs: int,
     learning_rate: float,
     on_status: Callable[[str, str | None], None],
+    max_seq_length: int = 512,
+    per_device_train_batch_size: int = 1,
+    gradient_accumulation_steps: int = 8,
+    optim: str = "adamw_8bit",
 ) -> AsyncIterator[str]:
     output_dir = str(get_user_data_dir() / "finetune" / job_id)
     os.makedirs(output_dir, exist_ok=True)
@@ -249,6 +256,10 @@ async def run_finetune_sse(
         target_modules=target_modules,
         num_epochs=num_epochs,
         learning_rate=learning_rate,
+        max_seq_length=max_seq_length,
+        per_device_train_batch_size=per_device_train_batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        optim=optim,
     )
     with open(script_path, "w") as f:
         f.write(script)

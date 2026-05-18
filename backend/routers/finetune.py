@@ -37,6 +37,10 @@ class FinetuneJobCreate(BaseModel):
     learning_rate: float = 2e-4
     pair_ids: Optional[list[str]] = None  # None = use all pairs
     profile_id: Optional[str] = None
+    max_seq_length: int = 512
+    per_device_train_batch_size: int = 1
+    gradient_accumulation_steps: int = 8
+    optim: str = "adamw_8bit"
 
 
 class FinetuneProfileCreate(BaseModel):
@@ -305,6 +309,10 @@ async def run_job_stream(job_id: str) -> StreamingResponse:
         num_epochs=cfg.get("num_epochs", 3),
         learning_rate=cfg.get("learning_rate", 2e-4),
         on_status=on_status,
+        max_seq_length=cfg.get("max_seq_length", 512),
+        per_device_train_batch_size=cfg.get("per_device_train_batch_size", 1),
+        gradient_accumulation_steps=cfg.get("gradient_accumulation_steps", 8),
+        optim=cfg.get("optim", "adamw_8bit"),
     )
     return StreamingResponse(
         gen,
@@ -341,3 +349,66 @@ async def export_job_stream(job_id: str) -> StreamingResponse:
 @router.get("/vram-estimate")
 def vram_estimate(params_billion: float) -> dict:
     return {"vram_gb": ft.estimate_qlora_vram_gb(params_billion)}
+
+
+# ── Recommended config ──────────────────────────────────────────────────────
+
+def _build_rationale(gpu_name: str, vram_gb: float, max_seq_length: int, lora_rank: int) -> str:
+    if vram_gb == 0:
+        return "No GPU detected — CPU training will be very slow. Reduce dataset size."
+    parts = [f"{gpu_name} ({vram_gb:.0f} GB VRAM)"]
+    parts.append(f"seq_length={max_seq_length} to fit activations in VRAM")
+    parts.append(f"rank={lora_rank} for quality/memory balance")
+    return " · ".join(parts)
+
+
+def _params_for_vram(vram_gb: float) -> tuple[int, int, int, int]:
+    """Return (max_seq_length, batch_size, grad_accum, lora_rank) for a given VRAM budget."""
+    if vram_gb >= 24:
+        return 2048, 2, 4, 32
+    if vram_gb >= 16:
+        return 1024, 1, 8, 16
+    if vram_gb >= 12:
+        return 512, 1, 8, 16
+    if vram_gb >= 8:
+        return 256, 1, 16, 8
+    return 256, 1, 16, 8
+
+
+@router.get("/recommended-config")
+def get_recommended_config(params_billion: float = 0.0) -> dict:
+    """Return optimal training params based on detected hardware."""
+    from backend.services.gpu_service import get_gpu_stats
+    try:
+        gpu = get_gpu_stats()
+        vram_gb = gpu.vram_total_mb / 1024
+        gpu_name = gpu.name
+    except Exception:
+        vram_gb = 0.0
+        gpu_name = "Unknown"
+
+    has_gpu = vram_gb > 0
+    max_seq_length, per_device_batch_size, gradient_accumulation, lora_rank = _params_for_vram(vram_gb)
+    vram_budget_gb = max(vram_gb * 0.85, 4.0) if has_gpu else 0.0
+    qlora_vram = ft.estimate_qlora_vram_gb(params_billion) if params_billion > 0 else None
+    fits = (qlora_vram is not None and qlora_vram <= vram_budget_gb) if has_gpu else False
+
+    return {
+        "gpu_name": gpu_name,
+        "vram_total_gb": round(vram_gb, 1),
+        "has_gpu": has_gpu,
+        "qlora_vram_estimate_gb": qlora_vram,
+        "model_fits": fits,
+        "recommended": {
+            "max_seq_length": max_seq_length,
+            "per_device_train_batch_size": per_device_batch_size,
+            "gradient_accumulation_steps": gradient_accumulation,
+            "lora_rank": lora_rank,
+            "lora_alpha": lora_rank,
+            "num_epochs": 3,
+            "learning_rate": 2e-4,
+            "optim": "adamw_8bit",
+            "target_modules": ["q_proj", "v_proj", "k_proj", "o_proj"],
+        },
+        "rationale": _build_rationale(gpu_name, vram_gb, max_seq_length, lora_rank),
+    }
