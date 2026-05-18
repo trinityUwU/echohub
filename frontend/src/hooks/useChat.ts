@@ -131,7 +131,6 @@ export function useChat(
     if (!modelLoaded) return
     setError(null)
     setStats(null)
-    setLiveTokens(null)
 
     const content = buildUserContent(text, attachments)
     const userMsgId = crypto.randomUUID()
@@ -321,9 +320,10 @@ export function useChat(
     abortRef.current = null
   }, [params, onMessagesChange, modelId, convId])
 
-  const isTokensExact = liveTokens !== null
-  const usedTokens = isTokensExact
-    ? liveTokens!.prompt + liveTokens!.completion
+  // Exact uniquement quand le stream est terminé ET qu'on a reçu le vrai compte
+  const isTokensExact = !streaming && liveTokens !== null
+  const usedTokens = liveTokens !== null
+    ? liveTokens.prompt + liveTokens.completion
     : estimateTokens(messages)
 
   return {
