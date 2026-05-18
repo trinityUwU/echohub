@@ -379,65 +379,62 @@ async def export_gguf_sse(
     lora_path: str,
     on_done: Callable[[str], None],
 ) -> AsyncIterator[str]:
+    """Export LoRA → GGUF Q4_K_M using Unsloth's native save_pretrained_gguf (no llama.cpp needed)."""
     output_dir = str(get_user_data_dir() / "finetune" / job_id)
-    merged_path = os.path.join(output_dir, "merged")
-    gguf_path = os.path.join(output_dir, "model.Q4_K_M.gguf")
+    gguf_dir = os.path.join(output_dir, "gguf_export")
+    gguf_path = os.path.join(gguf_dir, "model-Q4_K_M.gguf")
 
     py = get_unsloth_python()
+    cache_dir = str(Path.home() / ".cache" / "unsloth")
 
-    merge_script = f"""
+    export_script = f"""
+import os
+os.environ["UNSLOTH_COMPILE_LOCATION"] = "{cache_dir}"
+os.makedirs("{cache_dir}", exist_ok=True)
+os.makedirs("{gguf_dir}", exist_ok=True)
+
 from unsloth import FastLanguageModel
+print("Loading LoRA model...", flush=True)
 model, tokenizer = FastLanguageModel.from_pretrained("{lora_path}", load_in_4bit=True)
-model.save_pretrained_merged("{merged_path}", tokenizer, save_method="merged_16bit")
-print("Merge complete", flush=True)
+print("Exporting to GGUF Q4_K_M...", flush=True)
+model.save_pretrained_gguf("{gguf_dir}", tokenizer, quantization_method="q4_k_m")
+print("GGUF export complete", flush=True)
+# Find the exported gguf file
+import glob
+files = glob.glob("{gguf_dir}/*.gguf")
+if files:
+    print(f"GGUF_PATH:{{files[0]}}", flush=True)
 """
-    merge_path = os.path.join(output_dir, "merge.py")
-    with open(merge_path, "w") as f:
-        f.write(merge_script)
+    export_script_path = os.path.join(output_dir, "export_gguf.py")
+    with open(export_script_path, "w") as f:
+        f.write(export_script)
 
-    yield f"data: {json.dumps({'type': 'step', 'label': 'Merging LoRA into base model'})}\n\n"
+    yield f"data: {json.dumps({'type': 'step', 'label': 'Exporting LoRA to GGUF Q4_K_M (Unsloth native)…'})}\n\n"
     proc = await asyncio.create_subprocess_exec(
-        str(py), merge_path,
+        str(py), export_script_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
     assert proc.stdout is not None
+    detected_path: str | None = None
     async for line_b in proc.stdout:
         line = line_b.decode(errors="replace").rstrip()
         if line:
-            yield f"data: {json.dumps({'type': 'log', 'text': line})}\n\n"
+            if line.startswith("GGUF_PATH:"):
+                detected_path = line[10:].strip()
+            else:
+                yield f"data: {json.dumps({'type': 'log', 'text': line})}\n\n"
     await proc.wait()
     if proc.returncode != 0:
-        yield f"data: {json.dumps({'type': 'error', 'text': 'Merge failed'})}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'text': 'GGUF export failed'})}\n\n"
         return
 
-    llama_cpp = _find_llama_convert()
-    if llama_cpp is None:
-        yield f"data: {json.dumps({'type': 'error', 'text': 'llama.cpp convert script not found'})}\n\n"
-        return
+    final_path = detected_path or gguf_path
+    yield f"data: {json.dumps({'type': 'done', 'gguf_path': final_path})}\n\n"
+    on_done(final_path)
+    return
 
-    yield f"data: {json.dumps({'type': 'step', 'label': 'Quantizing to GGUF Q4_K_M'})}\n\n"
-    convert_cmd = [
-        sys.executable, str(llama_cpp),
-        merged_path, "--outfile", gguf_path, "--outtype", "q4_k_m",
-    ]
-    proc2 = await asyncio.create_subprocess_exec(
-        *convert_cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    assert proc2.stdout is not None
-    async for line_b in proc2.stdout:
-        line = line_b.decode(errors="replace").rstrip()
-        if line:
-            yield f"data: {json.dumps({'type': 'log', 'text': line})}\n\n"
-    await proc2.wait()
-    if proc2.returncode != 0:
-        yield f"data: {json.dumps({'type': 'error', 'text': 'Quantization failed'})}\n\n"
-        return
-
-    yield f"data: {json.dumps({'type': 'done', 'gguf_path': gguf_path})}\n\n"
-    on_done(gguf_path)
 
 
 async def _eval_pipeline_sse(
