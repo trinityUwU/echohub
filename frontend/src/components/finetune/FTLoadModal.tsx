@@ -19,11 +19,12 @@ const LR_OPTIONS    = [1e-4, 2e-4, 5e-4] as const
 const ALL_MODULES   = ['q_proj', 'v_proj', 'k_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']
 const OPTIM_OPTIONS = ['adamw_8bit', 'adamw', 'sgd']
 
-function estimateVram(paramsBillion: number, rank: number, seqLen: number): number {
-  const modelGb  = paramsBillion * 0.5       // QLoRA 4bit base
-  const loraGb   = rank * 0.015              // LoRA adapter
-  const activGb  = (seqLen / 512) * 0.8     // activations scale with seq length
-  return Math.round((modelGb + loraGb + activGb + 1.5) * 10) / 10  // +1.5 overhead
+function estimateVram(paramsBillion: number, rank: number, seqLen: number, cpuOffloadGb: number): number {
+  const modelGb  = paramsBillion * 0.5       // QLoRA 4bit base (8bit if offload)
+  const loraGb   = rank * 0.015
+  const activGb  = (seqLen / 512) * 0.8
+  const total    = modelGb + loraGb + activGb + 1.5
+  return Math.round(Math.max(total - cpuOffloadGb, 1.0) * 10) / 10
 }
 
 function VramBar({ used, total }: { used: number; total: number }): React.ReactElement {
@@ -94,8 +95,9 @@ export function FTLoadModal({
   }
 
   const vramUsed = config && paramsBillion
-    ? estimateVram(paramsBillion, config.lora_rank, config.max_seq_length)
+    ? estimateVram(paramsBillion, config.lora_rank, config.max_seq_length, config.cpu_offload_gb)
     : null
+  const maxOffload = hw ? Math.floor(hw.ram_free_gb * 0.7) : 0
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
@@ -111,7 +113,7 @@ export function FTLoadModal({
           {hw && (
             <div className="text-right flex-shrink-0">
               <p className="text-xs text-text-primary">{hw.gpu_name.split(' ').slice(0, 4).join(' ')}</p>
-              <p className="text-[10px] text-text-muted">{hw.vram_total_gb} GB VRAM</p>
+              <p className="text-[10px] text-text-muted">{hw.vram_total_gb} GB VRAM · {hw.ram_free_gb} GB RAM free</p>
             </div>
           )}
         </div>
@@ -199,6 +201,31 @@ export function FTLoadModal({
                   ))}
                 </div>
               </ParamRow>
+            </div>
+
+            {/* CPU RAM offload */}
+            <div className="border-t border-white/[0.04] pt-3">
+              <div className="flex items-center justify-between mb-1.5">
+                <div>
+                  <p className="text-[10px] text-text-muted uppercase tracking-wider">CPU RAM offload</p>
+                  <p className="text-[10px] text-text-muted/50 mt-0.5">
+                    {config.cpu_offload_gb === 0
+                      ? 'GPU only — fastest, may OOM on large models'
+                      : `${config.cpu_offload_gb} GB offloaded to RAM — uses 8bit instead of 4bit, slower`}
+                  </p>
+                </div>
+                <span className="text-xs font-mono text-text-primary flex-shrink-0">
+                  {config.cpu_offload_gb} GB
+                </span>
+              </div>
+              <input type="range" min={0} max={maxOffload} step={1}
+                value={config.cpu_offload_gb}
+                onChange={e => update('cpu_offload_gb', Number(e.target.value))}
+                className="w-full accent-accent" />
+              <div className="flex justify-between text-[10px] text-text-muted/40 mt-0.5">
+                <span>0 GB (GPU only)</span>
+                {hw && <span>{maxOffload} GB max ({hw.ram_free_gb} GB free)</span>}
+              </div>
             </div>
 
             {/* Target modules */}

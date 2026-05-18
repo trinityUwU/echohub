@@ -141,13 +141,13 @@ def _build_train_script(
     per_device_train_batch_size: int = 1,
     gradient_accumulation_steps: int = 8,
     optim: str = "adamw_8bit",
+    cpu_offload_gb: int = 0,
 ) -> str:
     targets_repr = repr(target_modules)
     cache_dir = str(Path.home() / ".cache" / "unsloth")
     return f"""
 import os, json, torch
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-# Redirect Unsloth compile cache away from the project tree (avoids Tauri watcher loop)
 os.environ["UNSLOTH_COMPILE_LOCATION"] = "{cache_dir}"
 os.makedirs("{cache_dir}", exist_ok=True)
 
@@ -155,7 +155,8 @@ from unsloth import FastLanguageModel
 from trl import SFTTrainer, SFTConfig
 from datasets import Dataset
 
-MAX_SEQ_LENGTH = {max_seq_length}
+MAX_SEQ_LENGTH  = {max_seq_length}
+CPU_OFFLOAD_GB  = {cpu_offload_gb}   # GB of model layers to offload to system RAM (0 = GPU only)
 
 if torch.cuda.is_available():
     total_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
@@ -164,12 +165,27 @@ if torch.cuda.is_available():
 else:
     print("No GPU — CPU training", flush=True)
 
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="{model_path}",
-    max_seq_length=MAX_SEQ_LENGTH,
-    dtype=None,
-    load_in_4bit=True,
-)
+if CPU_OFFLOAD_GB > 0:
+    # CPU offload requires 8bit (4bit does not support mixed dispatch)
+    print(f"CPU offload enabled: {{CPU_OFFLOAD_GB}}GB → using 8bit quantization", flush=True)
+    import psutil
+    ram_gb = psutil.virtual_memory().available / 1024**3
+    print(f"System RAM available: {{ram_gb:.1f}}GB", flush=True)
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name="{model_path}",
+        max_seq_length=MAX_SEQ_LENGTH,
+        dtype=None,
+        load_in_8bit=True,
+        llm_int8_enable_fp32_cpu_offload=True,
+        max_memory={{0: f"{{int(torch.cuda.get_device_properties(0).total_memory / 1024**3 - CPU_OFFLOAD_GB - 1)}}GB", "cpu": f"{{CPU_OFFLOAD_GB + 2}}GB"}},
+    )
+else:
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        model_name="{model_path}",
+        max_seq_length=MAX_SEQ_LENGTH,
+        dtype=None,
+        load_in_4bit=True,
+    )
 
 model = FastLanguageModel.get_peft_model(
     model,
@@ -241,6 +257,7 @@ async def run_finetune_sse(
     per_device_train_batch_size: int = 1,
     gradient_accumulation_steps: int = 8,
     optim: str = "adamw_8bit",
+    cpu_offload_gb: int = 0,
 ) -> AsyncIterator[str]:
     output_dir = str(get_user_data_dir() / "finetune" / job_id)
     os.makedirs(output_dir, exist_ok=True)
@@ -263,6 +280,7 @@ async def run_finetune_sse(
         per_device_train_batch_size=per_device_train_batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
         optim=optim,
+        cpu_offload_gb=cpu_offload_gb,
     )
     with open(script_path, "w") as f:
         f.write(script)

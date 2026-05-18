@@ -41,6 +41,7 @@ class FinetuneJobCreate(BaseModel):
     per_device_train_batch_size: int = 1
     gradient_accumulation_steps: int = 8
     optim: str = "adamw_8bit"
+    cpu_offload_gb: int = 0
 
 
 class FinetuneProfileCreate(BaseModel):
@@ -313,6 +314,7 @@ async def run_job_stream(job_id: str) -> StreamingResponse:
         per_device_train_batch_size=cfg.get("per_device_train_batch_size", 1),
         gradient_accumulation_steps=cfg.get("gradient_accumulation_steps", 8),
         optim=cfg.get("optim", "adamw_8bit"),
+        cpu_offload_gb=cfg.get("cpu_offload_gb", 0),
     )
     return StreamingResponse(
         gen,
@@ -383,9 +385,13 @@ def get_recommended_config(params_billion: float = 0.0) -> dict:
         gpu = get_gpu_stats()
         vram_gb = gpu.vram_total_mb / 1024
         gpu_name = gpu.name
+        ram_total_gb = round(gpu.cpu.ram_total_gb, 1) if gpu.cpu else 0.0
+        ram_free_gb  = round(gpu.cpu.ram_total_gb - gpu.cpu.ram_used_gb, 1) if gpu.cpu else 0.0
     except Exception:
         vram_gb = 0.0
         gpu_name = "Unknown"
+        ram_total_gb = 0.0
+        ram_free_gb  = 0.0
 
     has_gpu = vram_gb > 0
     max_seq_length, per_device_batch_size, gradient_accumulation, lora_rank = _params_for_vram(vram_gb)
@@ -396,6 +402,8 @@ def get_recommended_config(params_billion: float = 0.0) -> dict:
     return {
         "gpu_name": gpu_name,
         "vram_total_gb": round(vram_gb, 1),
+        "ram_total_gb": ram_total_gb,
+        "ram_free_gb": ram_free_gb,
         "has_gpu": has_gpu,
         "qlora_vram_estimate_gb": qlora_vram,
         "model_fits": fits,
@@ -409,6 +417,7 @@ def get_recommended_config(params_billion: float = 0.0) -> dict:
             "learning_rate": 2e-4,
             "optim": "adamw_8bit",
             "target_modules": ["q_proj", "v_proj", "k_proj", "o_proj"],
+            "cpu_offload_gb": 0,
         },
         "rationale": _build_rationale(gpu_name, vram_gb, max_seq_length, lora_rank),
     }

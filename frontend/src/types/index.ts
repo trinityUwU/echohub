@@ -277,11 +277,14 @@ export interface FtTrainingConfig {
   learning_rate: number
   optim: string
   target_modules: string[]
+  cpu_offload_gb: number
 }
 
 export interface FtRecommendedConfig {
   gpu_name: string
   vram_total_gb: number
+  ram_total_gb: number
+  ram_free_gb: number
   has_gpu: boolean
   qlora_vram_estimate_gb: number | null
   model_fits: boolean
