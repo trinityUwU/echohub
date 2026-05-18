@@ -309,8 +309,10 @@ async def generate(
         completion_tokens = 0
         USAGE_INTERVAL = 10  # envoyer un chunk usage tous les N tokens générés
 
+        generated_text = ""
+
         def _stream_sync() -> None:
-            nonlocal completion_tokens
+            nonlocal completion_tokens, generated_text
             try:
                 for chunk in _llm.create_chat_completion(stream=True, **common_kwargs):
                     if _eject_requested:
@@ -318,8 +320,8 @@ async def generate(
                     delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
                     finish = chunk.get("choices", [{}])[0].get("finish_reason")
                     if delta:
+                        generated_text += delta
                         completion_tokens += 1
-                        # Format SSE identique à OpenAI/vLLM pour compatibilité frontend
                         payload = json.dumps({
                             "choices": [{"delta": {"content": delta}, "finish_reason": None}]
                         })
@@ -343,9 +345,13 @@ async def generate(
         while True:
             item = await queue.get()
             if item is None:
-                # Envoyer le chunk usage final (compatible avec stream_options vLLM)
+                # Tokeniser le texte généré pour avoir le vrai compte de completion tokens
+                try:
+                    real_completion = len(_llm.tokenize(generated_text.encode("utf-8"), add_bos=False))
+                except Exception:
+                    real_completion = completion_tokens
                 usage_payload = json.dumps({
-                    "usage": {"completion_tokens": completion_tokens, "prompt_tokens": prompt_tokens}
+                    "usage": {"completion_tokens": real_completion, "prompt_tokens": prompt_tokens}
                 })
                 yield f"data: {usage_payload}"
                 break
