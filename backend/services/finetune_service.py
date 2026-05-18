@@ -454,7 +454,13 @@ async def _eval_pipeline_sse(
     yield _sse({"type": "step", "label": f"[Eval {stage}] Loading model…"})
     try:
         from backend.services import llama_service
-        from backend.services.engine_router import detect_gpu
+        from backend.services.engine_router import detect_gpu, unload_model as _unload_first
+        # Unload any currently loaded model first
+        try:
+            _unload_first()
+            await asyncio.sleep(1)
+        except Exception:
+            pass
         gpu = detect_gpu()
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(
@@ -462,14 +468,14 @@ async def _eval_pipeline_sse(
             lambda: llama_service.load_model_async(
                 gguf_path=gguf_path,
                 model_id=gguf_model_id,
-                n_ctx=4096,
+                n_ctx=2048,
                 gpu_type=gpu["type"],
             ),
         )
-        # Poll until loaded (up to 120s)
+        # Poll until THIS model is loaded (check model_id match)
         for _ in range(240):
             state = llama_service.get_load_state()
-            if state.get("loaded_model_id"):
+            if state.get("loaded_model_id") == gguf_model_id:
                 break
             if state.get("error"):
                 raise RuntimeError(state["error"])
@@ -502,17 +508,8 @@ async def _eval_pipeline_sse(
                 temperature=0.0,
                 max_tokens=512,
             ):
-                if isinstance(chunk, str) and chunk.startswith("data: "):
-                    raw = chunk[6:].strip()
-                    if raw and raw != "[DONE]":
-                        try:
-                            parsed = json.loads(raw)
-                            delta = (parsed.get("choices") or [{}])[0].get("delta", {}).get("content")
-                            if delta:
-                                response_text += delta
-                        except Exception:
-                            pass
-                elif isinstance(chunk, dict):
+                # stream=False yields a single dict with OpenAI-style structure
+                if isinstance(chunk, dict):
                     # stream=False returns a single dict
                     response_text = (chunk.get("choices") or [{}])[0].get("message", {}).get("content", "")
             results.append({"prompt_id": p["id"], "prompt": p["prompt"], "response": response_text, "score": None})
