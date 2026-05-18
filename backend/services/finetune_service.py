@@ -44,29 +44,67 @@ def estimate_qlora_vram_gb(params_billion: float) -> float:
     return round(params_billion * 0.5 + 2.0, 1)
 
 
+def _detect_cuda_version() -> str:
+    """Return CUDA major.minor string (e.g. '12.1') or 'cpu'."""
+    try:
+        result = subprocess.run(
+            ["nvcc", "--version"], capture_output=True, text=True, timeout=5
+        )
+        import re
+        m = re.search(r"release (\d+)\.(\d+)", result.stdout)
+        if m:
+            return f"{m.group(1)}.{m.group(2)}"
+    except Exception:
+        pass
+    return "cpu"
+
+
+def _torch_index_url(cuda: str) -> str:
+    major = int(cuda.split(".")[0]) if cuda != "cpu" else 0
+    minor = int(cuda.split(".")[1]) if cuda != "cpu" and "." in cuda else 0
+    if cuda == "cpu":
+        return "https://download.pytorch.org/whl/cpu"
+    if major >= 13:
+        return "https://download.pytorch.org/whl/cu130"
+    if major == 12 and minor >= 4:
+        return "https://download.pytorch.org/whl/cu124"
+    return "https://download.pytorch.org/whl/cu121"
+
+
 async def install_unsloth_sse() -> AsyncIterator[str]:
-    """Stream installation logs via SSE."""
-    _UNSLOTH_VENV.mkdir(parents=True, exist_ok=True)
+    """Stream installation logs via SSE. Detects CUDA version automatically."""
+    import shutil
+
+    cuda = _detect_cuda_version()
+    torch_url = _torch_index_url(cuda)
+    yield f"data: {json.dumps({'type': 'log', 'text': f'Detected CUDA {cuda} — using {torch_url}'})}\n\n"
+
+    # Wipe existing broken venv if present
+    if _UNSLOTH_VENV.exists():
+        yield f"data: {json.dumps({'type': 'step', 'label': 'Removing existing venv'})}\n\n"
+        shutil.rmtree(_UNSLOTH_VENV, ignore_errors=True)
+
     py = get_unsloth_python()
 
-    steps = [
+    steps: list[tuple[list[str], str]] = [
         ([sys.executable, "-m", "venv", str(_UNSLOTH_VENV)], "Creating venv"),
-        ([str(py), "-m", "pip", "install", "--upgrade", "pip"], "Upgrading pip"),
+        ([str(py), "-m", "pip", "install", "--upgrade", "pip", "wheel", "setuptools"], "Upgrading pip"),
         (
             [
                 str(py), "-m", "pip", "install",
-                "unsloth[cu121]", "trl", "transformers", "peft", "accelerate",
-                "bitsandbytes", "--no-deps",
+                "torch", "torchvision", "torchaudio",
+                "--index-url", torch_url,
             ],
-            "Installing Unsloth + deps",
+            f"Installing PyTorch (CUDA {cuda})",
         ),
         (
             [
                 str(py), "-m", "pip", "install",
-                "torch", "torchvision",
-                "--index-url", "https://download.pytorch.org/whl/cu121",
+                "unsloth", "trl", "peft", "accelerate",
+                "bitsandbytes", "xformers",
+                "--no-build-isolation",
             ],
-            "Installing PyTorch CUDA",
+            "Installing Unsloth + deps",
         ),
     ]
 
