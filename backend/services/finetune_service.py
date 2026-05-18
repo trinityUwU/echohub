@@ -286,6 +286,15 @@ async def run_finetune_sse(
     with open(script_path, "w") as f:
         f.write(script)
 
+    # Kill any orphan process for this job before starting a new one
+    orphan = _active_jobs.pop(job_id, None)
+    if orphan is not None:
+        try:
+            orphan.terminate()
+            await asyncio.wait_for(orphan.wait(), timeout=5)
+        except Exception:
+            pass
+
     py = get_unsloth_python()
     yield f"data: {json.dumps({'type': 'start', 'output_dir': output_dir})}\n\n"
     on_status("running", None)
@@ -314,14 +323,20 @@ async def run_finetune_sse(
     lora_saved = os.path.exists(os.path.join(lora_path, "adapter_config.json"))
 
     if proc.returncode == 0 or lora_saved:
-        # Success: either clean exit or LoRA was actually saved despite warnings
         if proc.returncode != 0:
-            yield f"data: {json.dumps({'type': 'log', 'text': f'Process exited {proc.returncode} but LoRA was saved — treating as success'})}\n\n"
+            yield f"data: {json.dumps({'type': 'log', 'text': 'Process exited non-zero but LoRA was saved — marking done'})}\n\n"
         yield f"data: {json.dumps({'type': 'done', 'output_dir': output_dir})}\n\n"
         on_status("done", output_dir)
     else:
-        yield f"data: {json.dumps({'type': 'error', 'text': f'Training failed (code {proc.returncode})'})}\n\n"
-        on_status("error", None)
+        # Only mark error if the current DB status is not already 'done'
+        # (a previous run may have succeeded for the same job_id)
+        from backend.services import db as _db
+        current = _db.get_finetune_job(job_id)
+        if current and current.get("status") == "done":
+            yield f"data: {json.dumps({'type': 'done', 'output_dir': output_dir})}\n\n"
+        else:
+            yield f"data: {json.dumps({'type': 'error', 'text': f'Training failed (code {proc.returncode})'})}\n\n"
+            on_status("error", None)
 
 
 def cancel_finetune(job_id: str) -> bool:

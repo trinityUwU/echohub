@@ -300,6 +300,14 @@ async def run_job_stream(job_id: str) -> StreamingResponse:
     if not job:
         raise HTTPException(404, "Job not found")
 
+    # Auto-recover: if LoRA exists on disk but status is wrong, fix it first
+    from backend.services.user_data import get_user_data_dir as _gud
+    lora_check = _gud() / "finetune" / job_id / "lora" / "adapter_config.json"
+    if lora_check.exists() and job["status"] != "done":
+        output_dir = str(_gud() / "finetune" / job_id)
+        db.update_finetune_job(job_id, status="done", output_path=output_dir)
+        job = db.get_finetune_job(job_id)  # refresh
+
     # Jobs in terminal state — stream status only, don't relaunch
     if job["status"] in ("cancelled", "done", "error"):
         status = job["status"]
