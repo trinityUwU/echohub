@@ -54,8 +54,8 @@ export function PairsTab(): React.ReactElement {
   return (
     <div className="flex flex-1 overflow-hidden">
       {/* ── Left: list ── */}
-      <div className="flex flex-col w-[340px] flex-shrink-0 border-r border-border overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
+      <div className="flex flex-col w-[320px] flex-shrink-0 border-r border-white/[0.06] overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06] flex-shrink-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-text-primary">Pairs</span>
             {!loading && <span className="text-xs text-text-muted bg-overlay px-1.5 py-0.5 rounded-full">{pairs.length}</span>}
@@ -115,8 +115,8 @@ export function PairsTab(): React.ReactElement {
               transition={{ duration: 0.12 }} className="flex flex-col flex-1 overflow-y-auto p-5 gap-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-xs text-text-muted uppercase tracking-widest font-medium mb-1">Pair</div>
-                  <div className="text-xs text-text-muted/60">{formatDate(selected.created_at)}
+                  <div className="text-[10px] text-text-muted/40 uppercase tracking-widest font-medium mb-1">Pair</div>
+                  <div className="text-xs text-text-muted/50">{formatDate(selected.created_at)}
                     {selected.model_id && <span> · {selected.model_id.split('/').pop()}</span>}
                   </div>
                 </div>
@@ -154,7 +154,7 @@ export function PairsTab(): React.ReactElement {
 function PairListItem({ pair, active, onClick }: { pair: TrainingPair; active: boolean; onClick: () => void }): React.ReactElement {
   const preview = pair.prompt.length > 55 ? pair.prompt.slice(0, 55) + '…' : pair.prompt
   return (
-    <button onClick={onClick} className={`w-full text-left px-4 py-3 border-b border-border/50 transition-colors cursor-pointer ${
+    <button onClick={onClick} className={`w-full text-left px-4 py-3 border-b border-white/[0.04] transition-colors cursor-pointer ${
       active ? 'bg-accent/10 border-l-2 border-l-accent' : 'hover:bg-white/[0.02]'
     }`}>
       <div className="text-xs text-text-primary leading-snug mb-1">{preview}</div>
@@ -164,12 +164,13 @@ function PairListItem({ pair, active, onClick }: { pair: TrainingPair; active: b
 }
 
 function DetailBlock({ label, content, accent }: { label: string; content: string; accent?: 'green' | 'red' }): React.ReactElement {
-  const labelClass = accent === 'green' ? 'text-green' : accent === 'red' ? 'text-red-400' : 'text-text-muted'
-  const borderClass = accent === 'green' ? 'border-green/20' : accent === 'red' ? 'border-red-400/20' : 'border-border'
+  const labelClass = accent === 'green' ? 'text-green/70' : accent === 'red' ? 'text-red-400/70' : 'text-text-muted/50'
+  const bgClass = accent === 'green' ? 'bg-green/[0.04]' : accent === 'red' ? 'bg-red-400/[0.04]' : 'bg-white/[0.03]'
+  const leftBar = accent === 'green' ? 'border-l-2 border-l-green/30' : accent === 'red' ? 'border-l-2 border-l-red-400/30' : ''
   return (
     <div className="flex flex-col gap-1.5">
-      <div className={`text-xs font-medium uppercase tracking-widest ${labelClass}`}>{label}</div>
-      <div className={`text-sm text-text-primary bg-elevated border ${borderClass} rounded-sm px-3 py-2.5 leading-relaxed whitespace-pre-wrap font-mono text-xs`}>
+      <div className={`text-[10px] font-medium uppercase tracking-widest ${labelClass}`}>{label}</div>
+      <div className={`text-text-primary rounded-sm px-3 py-2.5 leading-relaxed whitespace-pre-wrap font-mono text-xs ${bgClass} ${leftBar}`}>
         {content}
       </div>
     </div>
