@@ -15,7 +15,8 @@ from backend.services.user_data import get_user_data_dir
 
 _UNSLOTH_VENV = Path.home() / ".local" / "share" / "echohub" / "unsloth-env"
 _active_jobs: dict[str, asyncio.subprocess.Process] = {}
-_cancelled_jobs: set[str] = set()  # jobs cancelled mid-pipeline
+_cancelled_jobs: set[str] = set()   # jobs cancelled mid-pipeline
+_active_pipelines: set[str] = set() # job_ids with a running pipeline (eval or training)
 
 
 def get_unsloth_python() -> Path:
@@ -354,6 +355,18 @@ def is_cancelled(job_id: str) -> bool:
 
 def clear_cancelled(job_id: str) -> None:
     _cancelled_jobs.discard(job_id)
+
+
+def is_pipeline_active(job_id: str) -> bool:
+    return job_id in _active_pipelines
+
+
+def register_pipeline(job_id: str) -> None:
+    _active_pipelines.add(job_id)
+
+
+def unregister_pipeline(job_id: str) -> None:
+    _active_pipelines.discard(job_id)
 
 
 async def export_gguf_sse(

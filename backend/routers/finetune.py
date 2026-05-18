@@ -298,12 +298,6 @@ def cancel_job(job_id: str) -> dict:
     # Kill process + set cancelled flag (checked by eval pipeline between steps)
     ft.cancel_finetune(job_id)
     db.update_finetune_job(job_id, status="cancelled")
-    # Unload any model that may have been loaded by eval pipeline
-    try:
-        from backend.services.engine_router import unload_model as _unload
-        _unload()
-    except Exception:
-        pass
     return {"cancelled": True}
 
 
@@ -331,21 +325,20 @@ async def run_job_stream(job_id: str) -> StreamingResponse:
         return StreamingResponse(_terminal(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-    # Job running but NOT in active_jobs → backend restarted mid-training, status stale
-    # Mark as error rather than relaunching (would OOM since no VRAM freed)
-    if job["status"] == "running" and job_id not in ft._active_jobs:
+    # Pipeline already active for this job — don't start a second
+    if ft.is_pipeline_active(job_id):
+        async def _already_running():
+            yield f"data: {json.dumps({'type': 'log', 'text': 'Pipeline already running…'})}\n\n"
+            await asyncio.sleep(60)
+        return StreamingResponse(_already_running(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    # Job running but no active pipeline → backend restarted mid-training
+    if job["status"] == "running":
         db.update_finetune_job(job_id, status="error", error="Backend restarted during training — relaunch the job")
         async def _stale():
             yield f"data: {json.dumps({'type': 'error', 'text': 'Backend restarted during training. Please relaunch the job.'})}\n\n"
         return StreamingResponse(_stale(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-
-    # Job already running in an active process — don't start a second
-    if job["status"] == "running" and job_id in ft._active_jobs:
-        async def _already_running():
-            yield f"data: {json.dumps({'type': 'log', 'text': 'Already running…'})}\n\n"
-            await asyncio.sleep(60)
-        return StreamingResponse(_already_running(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     # Unload any loaded inference model to free VRAM before training
@@ -382,7 +375,16 @@ async def run_job_stream(job_id: str) -> StreamingResponse:
 
 async def _full_pipeline(job_id: str, job: dict, cfg: dict, pairs: list[dict]):
     """Orchestrates: eval_before → fine-tune → eval_after (with GGUF export)."""
-    ft.clear_cancelled(job_id)  # reset any stale cancel flag from a previous run
+    ft.clear_cancelled(job_id)
+    ft.register_pipeline(job_id)
+    try:
+        async for chunk in _full_pipeline_inner(job_id, job, cfg, pairs):
+            yield chunk
+    finally:
+        ft.unregister_pipeline(job_id)
+
+
+async def _full_pipeline_inner(job_id: str, job: dict, cfg: dict, pairs: list[dict]):
     profile_id: Optional[str] = cfg.get("profile_id")
     eval_before: bool = cfg.get("eval_before", False)
     eval_after: bool = cfg.get("eval_after", False)
