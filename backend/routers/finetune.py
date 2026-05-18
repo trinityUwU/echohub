@@ -97,15 +97,24 @@ def list_jobs() -> list[dict]:
 def create_job(body: FinetuneJobCreate) -> dict:
     job_id = str(uuid.uuid4())
     config = body.model_dump()
+    # Resolve local path if model is downloaded — Unsloth loads faster from disk
+    from backend.services.hf_service import _model_dir, _is_downloaded
+    if _is_downloaded(body.model_id):
+        config["model_path"] = str(_model_dir(body.model_id))
     return db.create_finetune_job(job_id, body.model_id, config)
 
 
 @router.delete("/jobs/{job_id}/cancel")
 def cancel_job(job_id: str) -> dict:
-    cancelled = ft.cancel_finetune(job_id)
-    if cancelled:
-        db.update_finetune_job(job_id, status="cancelled")
-    return {"cancelled": cancelled}
+    job = db.get_finetune_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job["status"] not in ("pending", "running"):
+        return {"cancelled": False, "reason": "already_terminal"}
+    # Kill process if running, then always mark cancelled in DB
+    ft.cancel_finetune(job_id)
+    db.update_finetune_job(job_id, status="cancelled")
+    return {"cancelled": True}
 
 
 @router.get("/jobs/{job_id}/stream")

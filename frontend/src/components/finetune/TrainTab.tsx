@@ -256,7 +256,7 @@ function JobRow({ job, onCancel, onJobUpdate, onRefresh }: {
           <span className="text-xs text-text-muted truncate">{job.model_id.split('/').pop()}</span>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          {job.status === 'running' && (
+          {(job.status === 'running' || job.status === 'pending') && (
             <button
               onClick={() => onCancel(job.id)}
               className="px-3 py-1 text-xs border border-border text-text-muted hover:text-red-400 hover:border-red-400/30 rounded-sm cursor-pointer transition-colors"
