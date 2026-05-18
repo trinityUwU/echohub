@@ -29,7 +29,7 @@ class TrainingPairCreate(BaseModel):
 
 class FinetuneJobCreate(BaseModel):
     model_id: str
-    model_path: str
+    model_path: Optional[str] = None  # resolved from local path if omitted
     lora_rank: int = 16
     lora_alpha: int = 16
     target_modules: list[str] = ["q_proj", "v_proj", "k_proj", "o_proj"]
@@ -237,12 +237,15 @@ def list_jobs() -> list[dict]:
 
 @router.post("/jobs")
 def create_job(body: FinetuneJobCreate) -> dict:
+    from backend.services.hf_service import _model_dir, _is_downloaded
     job_id = str(uuid.uuid4())
     config = body.model_dump()
-    # Resolve local path if model is downloaded — Unsloth loads faster from disk
-    from backend.services.hf_service import _model_dir, _is_downloaded
+    # Resolve local path — required for Unsloth
     if _is_downloaded(body.model_id):
         config["model_path"] = str(_model_dir(body.model_id))
+    elif not config.get("model_path"):
+        # Fallback: use HF model ID directly (Unsloth will download it)
+        config["model_path"] = body.model_id
     return db.create_finetune_job(job_id, body.model_id, config)
 
 

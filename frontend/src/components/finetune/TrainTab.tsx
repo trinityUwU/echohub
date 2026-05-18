@@ -15,6 +15,7 @@ export function TrainTab({ profileId, loadedModel, ftModel }: TrainTabProps): Re
   const [profiles, setProfiles] = useState<FinetuneProfile[]>([])
   const [selectedProfile, setSelectedProfile] = useState<string | null>(profileId)
   const [starting, setStarting] = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
 
   useEffect(() => { setSelectedProfile(profileId) }, [profileId])
@@ -41,14 +42,17 @@ export function TrainTab({ profileId, loadedModel, ftModel }: TrainTabProps): Re
   const handleStart = async (): Promise<void> => {
     if (!activeModel) return
     setStarting(true)
+    setStartError(null)
     try {
       const job = await createFinetuneJob({
-        model_id: activeModel!.id,
+        model_id: activeModel.id,
         profile_id: selectedProfile,
       })
       await loadJobs()
       setSelectedJobId(job.id)
-    } catch { /* ignore */ } finally {
+    } catch (e) {
+      setStartError(e instanceof Error ? e.message : 'Failed to start job')
+    } finally {
       setStarting(false)
     }
   }
@@ -85,8 +89,13 @@ export function TrainTab({ profileId, loadedModel, ftModel }: TrainTabProps): Re
           onClick={handleStart}
           className="mt-3 px-4 py-1.5 bg-accent/20 hover:bg-accent/30 disabled:opacity-40 disabled:cursor-not-allowed text-accent text-xs rounded cursor-pointer transition-colors"
         >
-          {starting ? 'Starting...' : 'Start training'}
+          {starting ? 'Starting…' : 'Start training'}
         </button>
+        {startError && (
+          <div className="mt-2 text-xs text-red-400 bg-red-400/8 border border-red-400/15 rounded-sm px-3 py-2">
+            {startError}
+          </div>
+        )}
       </div>
 
       {/* Jobs list */}
