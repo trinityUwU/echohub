@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { FinetuneJob, FinetuneProfile, ModelInfo } from '@/types'
-import { listFinetuneJobs, createFinetuneJob, listFinetuneProfiles } from '@/api/client'
+import type { FinetuneJob, FinetuneProfile, FtStatus, ModelInfo } from '@/types'
+import { listFinetuneJobs, createFinetuneJob, listFinetuneProfiles, getFtStatus, ftInstallStreamUrl } from '@/api/client'
 import { EvalPanel } from './EvalPanel'
+
+const MAX_LOG_LINES = 50
 
 interface TrainTabProps {
   profileId: string | null
@@ -11,33 +13,47 @@ interface TrainTabProps {
 
 export function TrainTab({ profileId, loadedModel, ftModel }: TrainTabProps): React.ReactElement {
   const activeModel = ftModel ?? loadedModel
+  const [status, setStatus] = useState<FtStatus | null>(null)
   const [jobs, setJobs] = useState<FinetuneJob[]>([])
   const [profiles, setProfiles] = useState<FinetuneProfile[]>([])
   const [selectedProfile, setSelectedProfile] = useState<string | null>(profileId)
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null)
+  const [installing, setInstalling] = useState(false)
+  const [installLogs, setInstallLogs] = useState<string[]>([])
 
   useEffect(() => { setSelectedProfile(profileId) }, [profileId])
 
+  const loadData = useCallback(async (): Promise<void> => {
+    try {
+      const [s, j, p] = await Promise.all([getFtStatus(), listFinetuneJobs(), listFinetuneProfiles()])
+      setStatus(s); setJobs(j); setProfiles(p)
+    } catch { /* ignore */ }
+  }, [])
+
   const loadJobs = useCallback(async (): Promise<void> => {
-    try {
-      const data = await listFinetuneJobs()
-      setJobs(data)
-    } catch { /* ignore */ }
+    try { setJobs(await listFinetuneJobs()) } catch { /* ignore */ }
   }, [])
 
-  const loadProfiles = useCallback(async (): Promise<void> => {
-    try {
-      const data = await listFinetuneProfiles()
-      setProfiles(data)
-    } catch { /* ignore */ }
-  }, [])
+  useEffect(() => { void loadData() }, [loadData])
 
-  useEffect(() => {
-    loadJobs()
-    loadProfiles()
-  }, [loadJobs, loadProfiles])
+  const handleInstall = (): void => {
+    setInstalling(true); setInstallLogs([])
+    ftInstallStreamUrl().then(url => {
+      const es = new EventSource(url)
+      es.onmessage = (e) => {
+        try {
+          const d = JSON.parse(e.data) as { type: string; text?: string; label?: string }
+          if (d.type === 'done') { es.close(); setInstalling(false); void loadData() }
+          else if (d.type === 'error') { setInstallLogs(l => [...l.slice(-MAX_LOG_LINES + 1), `ERROR: ${d.text ?? ''}`]); es.close(); setInstalling(false) }
+          else if (d.type === 'step') setInstallLogs(l => [...l.slice(-MAX_LOG_LINES + 1), `>>> ${d.label ?? ''}`])
+          else if (d.type === 'log' && d.text) setInstallLogs(l => [...l.slice(-MAX_LOG_LINES + 1), d.text!])
+        } catch { /* skip */ }
+      }
+      es.onerror = () => { es.close(); setInstalling(false) }
+    }).catch(() => setInstalling(false))
+  }
 
   const handleStart = async (): Promise<void> => {
     if (!activeModel) return
@@ -63,6 +79,28 @@ export function TrainTab({ profileId, loadedModel, ftModel }: TrainTabProps): Re
 
   return (
     <div className="flex-1 overflow-y-auto p-5">
+      {/* Unsloth install banner */}
+      {status && !status.unsloth_available && (
+        <div className="bg-yellow/8 border border-yellow/20 rounded-md p-4 mb-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-medium text-yellow">Unsloth not installed</div>
+              <div className="text-xs text-text-muted mt-0.5">Required for QLoRA fine-tuning. Will be installed in an isolated venv.</div>
+            </div>
+            <button onClick={handleInstall} disabled={installing}
+              className="px-4 py-1.5 text-xs bg-yellow/15 hover:bg-yellow/25 disabled:opacity-50 border border-yellow/30 text-yellow rounded-sm cursor-pointer transition-colors font-medium flex-shrink-0 flex items-center gap-1.5">
+              {installing && <span className="w-3 h-3 border border-yellow/40 border-t-yellow rounded-full animate-spin" />}
+              {installing ? 'Installing…' : 'Install Unsloth'}
+            </button>
+          </div>
+          {installLogs.length > 0 && (
+            <div className="font-mono text-xs bg-overlay rounded-sm p-3 max-h-48 overflow-y-auto leading-relaxed text-text-muted">
+              {installLogs.map((l, i) => <div key={i}>{l}</div>)}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* New run config */}
       <div className="bg-surface border border-white/[0.06] rounded-md p-4 mb-4">
         <h3 className="text-sm font-semibold text-text-primary mb-3">New training run</h3>
