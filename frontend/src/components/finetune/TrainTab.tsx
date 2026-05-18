@@ -69,7 +69,9 @@ export function TrainTab({ profileId, loadedModel, ftModel }: TrainTabProps): Re
             <span className="text-xs text-text-secondary">{activeModel.name}</span>
           </div>
         ) : (
-          <p className="text-xs text-text-muted mb-3">Load a model first</p>
+          <p className="text-xs text-text-muted mb-3">
+            No model selected — go to <span className="text-accent">Models</span> tab and click "Select for training"
+          </p>
         )}
 
         <ProfileSelector

@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
 import type { DownloadJob, ModelInfo } from '@/types'
 import { ProfilesTab } from './ProfilesTab'
 import { TrainTab } from './TrainTab'
@@ -24,10 +23,12 @@ export function FineTunePage({ loadedModel, vramTotalGb, downloadJobs, onDownloa
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
   const [selectedModel, setSelectedModel] = useState<ModelInfo | null>(null)
 
+  const ftModelName = selectedModel?.name ?? selectedModel?.id?.split('/').pop() ?? null
+
   const tabs: Tab[] = [
     { id: 'models', label: 'Models' },
     { id: 'profiles', label: 'Profiles' },
-    { id: 'train', label: loadedModel ? `Train · ${loadedModel.name}` : 'Train' },
+    { id: 'train', label: ftModelName ? `Train · ${ftModelName}` : 'Train' },
   ]
 
   return (
@@ -44,43 +45,32 @@ export function FineTunePage({ loadedModel, vramTotalGb, downloadJobs, onDownloa
         ))}
       </div>
 
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={activeTab}
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -4 }}
-          transition={{ duration: 0.15 }}
-          className="flex flex-1 overflow-hidden"
-        >
-          {activeTab === 'profiles' && (
-            <ProfilesTab
-              selectedProfileId={selectedProfileId}
-              onSelectProfile={setSelectedProfileId}
-            />
-          )}
-          {activeTab === 'train' && (
-            <TrainTab
-              profileId={selectedProfileId}
-              loadedModel={loadedModel}
-              ftModel={selectedModel}
-            />
-          )}
-          {activeTab === 'models' && (
-            <FTModelBrowser
-              vramTotalGb={vramTotalGb}
-              downloadJobs={downloadJobs}
-              onDownloaded={onDownloaded}
-              onSelect={model => {
-                setSelectedProfileId(null)
-                setActiveTab('train')
-                // pass model to TrainTab via state
-                setSelectedModel(model)
-              }}
-            />
-          )}
-        </motion.div>
-      </AnimatePresence>
+      <div className="flex flex-1 overflow-hidden">
+        <div className={`flex flex-col flex-1 overflow-hidden ${activeTab === 'models' ? '' : 'hidden'}`}>
+          <FTModelBrowser
+            vramTotalGb={vramTotalGb}
+            downloadJobs={downloadJobs}
+            onDownloaded={onDownloaded}
+            onSelect={model => {
+              setSelectedModel(model)
+              setActiveTab('train')
+            }}
+          />
+        </div>
+        <div className={`flex flex-col flex-1 overflow-hidden ${activeTab === 'profiles' ? '' : 'hidden'}`}>
+          <ProfilesTab
+            selectedProfileId={selectedProfileId}
+            onSelectProfile={setSelectedProfileId}
+          />
+        </div>
+        <div className={`flex flex-col flex-1 overflow-hidden ${activeTab === 'train' ? '' : 'hidden'}`}>
+          <TrainTab
+            profileId={selectedProfileId}
+            loadedModel={loadedModel}
+            ftModel={selectedModel}
+          />
+        </div>
+      </div>
     </div>
   )
 }
