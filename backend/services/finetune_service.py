@@ -156,20 +156,23 @@ from trl import SFTTrainer, SFTConfig
 from datasets import Dataset
 
 MAX_SEQ_LENGTH = {max_seq_length}
-VRAM_LIMIT_GB  = 10.0
 
 if torch.cuda.is_available():
-    vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
-    print(f"GPU: {{torch.cuda.get_device_name(0)}} — {{vram_gb:.1f}} GB VRAM", flush=True)
-    if vram_gb < 8:
-        print("WARNING: Less than 8GB VRAM — training may fail", flush=True)
+    total_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    free_gb  = torch.cuda.mem_get_info(0)[0] / 1024**3
+    # 80% of free VRAM, capped to total-1GB, minimum 4GB
+    vram_limit = min(max(free_gb * 0.80, 4.0), total_gb - 1.0)
+    print(f"GPU: {{torch.cuda.get_device_name(0)}} — {{total_gb:.1f}}GB total, {{free_gb:.1f}}GB free → using {{vram_limit:.1f}}GB", flush=True)
+else:
+    vram_limit = 4.0
+    print("No GPU — CPU training", flush=True)
 
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name="{model_path}",
     max_seq_length=MAX_SEQ_LENGTH,
     dtype=None,
     load_in_4bit=True,
-    max_memory={{0: f"{{int(VRAM_LIMIT_GB)}}GB"}},
+    max_memory={{0: f"{{vram_limit:.0f}}GB"}},
 )
 
 model = FastLanguageModel.get_peft_model(
