@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import type { ModelInfo } from '@/types'
 import { FTModelBrowser } from './FTModelBrowser'
 import { PairsTab } from './PairsTab'
@@ -25,48 +25,24 @@ export function FineTunePage({ vramTotalGb }: FineTunePageProps): React.ReactEle
     <div className="flex flex-col flex-1 overflow-hidden">
       <TabBar active={activeTab} onSelect={setActiveTab} selectedModelName={selectedModel?.name ?? null} />
       <div className="flex flex-1 overflow-hidden">
-        <AnimatePresence mode="wait">
-          {activeTab === 'models' && (
-            <TabPane key="models">
-              <FTModelBrowser
-                vramTotalGb={vramTotalGb}
-                onSelect={handleModelSelect}
-              />
-            </TabPane>
-          )}
-          {activeTab === 'pairs' && (
-            <TabPane key="pairs">
-              <PairsTab />
-            </TabPane>
-          )}
-          {activeTab === 'train' && (
-            <TabPane key="train">
-              <TrainTab
-                selectedModel={selectedModel}
-                vramTotalGb={vramTotalGb}
-                onNavigateToModels={() => setActiveTab('models')}
-              />
-            </TabPane>
-          )}
-        </AnimatePresence>
+        <div className={`flex flex-col flex-1 overflow-hidden ${activeTab === 'models' ? '' : 'hidden'}`}>
+          <FTModelBrowser vramTotalGb={vramTotalGb} onSelect={handleModelSelect} />
+        </div>
+        <div className={`flex flex-col flex-1 overflow-hidden ${activeTab === 'pairs' ? '' : 'hidden'}`}>
+          <PairsTab />
+        </div>
+        <div className={`flex flex-col flex-1 overflow-hidden ${activeTab === 'train' ? '' : 'hidden'}`}>
+          <TrainTab
+            selectedModel={selectedModel}
+            vramTotalGb={vramTotalGb}
+            onNavigateToModels={() => setActiveTab('models')}
+          />
+        </div>
       </div>
     </div>
   )
 }
 
-function TabPane({ children }: { children: React.ReactNode }): React.ReactElement {
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.12 }}
-      className="flex flex-col flex-1 overflow-hidden"
-    >
-      {children}
-    </motion.div>
-  )
-}
 
 function TabBar({ active, onSelect, selectedModelName }: {
   active: Tab; onSelect: (t: Tab) => void; selectedModelName: string | null

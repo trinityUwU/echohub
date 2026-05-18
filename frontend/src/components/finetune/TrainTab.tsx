@@ -39,13 +39,19 @@ export function TrainTab({ selectedModel, vramTotalGb, onNavigateToModels }: Tra
       const es = new EventSource(url)
       es.onmessage = (e) => {
         try {
-          const data = JSON.parse(e.data) as { msg?: string; done?: boolean; success?: boolean }
-          if (data.done) {
+          const data = JSON.parse(e.data) as { type: string; text?: string; label?: string }
+          if (data.type === 'done') {
             es.close()
             setInstalling(false)
             void loadData()
-          } else if (data.msg) {
-            setInstallLogs(l => [...l.slice(-MAX_LOG_LINES + 1), data.msg!])
+          } else if (data.type === 'error') {
+            setInstallLogs(l => [...l.slice(-MAX_LOG_LINES + 1), `ERROR: ${data.text ?? ''}`])
+            es.close()
+            setInstalling(false)
+          } else if (data.type === 'step') {
+            setInstallLogs(l => [...l.slice(-MAX_LOG_LINES + 1), `>>> ${data.label ?? ''}`])
+          } else if (data.type === 'log' && data.text) {
+            setInstallLogs(l => [...l.slice(-MAX_LOG_LINES + 1), data.text!])
           }
         } catch { /* skip */ }
       }
@@ -110,6 +116,7 @@ export function TrainTab({ selectedModel, vramTotalGb, onNavigateToModels }: Tra
                   } catch { /* best-effort */ }
                 }}
                 onJobUpdate={(updated) => setJobs(prev => prev.map(j => j.id === updated.id ? updated : j))}
+                onRefresh={loadData}
               />
             ))}
           </div>
@@ -168,10 +175,11 @@ function StatusBadge({ status }: { status: FinetuneJob['status'] }): React.React
   )
 }
 
-function JobRow({ job, onCancel, onJobUpdate }: {
+function JobRow({ job, onCancel, onJobUpdate, onRefresh }: {
   job: FinetuneJob
   onCancel: (id: string) => Promise<void>
   onJobUpdate: (j: FinetuneJob) => void
+  onRefresh: () => void
 }): React.ReactElement {
   const [logs, setLogs] = useState<string[]>([])
   const [exporting, setExporting] = useState(false)
@@ -185,12 +193,17 @@ function JobRow({ job, onCancel, onJobUpdate }: {
       es = new EventSource(url)
       es.onmessage = (e) => {
         try {
-          const data = JSON.parse(e.data) as { msg?: string; done?: boolean; job?: FinetuneJob }
-          if (data.done) {
+          const data = JSON.parse(e.data) as { type: string; text?: string; output_dir?: string }
+          if (data.type === 'done') {
             es?.close()
-            if (data.job) onJobUpdate(data.job)
-          } else if (data.msg) {
-            setLogs(l => [...l.slice(-MAX_LOG_LINES + 1), data.msg!])
+            onRefresh()
+          } else if (data.type === 'error') {
+            setLogs(l => [...l.slice(-MAX_LOG_LINES + 1), `ERROR: ${data.text ?? ''}`])
+            es?.close()
+          } else if (data.type === 'log' && data.text) {
+            setLogs(l => [...l.slice(-MAX_LOG_LINES + 1), data.text!])
+          } else if (data.type === 'start') {
+            setLogs(l => [...l, 'Training started…'])
           }
         } catch { /* skip */ }
       }
@@ -210,9 +223,11 @@ function JobRow({ job, onCancel, onJobUpdate }: {
       const es = new EventSource(url)
       es.onmessage = (e) => {
         try {
-          const data = JSON.parse(e.data) as { msg?: string; done?: boolean }
-          if (data.done) { es.close(); setExporting(false) }
-          else if (data.msg) setExportLogs(l => [...l.slice(-MAX_LOG_LINES + 1), data.msg!])
+          const data = JSON.parse(e.data) as { type: string; text?: string; label?: string; gguf_path?: string }
+          if (data.type === 'done') { es.close(); setExporting(false) }
+          else if (data.type === 'step') setExportLogs(l => [...l.slice(-MAX_LOG_LINES + 1), `>>> ${data.label ?? ''}`])
+          else if (data.type === 'log' && data.text) setExportLogs(l => [...l.slice(-MAX_LOG_LINES + 1), data.text!])
+          else if (data.type === 'error') { setExportLogs(l => [...l, `ERROR: ${data.text ?? ''}`]); es.close(); setExporting(false) }
         } catch { /* skip */ }
       }
       es.onerror = () => { es.close(); setExporting(false) }
