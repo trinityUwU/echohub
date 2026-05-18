@@ -240,24 +240,31 @@ function JobRow({ job, selected, onClick, onRefresh }: JobRowProps): React.React
   const logRef = useRef<HTMLDivElement>(null)
   const isActive = job.status === 'pending' || job.status === 'running'
 
+  const onRefreshRef = useRef(onRefresh)
+  useEffect(() => { onRefreshRef.current = onRefresh }, [onRefresh])
+
   useEffect(() => {
     if (!isActive) return
     let es: EventSource | null = null
+    let connected = false
     ftJobStreamUrl(job.id).then(url => {
       es = new EventSource(url)
       es.onmessage = (e) => {
         try {
           const d = JSON.parse(e.data) as { type: string; text?: string }
-          if (d.type === 'done' || d.type === 'error') { es?.close(); setTimeout(onRefresh, 300) }
+          if (!connected && (d.type === 'start' || d.type === 'log')) {
+            connected = true
+            setLogs(['Training started…'])
+          }
           if (d.type === 'log' && d.text) setLogs(l => [...l.slice(-MAX_LOG_LINES + 1), d.text!])
-          if (d.type === 'start') setLogs(l => [...l, 'Training started…'])
           if (d.type === 'error' && d.text) setLogs(l => [...l, `ERROR: ${d.text}`])
+          if (d.type === 'done' || d.type === 'error') { es?.close(); setTimeout(() => onRefreshRef.current(), 300) }
         } catch { /* skip */ }
       }
-      es.onerror = () => { es?.close(); setTimeout(onRefresh, 500) }
+      es.onerror = () => { es?.close(); setTimeout(() => onRefreshRef.current(), 500) }
     }).catch(() => {})
     return () => { es?.close() }
-  }, [job.id, job.status, isActive, onRefresh])
+  }, [job.id, isActive])
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
@@ -286,12 +293,17 @@ function JobRow({ job, selected, onClick, onRefresh }: JobRowProps): React.React
         )}
       </div>
       {job.error && <p className="px-3 pb-2 text-xs text-red-400">{job.error}</p>}
-      {(logs.length > 0 || isActive) && (
-        <div ref={logRef} className="mx-3 mb-3 font-mono text-xs bg-overlay rounded-sm p-2.5 max-h-40 overflow-y-auto leading-relaxed text-text-muted">
+      {isActive && (
+        <div ref={logRef} className="mx-3 mb-3 font-mono text-xs bg-overlay rounded-sm p-2.5 max-h-48 overflow-y-auto leading-relaxed text-text-muted">
           {logs.length === 0
-            ? <span className="animate-pulse">Connecting to training process…</span>
-            : logs.map((l, i) => <div key={i}>{l}</div>)
+            ? <span className="animate-pulse opacity-50">Connecting…</span>
+            : logs.map((l, i) => <div key={i} className="py-[1px]">{l}</div>)
           }
+        </div>
+      )}
+      {!isActive && logs.length > 0 && (
+        <div className="mx-3 mb-3 font-mono text-xs bg-overlay rounded-sm p-2.5 max-h-24 overflow-y-auto leading-relaxed text-text-muted/60">
+          {logs.slice(-5).map((l, i) => <div key={i} className="py-[1px]">{l}</div>)}
         </div>
       )}
     </div>
