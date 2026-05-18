@@ -167,7 +167,12 @@ export default function App(): React.ReactElement {
           />
         </div>
         <div className={`flex flex-1 overflow-hidden ${page === 'finetune' ? 'animate-fade-in' : 'hidden'}`}>
-          <FineTunePage loadedModel={loadedModel} />
+          <FineTunePage
+            loadedModel={loadedModel}
+            vramTotalGb={gpu ? gpu.vram_total_mb / 1024 : 0}
+            downloadJobs={Object.fromEntries(downloadJobs.map(j => [j.model_id, j]))}
+            onDownloaded={refresh}
+          />
         </div>
         <div className={`flex flex-1 overflow-hidden ${page === 'settings' ? 'animate-fade-in' : 'hidden'}`}>
           <SettingsPage />

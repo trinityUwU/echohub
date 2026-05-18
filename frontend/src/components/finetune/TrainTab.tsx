@@ -6,9 +6,11 @@ import { EvalPanel } from './EvalPanel'
 interface TrainTabProps {
   profileId: string | null
   loadedModel: ModelInfo | null
+  ftModel?: ModelInfo | null
 }
 
-export function TrainTab({ profileId, loadedModel }: TrainTabProps): React.ReactElement {
+export function TrainTab({ profileId, loadedModel, ftModel }: TrainTabProps): React.ReactElement {
+  const activeModel = ftModel ?? loadedModel
   const [jobs, setJobs] = useState<FinetuneJob[]>([])
   const [profiles, setProfiles] = useState<FinetuneProfile[]>([])
   const [selectedProfile, setSelectedProfile] = useState<string | null>(profileId)
@@ -37,11 +39,11 @@ export function TrainTab({ profileId, loadedModel }: TrainTabProps): React.React
   }, [loadJobs, loadProfiles])
 
   const handleStart = async (): Promise<void> => {
-    if (!loadedModel) return
+    if (!activeModel) return
     setStarting(true)
     try {
       const job = await createFinetuneJob({
-        model_id: loadedModel.id,
+        model_id: activeModel!.id,
         profile_id: selectedProfile,
       })
       await loadJobs()
@@ -51,8 +53,8 @@ export function TrainTab({ profileId, loadedModel }: TrainTabProps): React.React
     }
   }
 
-  const evalLoadedModel = loadedModel
-    ? { id: loadedModel.id, path: undefined }
+  const evalLoadedModel = activeModel
+    ? { id: activeModel.id, path: undefined }
     : null
 
   return (
@@ -61,10 +63,10 @@ export function TrainTab({ profileId, loadedModel }: TrainTabProps): React.React
       <div className="bg-surface border border-white/[0.06] rounded-md p-4 mb-4">
         <h3 className="text-sm font-semibold text-text-primary mb-3">New training run</h3>
 
-        {loadedModel ? (
+        {activeModel ? (
           <div className="flex items-center gap-2 mb-3">
             <span className="w-2 h-2 rounded-full bg-accent flex-shrink-0" />
-            <span className="text-xs text-text-secondary">{loadedModel.name}</span>
+            <span className="text-xs text-text-secondary">{activeModel.name}</span>
           </div>
         ) : (
           <p className="text-xs text-text-muted mb-3">Load a model first</p>
@@ -77,7 +79,7 @@ export function TrainTab({ profileId, loadedModel }: TrainTabProps): React.React
         />
 
         <button
-          disabled={!loadedModel || starting}
+          disabled={!activeModel || starting}
           onClick={handleStart}
           className="mt-3 px-4 py-1.5 bg-accent/20 hover:bg-accent/30 disabled:opacity-40 disabled:cursor-not-allowed text-accent text-xs rounded cursor-pointer transition-colors"
         >

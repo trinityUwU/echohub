@@ -1,11 +1,15 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import type { ModelInfo } from '@/types'
+import type { DownloadJob, ModelInfo } from '@/types'
 import { ProfilesTab } from './ProfilesTab'
 import { TrainTab } from './TrainTab'
+import { FTModelBrowser } from './FTModelBrowser'
 
 interface FineTunePageProps {
   loadedModel: ModelInfo | null
+  vramTotalGb: number
+  downloadJobs: Record<string, DownloadJob>
+  onDownloaded: () => void
 }
 
 type TabId = 'models' | 'profiles' | 'train'
@@ -15,9 +19,10 @@ interface Tab {
   label: string
 }
 
-export function FineTunePage({ loadedModel }: FineTunePageProps): React.ReactElement {
+export function FineTunePage({ loadedModel, vramTotalGb, downloadJobs, onDownloaded }: FineTunePageProps): React.ReactElement {
   const [activeTab, setActiveTab] = useState<TabId>('profiles')
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
+  const [selectedModel, setSelectedModel] = useState<ModelInfo | null>(null)
 
   const tabs: Tab[] = [
     { id: 'models', label: 'Models' },
@@ -58,10 +63,21 @@ export function FineTunePage({ loadedModel }: FineTunePageProps): React.ReactEle
             <TrainTab
               profileId={selectedProfileId}
               loadedModel={loadedModel}
+              ftModel={selectedModel}
             />
           )}
           {activeTab === 'models' && (
-            <ModelsPlaceholder />
+            <FTModelBrowser
+              vramTotalGb={vramTotalGb}
+              downloadJobs={downloadJobs}
+              onDownloaded={onDownloaded}
+              onSelect={model => {
+                setSelectedProfileId(null)
+                setActiveTab('train')
+                // pass model to TrainTab via state
+                setSelectedModel(model)
+              }}
+            />
           )}
         </motion.div>
       </AnimatePresence>
@@ -86,10 +102,3 @@ function TabButton({ label, active, onClick }: {
   )
 }
 
-function ModelsPlaceholder(): React.ReactElement {
-  return (
-    <div className="flex flex-1 items-center justify-center text-text-muted text-sm">
-      Model management coming soon
-    </div>
-  )
-}
