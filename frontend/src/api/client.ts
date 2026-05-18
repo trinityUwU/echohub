@@ -503,7 +503,9 @@ export const createFinetuneJob = (data: {
   max_seq_length?: number; per_device_train_batch_size?: number
   gradient_accumulation_steps?: number; lora_rank?: number; lora_alpha?: number
   num_epochs?: number; learning_rate?: number; optim?: string
-  target_modules?: string[]
+  target_modules?: string[]; cpu_offload_gb?: number
+  eval_before?: boolean; eval_after?: boolean
+  eval_gguf_model_id?: string; eval_gguf_file?: string
 }): Promise<import('@/types').FinetuneJob> =>
   apiRequest('/finetune/jobs', { method: 'POST', body: JSON.stringify(data) })
 

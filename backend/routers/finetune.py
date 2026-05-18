@@ -43,6 +43,10 @@ class FinetuneJobCreate(BaseModel):
     gradient_accumulation_steps: int = 8
     optim: str = "adamw_8bit"
     cpu_offload_gb: int = 0
+    eval_before: bool = False
+    eval_after: bool = False
+    eval_gguf_model_id: Optional[str] = None
+    eval_gguf_file: Optional[str] = None
 
 
 class FinetuneProfileCreate(BaseModel):
@@ -363,10 +367,42 @@ async def run_job_stream(job_id: str) -> StreamingResponse:
         return StreamingResponse(_no_pairs(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-    def on_status(status: str, output_path: str | None) -> None:
-        db.update_finetune_job(job_id, status=status, output_path=output_path)
+    return StreamingResponse(
+        _full_pipeline(job_id=job_id, job=job, cfg=cfg, pairs=pairs),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
-    gen = ft.run_finetune_sse(
+
+async def _full_pipeline(job_id: str, job: dict, cfg: dict, pairs: list[dict]):
+    """Orchestrates: eval_before → fine-tune → eval_after (with GGUF export)."""
+    profile_id: Optional[str] = cfg.get("profile_id")
+    eval_before: bool = cfg.get("eval_before", False)
+    eval_after: bool = cfg.get("eval_after", False)
+    eval_gguf_model_id: Optional[str] = cfg.get("eval_gguf_model_id")
+    eval_gguf_file: Optional[str] = cfg.get("eval_gguf_file")
+
+    # ── Step 1: eval before ────────────────────────────────────────────────
+    if eval_before and eval_gguf_model_id and eval_gguf_file and profile_id:
+        async for chunk in ft._eval_pipeline_sse(
+            job_id=job_id,
+            profile_id=profile_id,
+            stage="before",
+            gguf_model_id=eval_gguf_model_id,
+            gguf_file=eval_gguf_file,
+        ):
+            yield chunk
+
+    # ── Step 2: fine-tune ──────────────────────────────────────────────────
+    lora_output_dir: Optional[str] = None
+
+    def on_status(status: str, output_path: Optional[str]) -> None:
+        nonlocal lora_output_dir
+        db.update_finetune_job(job_id, status=status, output_path=output_path)
+        if output_path:
+            lora_output_dir = output_path
+
+    async for chunk in ft.run_finetune_sse(
         job_id=job_id,
         model_path=cfg["model_path"],
         pairs=pairs,
@@ -381,12 +417,46 @@ async def run_job_stream(job_id: str) -> StreamingResponse:
         gradient_accumulation_steps=cfg.get("gradient_accumulation_steps", 8),
         optim=cfg.get("optim", "adamw_8bit"),
         cpu_offload_gb=cfg.get("cpu_offload_gb", 0),
-    )
-    return StreamingResponse(
-        gen,
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    ):
+        yield chunk
+
+    # Abort pipeline if fine-tune didn't succeed
+    current_job = db.get_finetune_job(job_id)
+    if not current_job or current_job["status"] != "done":
+        return
+
+    # ── Step 3: eval after ─────────────────────────────────────────────────
+    if not (eval_after and lora_output_dir and profile_id and eval_gguf_model_id and eval_gguf_file):
+        return
+
+    # Export LoRA → GGUF first
+    from pathlib import Path as _Path
+    lora_path = str(_Path(lora_output_dir) / "lora")
+    export_gguf_path: Optional[str] = None
+
+    def _on_export_done(gguf_path: str) -> None:
+        nonlocal export_gguf_path
+        export_gguf_path = gguf_path
+
+    yield f"data: {json.dumps({'type': 'step', 'label': 'Exporting LoRA to GGUF for after-eval…'})}\n\n"
+    async for chunk in ft.export_gguf_sse(job_id=job_id, lora_path=lora_path, on_done=_on_export_done):
+        yield chunk
+
+    if not export_gguf_path:
+        yield f"data: {json.dumps({'type': 'log', 'text': 'GGUF export failed — skipping after-eval'})}\n\n"
+        return
+
+    # Use the finetuned GGUF (local path) for after-eval
+    export_model_id = f"{eval_gguf_model_id}-finetuned"
+    async for chunk in ft._eval_pipeline_sse(
+        job_id=job_id,
+        profile_id=profile_id,
+        stage="after",
+        gguf_model_id=export_model_id,
+        gguf_file=export_gguf_path,  # absolute local path — no HF download needed
+        delete_after=False,
+    ):
+        yield chunk
 
 
 # ── Export GGUF ────────────────────────────────────────────────────────────

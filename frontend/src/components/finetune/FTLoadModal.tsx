@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { FtRecommendedConfig, FtTrainingConfig } from '@/types'
-import { getRecommendedConfig, createFinetuneJob } from '@/api/client'
+import type { FtRecommendedConfig, FtTrainingConfig, GgufCandidate } from '@/types'
+import { getRecommendedConfig, createFinetuneJob, findGguf } from '@/api/client'
 
 interface FTLoadModalProps {
   modelId: string
@@ -62,6 +62,13 @@ export function FTLoadModal({
   const [starting, setStarting] = useState(false)
   const [error, setError]   = useState<string | null>(null)
 
+  const [evalBefore, setEvalBefore]             = useState(false)
+  const [evalAfter, setEvalAfter]               = useState(false)
+  const [searchingGguf, setSearchingGguf]       = useState(false)
+  const [ggufCandidates, setGgufCandidates]     = useState<GgufCandidate[] | null>(null)
+  const [selectedGguf, setSelectedGguf]         = useState<GgufCandidate | null>(null)
+  const [selectedGgufFile, setSelectedGgufFile] = useState<string | null>(null)
+
   const load = useCallback(async (): Promise<void> => {
     try {
       const rec = await getRecommendedConfig(paramsBillion ?? undefined)
@@ -83,15 +90,47 @@ export function FTLoadModal({
     setDirty(false)
   }
 
+  const handleFindGguf = async (): Promise<void> => {
+    setSearchingGguf(true)
+    try {
+      const result = await findGguf(modelId)
+      setGgufCandidates(result.candidates)
+      if (result.candidates.length > 0) {
+        const top = result.candidates[0]
+        setSelectedGguf(top)
+        setSelectedGgufFile(top.recommended_file ?? null)
+      }
+    } catch { /* ignore */ } finally {
+      setSearchingGguf(false)
+    }
+  }
+
   const handleStart = async (): Promise<void> => {
     if (!config) return
+    if ((evalBefore || evalAfter) && (!selectedGguf || !selectedGgufFile)) {
+      setError('Find a GGUF model before starting eval')
+      return
+    }
     setStarting(true); setError(null)
     try {
-      const job = await createFinetuneJob({ model_id: modelId, profile_id: profileId, ...config })
+      const job = await createFinetuneJob({
+        model_id: modelId, profile_id: profileId, ...config,
+        eval_before: evalBefore,
+        eval_after: evalAfter,
+        eval_gguf_model_id: (evalBefore || evalAfter) ? selectedGguf?.id : undefined,
+        eval_gguf_file: (evalBefore || evalAfter) ? selectedGgufFile ?? undefined : undefined,
+      })
       onJobCreated(job.id); onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start job')
     } finally { setStarting(false) }
+  }
+
+  const handleToggleEval = (which: 'before' | 'after'): void => {
+    const willEnable = which === 'before' ? !evalBefore : !evalAfter
+    if (which === 'before') setEvalBefore(v => !v)
+    else setEvalAfter(v => !v)
+    if (willEnable && !selectedGguf && !searchingGguf) void handleFindGguf()
   }
 
   const vramUsed = config && paramsBillion
@@ -265,6 +304,47 @@ export function FTLoadModal({
             <p className="text-[10px] text-text-muted">
               Effective batch size: {config.per_device_train_batch_size * config.gradient_accumulation_steps} samples/step
             </p>
+
+            {/* Eval section */}
+            <div className="border-t border-white/[0.04] pt-3 flex flex-col gap-2">
+              <p className="text-[10px] text-text-muted uppercase tracking-wider">Eval</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => handleToggleEval('before')}
+                  className={`px-3 py-1 text-xs rounded border cursor-pointer transition-colors ${
+                    evalBefore
+                      ? 'bg-accent/20 border-accent/30 text-accent'
+                      : 'bg-white/[0.03] border-white/[0.06] text-text-muted hover:border-white/[0.12]'
+                  }`}
+                >
+                  Before eval
+                </button>
+                <button
+                  onClick={() => handleToggleEval('after')}
+                  className={`px-3 py-1 text-xs rounded border cursor-pointer transition-colors ${
+                    evalAfter
+                      ? 'bg-accent/20 border-accent/30 text-accent'
+                      : 'bg-white/[0.03] border-white/[0.06] text-text-muted hover:border-white/[0.12]'
+                  }`}
+                >
+                  After eval
+                </button>
+              </div>
+
+              {(evalBefore || evalAfter) && (
+                <EvalGgufPicker
+                  searching={searchingGguf}
+                  candidates={ggufCandidates}
+                  selected={selectedGguf}
+                  selectedFile={selectedGgufFile}
+                  evalAfter={evalAfter}
+                  onFind={handleFindGguf}
+                  onReset={() => { setGgufCandidates(null); setSelectedGguf(null); setSelectedGgufFile(null) }}
+                  onSelectCandidate={(c) => { setSelectedGguf(c); setSelectedGgufFile(c.recommended_file ?? null) }}
+                  onSelectFile={setSelectedGgufFile}
+                />
+              )}
+            </div>
           </div>
         )}
 
@@ -284,6 +364,78 @@ export function FTLoadModal({
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+interface EvalGgufPickerProps {
+  searching: boolean
+  candidates: GgufCandidate[] | null
+  selected: GgufCandidate | null
+  selectedFile: string | null
+  evalAfter: boolean
+  onFind: () => void
+  onReset: () => void
+  onSelectCandidate: (c: GgufCandidate) => void
+  onSelectFile: (f: string) => void
+}
+
+function EvalGgufPicker({
+  searching, candidates, selected, selectedFile, evalAfter,
+  onFind, onReset, onSelectCandidate, onSelectFile,
+}: EvalGgufPickerProps): React.ReactElement {
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-[10px] text-text-muted">GGUF base model for eval:</p>
+
+      {!candidates && (
+        <button onClick={onFind} disabled={searching}
+          className="self-start px-3 py-1 text-xs rounded border cursor-pointer transition-colors
+            bg-white/[0.03] border-white/[0.06] text-text-muted hover:border-white/[0.12] disabled:opacity-40">
+          {searching ? 'Searching…' : 'Find GGUF'}
+        </button>
+      )}
+
+      {candidates && candidates.length > 1 && !selected && (
+        <div className="flex flex-col gap-1">
+          {candidates.map(c => (
+            <button key={c.id} onClick={() => onSelectCandidate(c)}
+              className="text-left px-2 py-1 text-[10px] rounded border bg-white/[0.03] border-white/[0.06]
+                text-text-muted hover:border-white/[0.12] cursor-pointer transition-colors">
+              {c.id.split('/').pop()} {c.same_author && '· same author'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {selected && selectedFile && (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2 bg-white/[0.03] rounded px-2 py-1.5">
+            <span className="text-[10px] text-text-muted truncate flex-1">
+              {selected.id.split('/').pop()} · {selectedFile}
+            </span>
+            <button onClick={onReset}
+              className="text-[10px] text-text-muted hover:text-text-secondary cursor-pointer flex-shrink-0">
+              Change
+            </button>
+          </div>
+          {selected.gguf_files && selected.gguf_files.length > 1 && (
+            <select value={selectedFile} onChange={e => onSelectFile(e.target.value)}
+              className="text-[10px] bg-white/[0.03] border border-white/[0.06] rounded px-2 py-1
+                text-text-muted cursor-pointer focus:outline-none">
+              {selected.gguf_files.map(f => (
+                <option key={f.name} value={f.name}>{f.name} ({f.size_gb.toFixed(1)} GB)</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+
+      {evalAfter && (
+        <p className="text-[10px] text-text-muted/60">
+          After eval uses the exported GGUF from this training run
+        </p>
+      )}
     </div>
   )
 }

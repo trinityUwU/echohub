@@ -413,6 +413,158 @@ print("Merge complete", flush=True)
     on_done(gguf_path)
 
 
+async def _eval_pipeline_sse(
+    job_id: str,
+    profile_id: str,
+    stage: str,
+    gguf_model_id: str,
+    gguf_file: str,
+    delete_after: bool = True,
+) -> AsyncIterator[str]:
+    """Download GGUF (or use local path), load in llama.cpp, run eval prompts, unload, optionally delete."""
+    import uuid as _uuid
+    from backend.services import db as _db
+
+    def _sse(data: dict) -> str:
+        return f"data: {json.dumps(data)}\n\n"
+
+    # ── Step 1: resolve GGUF path ──────────────────────────────────────────
+    is_local_path = gguf_file.startswith("/")
+
+    if is_local_path:
+        gguf_path: str | None = gguf_file
+        yield _sse({"type": "log", "text": f"[Eval {stage}] Using local GGUF: {gguf_path}"})
+    else:
+        yield _sse({"type": "step", "label": f"[Eval {stage}] Downloading {gguf_file}…"})
+        try:
+            from huggingface_hub import hf_hub_download
+            from backend.services.hf_service import _model_dir, _get_hf_token
+            gguf_path = hf_hub_download(
+                repo_id=gguf_model_id,
+                filename=gguf_file,
+                local_dir=str(_model_dir(gguf_model_id)),
+                token=_get_hf_token(),
+            )
+            yield _sse({"type": "log", "text": f"[Eval {stage}] Downloaded: {gguf_path}"})
+        except Exception as e:
+            yield _sse({"type": "error", "text": f"[Eval {stage}] Download failed: {e}"})
+            return
+
+    # ── Step 2: load model via llama_service directly ──────────────────────
+    yield _sse({"type": "step", "label": f"[Eval {stage}] Loading model…"})
+    try:
+        from backend.services import llama_service
+        from backend.services.engine_router import detect_gpu
+        gpu = detect_gpu()
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: llama_service.load_model_async(
+                gguf_path=gguf_path,
+                model_id=gguf_model_id,
+                n_ctx=4096,
+                gpu_type=gpu["type"],
+            ),
+        )
+        # Poll until loaded (up to 120s)
+        for _ in range(240):
+            state = llama_service.get_load_state()
+            if state.get("loaded_model_id"):
+                break
+            if state.get("error"):
+                raise RuntimeError(state["error"])
+            await asyncio.sleep(0.5)
+        else:
+            raise RuntimeError("Model load timed out")
+        yield _sse({"type": "log", "text": f"[Eval {stage}] Model loaded"})
+    except Exception as e:
+        yield _sse({"type": "error", "text": f"[Eval {stage}] Load failed: {e}"})
+        if not is_local_path and delete_after and gguf_path:
+            try:
+                os.remove(gguf_path)
+            except Exception:
+                pass
+        return
+
+    # ── Step 3: fetch eval prompts ─────────────────────────────────────────
+    pairs = _db.get_training_pairs_for_profile(profile_id)
+    eval_prompts = [{"id": p["id"], "prompt": p["prompt"]} for p in pairs[:20]]
+    yield _sse({"type": "step", "label": f"[Eval {stage}] Running {len(eval_prompts)} prompts…"})
+
+    # ── Step 4: run prompts ────────────────────────────────────────────────
+    results: list[dict] = []
+    for i, p in enumerate(eval_prompts):
+        try:
+            response_text = ""
+            async for chunk in llama_service.generate(
+                messages=[{"role": "user", "content": p["prompt"]}],
+                stream=False,
+                temperature=0.0,
+                max_tokens=512,
+            ):
+                if isinstance(chunk, str) and chunk.startswith("data: "):
+                    raw = chunk[6:].strip()
+                    if raw and raw != "[DONE]":
+                        try:
+                            parsed = json.loads(raw)
+                            delta = (parsed.get("choices") or [{}])[0].get("delta", {}).get("content")
+                            if delta:
+                                response_text += delta
+                        except Exception:
+                            pass
+                elif isinstance(chunk, dict):
+                    # stream=False returns a single dict
+                    response_text = (chunk.get("choices") or [{}])[0].get("message", {}).get("content", "")
+            results.append({"prompt_id": p["id"], "prompt": p["prompt"], "response": response_text, "score": None})
+        except Exception:
+            results.append({"prompt_id": p["id"], "prompt": p["prompt"], "response": "", "score": None})
+        yield _sse({"type": "progress", "eval_stage": stage, "current": i + 1, "total": len(eval_prompts)})
+
+    # ── Step 5: unload ─────────────────────────────────────────────────────
+    yield _sse({"type": "step", "label": f"[Eval {stage}] Unloading model…"})
+    try:
+        llama_service.unload_model()
+    except Exception:
+        pass
+
+    # ── Step 6: delete temp GGUF if requested ─────────────────────────────
+    if delete_after and not is_local_path and gguf_path:
+        try:
+            os.remove(gguf_path)
+            yield _sse({"type": "log", "text": f"[Eval {stage}] Temp GGUF deleted"})
+        except Exception:
+            pass
+
+    # ── Step 7: score ──────────────────────────────────────────────────────
+    try:
+        from backend.services.quality_scorer import score_general
+        for r in results:
+            try:
+                scored = score_general(r["prompt"], r["response"])
+                r["score"] = scored.get("score") if isinstance(scored, dict) else float(scored)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    valid = [r["score"] for r in results if r["score"] is not None]
+    score_avg = round(sum(valid) / len(valid), 2) if valid else None
+
+    # ── Step 8: persist ────────────────────────────────────────────────────
+    model_path_stored = gguf_path if not delete_after else gguf_file
+    _db.create_finetune_eval(
+        id=str(_uuid.uuid4()),
+        job_id=job_id,
+        profile_id=profile_id,
+        stage=stage,
+        model_path=model_path_stored,
+        model_id=gguf_model_id,
+        results=results,
+        score_avg=score_avg,
+    )
+    yield _sse({"type": "eval_done", "stage": stage, "score_avg": score_avg})
+
+
 def _find_llama_convert() -> Path | None:
     candidates = [
         Path(__file__).parents[2] / "vendor" / "llama.cpp" / "convert_hf_to_gguf.py",
