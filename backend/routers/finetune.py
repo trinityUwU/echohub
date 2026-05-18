@@ -1,6 +1,7 @@
 """Fine-tuning API router."""
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from typing import Optional
@@ -273,10 +274,23 @@ async def run_job_stream(job_id: str) -> StreamingResponse:
     if not job:
         raise HTTPException(404, "Job not found")
 
-    if job["status"] == "cancelled":
-        async def _cancelled():
-            yield f"data: {json.dumps({'type': 'error', 'text': 'Job was cancelled'})}\n\n"
-        return StreamingResponse(_cancelled(), media_type="text/event-stream",
+    # Jobs in terminal state — stream status only, don't relaunch
+    if job["status"] in ("cancelled", "done", "error"):
+        status = job["status"]
+        error  = job.get("error") or ""
+        async def _terminal():
+            msg = f"Job already {status}" + (f": {error}" if error else "")
+            yield f"data: {json.dumps({'type': 'error' if status != 'done' else 'done', 'text': msg})}\n\n"
+        return StreamingResponse(_terminal(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    # Jobs already running in another connection — don't start a second process
+    if job["status"] == "running" and job_id in ft._active_jobs:
+        async def _already_running():
+            yield f"data: {json.dumps({'type': 'log', 'text': 'Job already running — attaching to existing stream'})}\n\n"
+            # Keep stream open so onerror doesn't trigger
+            await asyncio.sleep(60)
+        return StreamingResponse(_already_running(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     # Unload any loaded inference model to free VRAM before training

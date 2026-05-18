@@ -249,13 +249,17 @@ function JobRow({ job, onRefresh }: JobRowProps): React.ReactElement {
       es.onmessage = (e) => {
         try {
           const d = JSON.parse(e.data) as { type: string; text?: string }
-          if (!connected && (d.type === 'start' || d.type === 'log')) {
+          // Already terminal — just refresh status, don't pollute logs
+          if (d.type === 'done' || d.type === 'error') {
+            es?.close()
+            setTimeout(() => onRefreshRef.current(), 300)
+            return
+          }
+          if (!connected && d.type === 'log') {
             connected = true
             setLogs(['Training started…'])
           }
           if (d.type === 'log' && d.text) setLogs(l => [...l.slice(-MAX_LOG_LINES + 1), d.text!])
-          if (d.type === 'error' && d.text) setLogs(l => [...l, `ERROR: ${d.text}`])
-          if (d.type === 'done' || d.type === 'error') { es?.close(); setTimeout(() => onRefreshRef.current(), 300) }
         } catch { /* skip */ }
       }
       es.onerror = () => { es?.close(); setTimeout(() => onRefreshRef.current(), 500) }
