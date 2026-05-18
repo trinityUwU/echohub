@@ -402,6 +402,10 @@ async def _full_pipeline_inner(job_id: str, job: dict, cfg: dict, pairs: list[di
         ):
             yield chunk
 
+    if ft.is_cancelled(job_id):
+        yield f"data: {json.dumps({'type': 'error', 'text': 'Job cancelled'})}\n\n"
+        return
+
     # ── Step 2: fine-tune ──────────────────────────────────────────────────
     lora_output_dir: Optional[str] = None
 
@@ -429,7 +433,11 @@ async def _full_pipeline_inner(job_id: str, job: dict, cfg: dict, pairs: list[di
     ):
         yield chunk
 
-    # Abort pipeline if fine-tune didn't succeed
+    # Abort pipeline if fine-tune didn't succeed or was cancelled
+    if ft.is_cancelled(job_id):
+        yield f"data: {json.dumps({'type': 'error', 'text': 'Job cancelled'})}\n\n"
+        return
+
     current_job = db.get_finetune_job(job_id)
     if not current_job or current_job["status"] != "done":
         return

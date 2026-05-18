@@ -288,6 +288,11 @@ async def run_finetune_sse(
     with open(script_path, "w") as f:
         f.write(script)
 
+    if is_cancelled(job_id):
+        yield f"data: {json.dumps({'type': 'error', 'text': 'Job cancelled'})}\n\n"
+        on_status("cancelled", None)
+        return
+
     # Kill any orphan process for this job before starting a new one
     orphan = _active_jobs.pop(job_id, None)
     if orphan is not None:
