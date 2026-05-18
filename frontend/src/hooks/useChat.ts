@@ -21,8 +21,10 @@ function messageTextLength(msg: ChatMessage): number {
 }
 
 // Estimate token count (~4 chars/token)
-function estimateTokens(messages: ChatMessage[]): number {
-  return Math.round(messages.reduce((acc, m) => acc + messageTextLength(m), 0) / 4)
+function estimateTokens(messages: ChatMessage[], systemPrompt?: string): number {
+  const msgChars = messages.reduce((acc, m) => acc + messageTextLength(m), 0)
+  const sysChars = systemPrompt ? systemPrompt.length : 0
+  return Math.round((msgChars + sysChars) / 4)
 }
 
 function buildUserContent(text: string, attachments: Attachment[]): ChatMessage['content'] {
@@ -139,7 +141,7 @@ export function useChat(
 
     // Autocompact check: if estimated tokens > 75% of context, compact before sending
     if (maxContextTokens) {
-      const estimated = estimateTokens(currentMessages) + params.maxTokens
+      const estimated = estimateTokens(currentMessages, params.systemPrompt) + params.maxTokens
       const threshold = maxContextTokens * 0.75
       if (estimated > threshold && currentMessages.filter(m => m.role !== 'system').length > 6) {
         const compacted = await compact(currentMessages)
@@ -324,7 +326,7 @@ export function useChat(
   const isTokensExact = !streaming && liveTokens !== null
   const usedTokens = liveTokens !== null
     ? liveTokens.prompt + liveTokens.completion
-    : estimateTokens(messages)
+    : estimateTokens(messages, params.systemPrompt)
 
   return {
     messages,
