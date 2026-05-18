@@ -4,6 +4,7 @@ import type { Attachment, ChatMessage, ChatParams, ContentPart, GenerationStats 
 
 export const DEFAULT_CHAT_PARAMS: ChatParams = {
   systemPrompt: '',
+  permanentRules: '',
   temperature: 0.7,
   maxTokens: 4096,
   topP: 0.95,
@@ -21,9 +22,9 @@ function messageTextLength(msg: ChatMessage): number {
 }
 
 // Estimate token count (~4 chars/token)
-function estimateTokens(messages: ChatMessage[], systemPrompt?: string): number {
+function estimateTokens(messages: ChatMessage[], systemPrompt?: string, permanentRules?: string): number {
   const msgChars = messages.reduce((acc, m) => acc + messageTextLength(m), 0)
-  const sysChars = systemPrompt ? systemPrompt.length : 0
+  const sysChars = (systemPrompt?.length ?? 0) + (permanentRules?.length ?? 0)
   return Math.round((msgChars + sysChars) / 4)
 }
 
@@ -143,7 +144,7 @@ export function useChat(
 
     // Autocompact check: if estimated tokens > 75% of context, compact before sending
     if (maxContextTokens) {
-      const estimated = estimateTokens(currentMessages, params.systemPrompt) + params.maxTokens
+      const estimated = estimateTokens(currentMessages, params.systemPrompt, params.permanentRules) + params.maxTokens
       const threshold = maxContextTokens * 0.75
       if (estimated > threshold && currentMessages.filter(m => m.role !== 'system').length > 6) {
         const compacted = await compact(currentMessages)
@@ -332,7 +333,7 @@ export function useChat(
   const isTokensExact = !streaming && liveTokens !== null
   const usedTokens = liveTokens !== null
     ? liveTokens.prompt + liveTokens.completion
-    : estimateTokens(messages, params.systemPrompt)
+    : estimateTokens(messages, params.systemPrompt, params.permanentRules)
 
   return {
     messages,

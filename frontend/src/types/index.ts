@@ -115,6 +115,7 @@ export interface Attachment {
 
 export interface ChatParams {
   systemPrompt: string
+  permanentRules: string
   temperature: number
   maxTokens: number
   topP: number

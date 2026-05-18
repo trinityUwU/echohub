@@ -9,7 +9,7 @@ const BUILTIN_PROFILES: ChatProfile[] = [
     id: 'default',
     name: 'Default',
     params: {
-      systemPrompt: '', temperature: 0.7, maxTokens: 4096,
+      systemPrompt: '', permanentRules: '', temperature: 0.7, maxTokens: 4096,
       topP: 0.95, topK: -1, repetitionPenalty: 1.1,
       presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: false,
     },
@@ -19,7 +19,7 @@ const BUILTIN_PROFILES: ChatProfile[] = [
     name: 'Coder',
     params: {
       systemPrompt: 'You are an expert software engineer. Write clean, correct, well-structured code.',
-      temperature: 0.2, maxTokens: 4096,
+      permanentRules: '', temperature: 0.2, maxTokens: 4096,
       topP: 0.95, topK: -1, repetitionPenalty: 1.05,
       presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: true,
     },
@@ -28,7 +28,7 @@ const BUILTIN_PROFILES: ChatProfile[] = [
     id: 'creative',
     name: 'Creative',
     params: {
-      systemPrompt: '',
+      systemPrompt: '', permanentRules: '',
       temperature: 1.1, maxTokens: 4096,
       topP: 0.98, topK: 50, repetitionPenalty: 1.15,
       presencePenalty: 0.1, frequencyPenalty: 0, stop: '', enableThinking: false,
@@ -52,7 +52,12 @@ function loadProfiles(): ChatProfile[] {
       }
       return builtin
     })
-    return [...mergedBuiltins, ...custom]
+    // Normalize — add missing fields for profiles saved before this field existed
+    const normalize = (p: ChatProfile): ChatProfile => ({
+      ...p,
+      params: { ...p.params, permanentRules: p.params.permanentRules ?? '' },
+    })
+    return [...mergedBuiltins.map(normalize), ...custom.map(normalize)]
   } catch {
     return BUILTIN_PROFILES
   }

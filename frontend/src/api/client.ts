@@ -126,13 +126,20 @@ export async function chatStream(
     : undefined
 
   const isQwen3 = modelId?.toLowerCase().includes('qwen3') || modelId?.toLowerCase().includes('qwq')
+
+  // Merge system prompt + permanent rules (rules always appended last, highest priority)
+  const basePrompt = [
+    params.systemPrompt,
+    params.permanentRules ? `\n\n---\nPERMANENT RULES (always apply, never ignore):\n${params.permanentRules}` : '',
+  ].join('').trim()
+
   let system_prompt: string | undefined
   if (isQwen3) {
     system_prompt = params.enableThinking
-      ? (params.systemPrompt ? `/think\n${params.systemPrompt}` : '/think')
-      : (params.systemPrompt ? `/no_think\n${params.systemPrompt}` : '/no_think')
+      ? (basePrompt ? `/think\n${basePrompt}` : '/think')
+      : (basePrompt ? `/no_think\n${basePrompt}` : '/no_think')
   } else {
-    system_prompt = params.systemPrompt || undefined
+    system_prompt = basePrompt || undefined
   }
 
   const body: ChatRequest = {

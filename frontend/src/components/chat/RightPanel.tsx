@@ -32,6 +32,24 @@ export function RightPanel({ params, onChange, profiles, loadedModel }: RightPan
           className="w-full bg-elevated border border-border focus:border-border-hover rounded-sm px-2.5 py-2 text-sm text-text-primary placeholder-text-muted resize-y outline-none leading-relaxed min-h-[80px] transition-colors"
         />
       </Accordion>
+      <Accordion title="Permanent Rules">
+        <div className="flex flex-col gap-1.5">
+          <p className="text-2xs text-text-muted leading-relaxed">
+            Réinjecté à chaque message, après le system prompt. Utilise pour les règles critiques que le modèle ne doit jamais oublier.
+          </p>
+          <textarea
+            value={params.permanentRules}
+            onChange={e => set('permanentRules', e.target.value)}
+            placeholder={"- Always verify every variable is initialized\n- Never use blocking calls in async\n- Check all imports are present"}
+            className="w-full bg-elevated border border-yellow/30 focus:border-yellow/60 rounded-sm px-2.5 py-2 text-sm text-text-primary placeholder-text-muted/50 resize-y outline-none leading-relaxed min-h-[100px] transition-colors"
+          />
+          {params.permanentRules && (
+            <span className="text-2xs text-yellow">
+              ~{Math.round(params.permanentRules.length / 4)} tokens réinjectés à chaque message
+            </span>
+          )}
+        </div>
+      </Accordion>
       <Accordion title="Parameters">
         <Slider label="Temperature"  value={params.temperature}     min={0}   max={2}     step={0.01} onChange={v => set('temperature', v)} />
         <Slider label="Max Tokens"   value={params.maxTokens}       min={256} max={16384} step={256}  onChange={v => set('maxTokens', v)} formatValue={v => v.toLocaleString('en')} />
