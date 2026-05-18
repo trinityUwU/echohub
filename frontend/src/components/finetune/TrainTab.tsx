@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { FinetuneJob, FinetuneProfile, FtStatus, ModelInfo } from '@/types'
-import { listFinetuneJobs, listFinetuneProfiles, getFtStatus, ftInstallStreamUrl, cancelFinetuneJob, ftJobStreamUrl, recoverFinetuneJob } from '@/api/client'
+import { listFinetuneJobs, listFinetuneProfiles, getFtStatus, ftInstallStreamUrl, cancelFinetuneJob, ftJobStreamUrl, recoverFinetuneJob, getFinetuneJobLogs } from '@/api/client'
 import { EvalPanel } from './EvalPanel'
 import { FTLoadModal } from './FTLoadModal'
 
@@ -237,6 +237,14 @@ function JobRow({ job, onRefresh }: JobRowProps): React.ReactElement {
 
   // Auto-expand active jobs, keep expanded after done
   useEffect(() => { if (isActive) setExpanded(true) }, [isActive])
+
+  // Load persisted logs from disk for completed/errored jobs
+  useEffect(() => {
+    if (isActive || logs.length > 0) return
+    getFinetuneJobLogs(job.id)
+      .then(r => { if (r.exists && r.lines.length > 0) setLogs(r.lines) })
+      .catch(() => {})
+  }, [job.id, isActive, logs.length])
 
   const onRefreshRef = useRef(onRefresh)
   useEffect(() => { onRefreshRef.current = onRefresh }, [onRefresh])

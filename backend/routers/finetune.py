@@ -255,6 +255,20 @@ def create_job(body: FinetuneJobCreate) -> dict:
     return db.create_finetune_job(job_id, body.model_id, config)
 
 
+@router.get("/jobs/{job_id}/logs")
+def get_job_logs(job_id: str) -> dict:
+    """Return persisted training logs from disk."""
+    from backend.services.user_data import get_user_data_dir
+    log_path = get_user_data_dir() / "finetune" / job_id / "train.log"
+    if not log_path.exists():
+        return {"lines": [], "exists": False}
+    try:
+        lines = log_path.read_text(errors="replace").splitlines()
+        return {"lines": lines, "exists": True}
+    except Exception:
+        return {"lines": [], "exists": False}
+
+
 @router.post("/jobs/{job_id}/recover")
 def recover_job(job_id: str) -> dict:
     """Mark a failed job as done if the LoRA output was actually saved."""

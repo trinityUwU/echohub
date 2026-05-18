@@ -297,12 +297,15 @@ async def run_finetune_sse(
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
     _active_jobs[job_id] = proc
+    log_file_path = os.path.join(output_dir, "train.log")
 
     assert proc.stdout is not None
-    async for line_b in proc.stdout:
-        line = line_b.decode(errors="replace").rstrip()
-        if line:
-            yield f"data: {json.dumps({'type': 'log', 'text': line})}\n\n"
+    with open(log_file_path, "w", buffering=1) as log_file:
+        async for line_b in proc.stdout:
+            line = line_b.decode(errors="replace").rstrip()
+            if line:
+                log_file.write(line + "\n")
+                yield f"data: {json.dumps({'type': 'log', 'text': line})}\n\n"
 
     del _active_jobs[job_id]
     await proc.wait()

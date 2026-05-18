@@ -562,3 +562,6 @@ export const listEvals = (params?: { job_id?: string; profile_id?: string }): Pr
 
 export const recoverFinetuneJob = (id: string): Promise<{ status: string; output_dir: string }> =>
   apiRequest(`/finetune/jobs/${id}/recover`, { method: 'POST' })
+
+export const getFinetuneJobLogs = (id: string): Promise<{ lines: string[]; exists: boolean }> =>
+  apiRequest(`/finetune/jobs/${id}/logs`)
