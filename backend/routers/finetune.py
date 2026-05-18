@@ -255,6 +255,18 @@ def create_job(body: FinetuneJobCreate) -> dict:
     return db.create_finetune_job(job_id, body.model_id, config)
 
 
+@router.post("/jobs/{job_id}/recover")
+def recover_job(job_id: str) -> dict:
+    """Mark a failed job as done if the LoRA output was actually saved."""
+    from backend.services.user_data import get_user_data_dir
+    lora_path = get_user_data_dir() / "finetune" / job_id / "lora" / "adapter_config.json"
+    if not lora_path.exists():
+        raise HTTPException(400, "LoRA output not found — training did not complete")
+    output_dir = str(get_user_data_dir() / "finetune" / job_id)
+    db.update_finetune_job(job_id, status="done", output_path=output_dir)
+    return {"status": "recovered", "output_dir": output_dir}
+
+
 @router.delete("/jobs/{job_id}/cancel")
 def cancel_job(job_id: str) -> dict:
     job = db.get_finetune_job(job_id)
@@ -284,11 +296,19 @@ async def run_job_stream(job_id: str) -> StreamingResponse:
         return StreamingResponse(_terminal(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-    # Jobs already running in another connection — don't start a second process
+    # Job running but NOT in active_jobs → backend restarted mid-training, status stale
+    # Mark as error rather than relaunching (would OOM since no VRAM freed)
+    if job["status"] == "running" and job_id not in ft._active_jobs:
+        db.update_finetune_job(job_id, status="error", error="Backend restarted during training — relaunch the job")
+        async def _stale():
+            yield f"data: {json.dumps({'type': 'error', 'text': 'Backend restarted during training. Please relaunch the job.'})}\n\n"
+        return StreamingResponse(_stale(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    # Job already running in an active process — don't start a second
     if job["status"] == "running" and job_id in ft._active_jobs:
         async def _already_running():
-            yield f"data: {json.dumps({'type': 'log', 'text': 'Job already running — attaching to existing stream'})}\n\n"
-            # Keep stream open so onerror doesn't trigger
+            yield f"data: {json.dumps({'type': 'log', 'text': 'Already running…'})}\n\n"
             await asyncio.sleep(60)
         return StreamingResponse(_already_running(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

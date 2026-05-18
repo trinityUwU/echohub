@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { FinetuneJob, FinetuneProfile, FtStatus, ModelInfo } from '@/types'
-import { listFinetuneJobs, listFinetuneProfiles, getFtStatus, ftInstallStreamUrl, cancelFinetuneJob, ftJobStreamUrl } from '@/api/client'
+import { listFinetuneJobs, listFinetuneProfiles, getFtStatus, ftInstallStreamUrl, cancelFinetuneJob, ftJobStreamUrl, recoverFinetuneJob } from '@/api/client'
 import { EvalPanel } from './EvalPanel'
 import { FTLoadModal } from './FTLoadModal'
 
@@ -231,6 +231,7 @@ function JobRow({ job, onRefresh }: JobRowProps): React.ReactElement {
   const [logs, setLogs] = useState<string[]>([])
   const [expanded, setExpanded] = useState(false)
   const [cancelling, setCancelling] = useState(false)
+  const [recovering, setRecovering] = useState(false)
   const logRef = useRef<HTMLDivElement>(null)
   const isActive = job.status === 'pending' || job.status === 'running'
 
@@ -277,6 +278,12 @@ function JobRow({ job, onRefresh }: JobRowProps): React.ReactElement {
     try { await cancelFinetuneJob(job.id); onRefresh() } catch { /* ignore */ } finally { setCancelling(false) }
   }
 
+  const handleRecover = async (e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation()
+    setRecovering(true)
+    try { await recoverFinetuneJob(job.id); onRefresh() } catch { /* ignore */ } finally { setRecovering(false) }
+  }
+
   const hasLogs = logs.length > 0 || isActive
 
   return (
@@ -293,6 +300,13 @@ function JobRow({ job, onRefresh }: JobRowProps): React.ReactElement {
           <button onClick={handleCancel} disabled={cancelling}
             className="text-[10px] px-2 py-0.5 border border-white/[0.08] rounded-sm text-text-muted hover:text-red-400 hover:border-red-400/30 cursor-pointer transition-colors flex-shrink-0 disabled:opacity-40">
             {cancelling ? '…' : 'Cancel'}
+          </button>
+        )}
+        {job.status === 'error' && (
+          <button onClick={handleRecover} disabled={recovering}
+            title="Check if LoRA was saved despite the error and mark as done"
+            className="text-[10px] px-2 py-0.5 border border-white/[0.08] rounded-sm text-text-muted hover:text-green-400 hover:border-green-400/30 cursor-pointer transition-colors flex-shrink-0 disabled:opacity-40">
+            {recovering ? '…' : 'Recover'}
           </button>
         )}
         {hasLogs && (

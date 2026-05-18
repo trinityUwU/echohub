@@ -307,7 +307,13 @@ async def run_finetune_sse(
     del _active_jobs[job_id]
     await proc.wait()
 
-    if proc.returncode == 0:
+    lora_path = os.path.join(output_dir, "lora")
+    lora_saved = os.path.exists(os.path.join(lora_path, "adapter_config.json"))
+
+    if proc.returncode == 0 or lora_saved:
+        # Success: either clean exit or LoRA was actually saved despite warnings
+        if proc.returncode != 0:
+            yield f"data: {json.dumps({'type': 'log', 'text': f'Process exited {proc.returncode} but LoRA was saved — treating as success'})}\n\n"
         yield f"data: {json.dumps({'type': 'done', 'output_dir': output_dir})}\n\n"
         on_status("done", output_dir)
     else:

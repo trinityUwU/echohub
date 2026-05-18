@@ -559,3 +559,6 @@ export const listEvals = (params?: { job_id?: string; profile_id?: string }): Pr
   if (params?.profile_id) q.set('profile_id', params.profile_id)
   return apiRequest(`/finetune/evals${q.toString() ? '?' + q : ''}`)
 }
+
+export const recoverFinetuneJob = (id: string): Promise<{ status: string; output_dir: string }> =>
+  apiRequest(`/finetune/jobs/${id}/recover`, { method: 'POST' })
