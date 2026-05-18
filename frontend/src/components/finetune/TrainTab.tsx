@@ -81,11 +81,16 @@ export function TrainTab({ selectedModel, vramTotalGb, onNavigateToModels }: Tra
             <div>
               <div className="text-sm text-text-primary font-medium">{selectedModel.name ?? selectedModel.id.split('/').pop()}</div>
               <div className="text-xs text-text-muted mt-0.5">{selectedModel.params_billion ? `${selectedModel.params_billion}B` : ''} · {selectedModel.author}</div>
+              {status && status.pair_count === 0 && (
+                <div className="text-xs text-yellow mt-1.5">
+                  No training pairs yet — go to the <span className="font-medium">Pairs</span> tab to add some first
+                </div>
+              )}
             </div>
             <button
               onClick={() => setShowConfig(true)}
-              disabled={status ? !status.unsloth_available : false}
-              className="px-4 py-2 text-xs bg-accent hover:bg-accent-hover disabled:opacity-40 text-white rounded-sm cursor-pointer transition-colors font-medium flex-shrink-0"
+              disabled={(status ? !status.unsloth_available : false) || (status?.pair_count === 0)}
+              className="px-4 py-2 text-xs bg-accent hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-sm cursor-pointer transition-colors font-medium flex-shrink-0"
             >
               Configure & Start
             </button>
