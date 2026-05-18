@@ -1,21 +1,33 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { EvalPrompt, EvalResult, FinetuneEval } from '@/types'
-import { listEvals, initEval, submitEval } from '@/api/client'
-import { apiUrl } from '@/api/base'
+import type { EvalResult, FinetuneEval, GgufCandidate, GgufFileCandidate } from '@/types'
+import { listEvals, findGguf, evalRunStreamUrl } from '@/api/client'
 
 interface EvalPanelProps {
   profileId: string | null
   jobId: string | null
-  loadedModel: { id: string; path?: string } | null
+  selectedModelId: string | null
   onEvalDone: () => void
 }
 
-export function EvalPanel({ profileId, jobId, loadedModel, onEvalDone }: EvalPanelProps): React.ReactElement {
-  const [evals, setEvals] = useState<FinetuneEval[]>([])
-  const [running, setRunning] = useState<'before' | 'after' | null>(null)
-  const [runningProgress, setRunningProgress] = useState(0)
+type PipelineStep = { label: string; done: boolean }
 
-  const isBf16Warning = checkIsBf16(loadedModel)
+interface EvalRunState {
+  running: boolean
+  steps: PipelineStep[]
+  progress: { current: number; total: number } | null
+  error: string | null
+}
+
+const IDLE_RUN_STATE: EvalRunState = { running: false, steps: [], progress: null, error: null }
+
+export function EvalPanel({ profileId, jobId, selectedModelId, onEvalDone }: EvalPanelProps): React.ReactElement {
+  const [evals, setEvals] = useState<FinetuneEval[]>([])
+  const [searching, setSearching] = useState(false)
+  const [candidates, setCandidates] = useState<GgufCandidate[] | null>(null)
+  const [selectedCandidate, setSelectedCandidate] = useState<GgufCandidate | null>(null)
+  const [selectedFile, setSelectedFile] = useState<string | null>(null)
+  const [runState, setRunState] = useState<EvalRunState>(IDLE_RUN_STATE)
+  const [activeStage, setActiveStage] = useState<'before' | 'after' | null>(null)
 
   const loadEvals = useCallback(async (): Promise<void> => {
     if (!profileId) return
@@ -25,100 +37,304 @@ export function EvalPanel({ profileId, jobId, loadedModel, onEvalDone }: EvalPan
     } catch { /* ignore */ }
   }, [profileId])
 
-  useEffect(() => { loadEvals() }, [loadEvals])
+  useEffect(() => { void loadEvals() }, [loadEvals])
+
+  // Reset search when model changes
+  useEffect(() => {
+    setCandidates(null)
+    setSelectedCandidate(null)
+    setSelectedFile(null)
+  }, [selectedModelId])
 
   const beforeEval = evals.find(e => e.stage === 'before') ?? null
   const afterEval = evals.find(e => e.stage === 'after') ?? null
 
-  const runEval = async (stage: 'before' | 'after'): Promise<void> => {
-    if (!profileId || !loadedModel) return
-    setRunning(stage)
-    setRunningProgress(0)
+  const handleFindGguf = async (): Promise<void> => {
+    if (!selectedModelId) return
+    setSearching(true)
+    try {
+      const result = await findGguf(selectedModelId)
+      setCandidates(result.candidates)
+      if (result.candidates.length > 0) {
+        const top = result.candidates[0]
+        setSelectedCandidate(top)
+        setSelectedFile(top.recommended_file ?? null)
+      }
+    } catch { /* ignore */ } finally {
+      setSearching(false)
+    }
+  }
+
+  const handleRunEval = async (stage: 'before' | 'after'): Promise<void> => {
+    if (!profileId || !selectedCandidate || !selectedFile) return
+    setActiveStage(stage)
+    setRunState({ running: true, steps: [], progress: null, error: null })
 
     try {
-      const ready = await initEval({
-        profile_id: profileId,
-        stage,
-        model_id: loadedModel.id,
-        model_path: loadedModel.path ?? loadedModel.id,
-        job_id: jobId ?? undefined,
+      const url = await evalRunStreamUrl()
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profile_id: profileId,
+          job_id: jobId,
+          stage,
+          gguf_model_id: selectedCandidate.id,
+          gguf_file: selectedFile,
+          delete_after: true,
+        }),
       })
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
 
-      const results = await runPrompts(ready.prompts, progress => setRunningProgress(progress))
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
 
-      await submitEval({
-        profile_id: profileId,
-        stage,
-        model_id: loadedModel.id,
-        model_path: loadedModel.path ?? loadedModel.id,
-        job_id: jobId ?? undefined,
-        results,
-      })
+      const processLines = (lines: string[]): boolean => {
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const d = JSON.parse(line.slice(6)) as Record<string, unknown>
+            if (d.type === 'step') {
+              setRunState(s => ({ ...s, steps: [...s.steps.map(x => ({ ...x, done: true })), { label: String(d.label), done: false }] }))
+            } else if (d.type === 'progress') {
+              setRunState(s => ({ ...s, progress: { current: Number(d.current), total: Number(d.total) } }))
+            } else if (d.type === 'error') {
+              setRunState(s => ({ ...s, running: false, error: String(d.text) }))
+              return true
+            } else if (d.type === 'done') {
+              setRunState(s => ({ ...s, running: false, steps: s.steps.map(x => ({ ...x, done: true })) }))
+              void loadEvals().then(() => onEvalDone())
+              return true
+            }
+          } catch { /* skip */ }
+        }
+        return false
+      }
 
-      await loadEvals()
-      onEvalDone()
-    } catch { /* ignore */ } finally {
-      setRunning(null)
-      setRunningProgress(0)
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const chunks = buf.split('\n\n')
+        buf = chunks.pop() ?? ''
+        if (processLines(chunks)) break
+      }
+    } catch (e) {
+      setRunState(s => ({ ...s, running: false, error: e instanceof Error ? e.message : 'Unknown error' }))
+    } finally {
+      setActiveStage(null)
     }
   }
 
   if (!profileId) return <></>
 
+  const canRun = !!selectedCandidate && !!selectedFile && !runState.running
+  const modelSelected = !!selectedModelId
+
   return (
-    <div className="border-t border-white/[0.06] p-4">
-      <div className="flex items-center gap-2 mb-4">
+    <div className="border-t border-white/[0.06] p-4 space-y-4">
+      <div className="flex items-center gap-2">
         <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">Eval</span>
-        {!loadedModel && (
-          <span className="text-xs text-text-muted/60">Load a model in Chat to run eval</span>
-        )}
-        {loadedModel && isBf16Warning && (
-          <span className="text-xs text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded">
-            BF16 model detected — use a GGUF for eval to avoid VRAM issues
-          </span>
-        )}
       </div>
 
-      <div className="flex gap-4">
+      {/* GGUF selector */}
+      <GgufSelector
+        modelSelected={modelSelected}
+        searching={searching}
+        candidates={candidates}
+        selectedCandidate={selectedCandidate}
+        selectedFile={selectedFile}
+        onFindGguf={handleFindGguf}
+        onSelectCandidate={(c) => {
+          setSelectedCandidate(c)
+          setSelectedFile(c.recommended_file ?? null)
+        }}
+        onSelectFile={setSelectedFile}
+      />
+
+      {/* Pipeline status */}
+      {(runState.running || runState.steps.length > 0 || runState.error) && (
+        <PipelineStatus state={runState} />
+      )}
+
+      {/* Before / After panels */}
+      <div className="flex gap-3">
         <EvalStageCard
           label="Before"
           eval={beforeEval}
-          canRun={!!loadedModel && !isBf16Warning && running === null}
-          running={running === 'before'}
-          progress={running === 'before' ? runningProgress : 0}
-          onRun={() => runEval('before')}
+          canRun={canRun}
+          running={activeStage === 'before'}
+          onRun={() => void handleRunEval('before')}
         />
-        <ComparisonArrow before={beforeEval} after={afterEval} />
+        <DeltaArrow before={beforeEval} after={afterEval} />
         <EvalStageCard
           label="After"
           eval={afterEval}
-          canRun={!!loadedModel && !isBf16Warning && running === null && jobId !== null}
-          running={running === 'after'}
-          progress={running === 'after' ? runningProgress : 0}
-          onRun={() => runEval('after')}
+          canRun={canRun && jobId !== null}
+          running={activeStage === 'after'}
+          onRun={() => void handleRunEval('after')}
         />
       </div>
 
-      {beforeEval && afterEval && (
-        <EvalComparison before={beforeEval} after={afterEval} />
+      {beforeEval && afterEval && <EvalComparison before={beforeEval} after={afterEval} />}
+    </div>
+  )
+}
+
+// ── GgufSelector ────────────────────────────────────────────────────────────
+
+interface GgufSelectorProps {
+  modelSelected: boolean
+  searching: boolean
+  candidates: GgufCandidate[] | null
+  selectedCandidate: GgufCandidate | null
+  selectedFile: string | null
+  onFindGguf: () => void
+  onSelectCandidate: (c: GgufCandidate) => void
+  onSelectFile: (f: string) => void
+}
+
+function GgufSelector({ modelSelected, searching, candidates, selectedCandidate, selectedFile, onFindGguf, onSelectCandidate, onSelectFile }: GgufSelectorProps): React.ReactElement {
+  if (!modelSelected) {
+    return (
+      <p className="text-xs text-text-muted/60">
+        Select a model in the Models tab to run eval
+      </p>
+    )
+  }
+
+  if (candidates === null) {
+    return (
+      <button
+        onClick={onFindGguf}
+        disabled={searching}
+        className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] rounded cursor-pointer transition-colors disabled:opacity-50"
+      >
+        {searching && <span className="w-3 h-3 border border-accent/40 border-t-accent rounded-full animate-spin" />}
+        {searching ? 'Searching…' : 'Find GGUF for eval'}
+      </button>
+    )
+  }
+
+  if (candidates.length === 0) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-text-muted/60">No GGUF found for this model</span>
+        <button onClick={onFindGguf} className="text-xs text-accent cursor-pointer hover:text-accent/80">Retry</button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs text-text-muted">GGUF repo:</span>
+        {candidates.map(c => (
+          <button
+            key={c.id}
+            onClick={() => onSelectCandidate(c)}
+            className={`px-2 py-0.5 rounded text-xs cursor-pointer transition-colors ${
+              selectedCandidate?.id === c.id
+                ? 'bg-accent/20 text-accent border border-accent/30'
+                : 'bg-white/[0.04] text-text-muted hover:bg-white/[0.08] border border-white/[0.06]'
+            }`}
+          >
+            {c.id.split('/')[1] ?? c.id}
+            {c.same_author && <span className="ml-1 text-[10px] text-green-400/70">✓</span>}
+          </button>
+        ))}
+        <button onClick={onFindGguf} disabled={searching} className="text-xs text-text-muted/60 hover:text-text-muted cursor-pointer">
+          Refresh
+        </button>
+      </div>
+
+      {selectedCandidate?.gguf_files && selectedCandidate.gguf_files.length > 0 && (
+        <GgufFileList files={selectedCandidate.gguf_files} selected={selectedFile} onSelect={onSelectFile} />
       )}
     </div>
   )
 }
 
-// ── EvalStageCard ──────────────────────────────────────────────────────────
+// ── GgufFileList ────────────────────────────────────────────────────────────
+
+function GgufFileList({ files, selected, onSelect }: {
+  files: GgufFileCandidate[]
+  selected: string | null
+  onSelect: (f: string) => void
+}): React.ReactElement {
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <span className="text-xs text-text-muted">File:</span>
+      {files.map(f => (
+        <button
+          key={f.name}
+          onClick={() => onSelect(f.name)}
+          className={`px-2 py-0.5 rounded text-xs cursor-pointer transition-colors ${
+            selected === f.name
+              ? 'bg-accent/20 text-accent border border-accent/30'
+              : 'bg-white/[0.04] text-text-muted hover:bg-white/[0.08] border border-white/[0.06]'
+          }`}
+        >
+          {extractVariant(f.name)}
+          <span className="ml-1 text-[10px] opacity-60">{f.size_gb}GB</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function extractVariant(filename: string): string {
+  const m = filename.toUpperCase().match(/(Q\d[_\-]?K[_\-]?[MS]?|Q\d[_\-]\d|Q\d[_\-]K|Q\d|F16|BF16|IQ\d[_\-]\w+)/)
+  return m ? m[1].replace('-', '_') : filename.split('.')[0].slice(-12)
+}
+
+// ── PipelineStatus ──────────────────────────────────────────────────────────
+
+function PipelineStatus({ state }: { state: EvalRunState }): React.ReactElement {
+  return (
+    <div className="bg-overlay border border-white/[0.06] rounded-md p-3 space-y-1.5">
+      {state.steps.map((s, i) => (
+        <div key={i} className="flex items-center gap-2 text-xs">
+          {s.done
+            ? <span className="text-green-400 w-3">✓</span>
+            : <span className="w-3 h-3 border border-accent/40 border-t-accent rounded-full animate-spin" />
+          }
+          <span className={s.done ? 'text-text-muted' : 'text-text-primary'}>{s.label}</span>
+        </div>
+      ))}
+      {state.progress && (
+        <div>
+          <div className="h-1 bg-white/[0.06] rounded-full overflow-hidden">
+            <div
+              className="h-full bg-accent rounded-full transition-all duration-200"
+              style={{ width: `${(state.progress.current / state.progress.total) * 100}%` }}
+            />
+          </div>
+          <span className="text-[10px] text-text-muted mt-0.5 block">
+            {state.progress.current}/{state.progress.total} prompts
+          </span>
+        </div>
+      )}
+      {state.error && (
+        <p className="text-xs text-red-400">{state.error}</p>
+      )}
+    </div>
+  )
+}
+
+// ── EvalStageCard ────────────────────────────────────────────────────────────
 
 interface EvalStageCardProps {
   label: string
   eval: FinetuneEval | null
   canRun: boolean
   running: boolean
-  progress: number
   onRun: () => void
 }
 
-function EvalStageCard({ label, eval: e, canRun, running, progress, onRun }: EvalStageCardProps): React.ReactElement {
-  const scoreColor = e?.score_avg !== null && e?.score_avg !== undefined
+function EvalStageCard({ label, eval: e, canRun, running, onRun }: EvalStageCardProps): React.ReactElement {
+  const scoreColor = e?.score_avg != null
     ? e.score_avg >= 70 ? 'text-green-400' : e.score_avg >= 50 ? 'text-amber-400' : 'text-red-400'
     : 'text-text-muted'
 
@@ -126,9 +342,7 @@ function EvalStageCard({ label, eval: e, canRun, running, progress, onRun }: Eva
     <div className="flex-1 bg-surface border border-white/[0.06] rounded-md p-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">{label}</span>
-        {e && <span className={`text-lg font-bold tabular-nums ${scoreColor}`}>
-          {e.score_avg?.toFixed(1) ?? '—'}
-        </span>}
+        {e && <span className={`text-lg font-bold tabular-nums ${scoreColor}`}>{e.score_avg?.toFixed(1) ?? '—'}</span>}
       </div>
 
       {e ? (
@@ -136,15 +350,7 @@ function EvalStageCard({ label, eval: e, canRun, running, progress, onRun }: Eva
           {e.results.length} prompts · {new Date(e.created_at).toLocaleDateString()}
         </div>
       ) : running ? (
-        <div>
-          <div className="h-1 bg-white/[0.06] rounded-full overflow-hidden mb-1">
-            <div
-              className="h-full bg-accent rounded-full transition-all duration-300"
-              style={{ width: `${progress * 100}%` }}
-            />
-          </div>
-          <span className="text-xs text-text-muted">Running... {Math.round(progress * 100)}%</span>
-        </div>
+        <span className="text-xs text-accent">Running…</span>
       ) : (
         <button
           disabled={!canRun}
@@ -158,112 +364,56 @@ function EvalStageCard({ label, eval: e, canRun, running, progress, onRun }: Eva
   )
 }
 
-// ── ComparisonArrow ────────────────────────────────────────────────────────
+// ── DeltaArrow ───────────────────────────────────────────────────────────────
 
-function ComparisonArrow({ before, after }: {
-  before: FinetuneEval | null; after: FinetuneEval | null
-}): React.ReactElement {
+function DeltaArrow({ before, after }: { before: FinetuneEval | null; after: FinetuneEval | null }): React.ReactElement {
   if (!before || !after) {
     return <div className="flex items-center text-text-muted text-lg px-1">→</div>
   }
-
   const delta = (after.score_avg ?? 0) - (before.score_avg ?? 0)
   const color = delta > 0 ? 'text-green-400' : delta < 0 ? 'text-red-400' : 'text-text-muted'
-
   return (
     <div className={`flex flex-col items-center justify-center px-1 ${color}`}>
       <span className="text-sm">→</span>
-      <span className="text-xs font-bold tabular-nums">
-        {delta > 0 ? '+' : ''}{delta.toFixed(1)}
-      </span>
+      <span className="text-xs font-bold tabular-nums">{delta > 0 ? '+' : ''}{delta.toFixed(1)}</span>
     </div>
   )
 }
 
-// ── EvalComparison ─────────────────────────────────────────────────────────
+// ── EvalComparison ────────────────────────────────────────────────────────────
 
-function EvalComparison({ before, after }: {
-  before: FinetuneEval; after: FinetuneEval
-}): React.ReactElement {
-  const afterByPromptId = Object.fromEntries(after.results.map(r => [r.prompt_id, r]))
-
+function EvalComparison({ before, after }: { before: FinetuneEval; after: FinetuneEval }): React.ReactElement {
+  const afterMap = Object.fromEntries(after.results.map(r => [r.prompt_id, r]))
   return (
-    <div className="mt-4 space-y-3">
+    <div className="space-y-3">
       <span className="text-xs font-semibold text-text-muted uppercase tracking-wider block">Per-prompt comparison</span>
       {before.results.map(br => {
-        const ar = afterByPromptId[br.prompt_id]
+        const ar = afterMap[br.prompt_id]
         if (!ar) return null
-        return <PromptComparisonRow key={br.prompt_id} before={br} after={ar} />
+        return <PromptRow key={br.prompt_id} before={br} after={ar} />
       })}
     </div>
   )
 }
 
-function PromptComparisonRow({ before, after }: {
-  before: EvalResult; after: EvalResult
-}): React.ReactElement {
+function PromptRow({ before, after }: { before: EvalResult; after: EvalResult }): React.ReactElement {
   return (
     <div className="bg-surface border border-white/[0.06] rounded-md p-3 text-xs">
       <p className="text-text-secondary mb-2 font-medium">{before.prompt}</p>
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <span className="text-text-muted block mb-1">Before
-            {before.score !== null && <span className="ml-1 text-amber-400">{before.score.toFixed(0)}</span>}
+          <span className="text-text-muted block mb-1">
+            Before{before.score != null && <span className="ml-1 text-amber-400">{before.score.toFixed(0)}</span>}
           </span>
           <p className="text-text-primary leading-relaxed whitespace-pre-wrap">{before.response}</p>
         </div>
         <div>
-          <span className="text-text-muted block mb-1">After
-            {after.score !== null && <span className="ml-1 text-green-400">{after.score.toFixed(0)}</span>}
+          <span className="text-text-muted block mb-1">
+            After{after.score != null && <span className="ml-1 text-green-400">{after.score.toFixed(0)}</span>}
           </span>
           <p className="text-text-primary leading-relaxed whitespace-pre-wrap">{after.response}</p>
         </div>
       </div>
     </div>
   )
-}
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-function checkIsBf16(model: { id: string; path?: string } | null): boolean {
-  if (!model) return false
-  // Only flag if explicitly bf16/safetensors in the name — GGUF loaded via llama.cpp has no extension
-  const id = model.id.toLowerCase()
-  return id.includes('bf16') || id.includes('safetensors') || id.includes('fp16')
-}
-
-async function runPrompts(
-  prompts: EvalPrompt[],
-  onProgress: (p: number) => void,
-): Promise<EvalResult[]> {
-  const results: EvalResult[] = []
-
-  for (let i = 0; i < prompts.length; i++) {
-    const p = prompts[i]
-    const response = await runSinglePrompt(p.prompt)
-    results.push({ prompt_id: p.id, prompt: p.prompt, response, score: null })
-    onProgress((i + 1) / prompts.length)
-  }
-
-  return results
-}
-
-async function runSinglePrompt(prompt: string): Promise<string> {
-  try {
-    const url = await apiUrl('/inference/chat')
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages: [{ role: 'user', content: prompt }],
-        stream: false,
-        max_tokens: 512,
-      }),
-    })
-    if (!res.ok) return ''
-    const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> }
-    return data?.choices?.[0]?.message?.content ?? ''
-  } catch {
-    return ''
-  }
 }

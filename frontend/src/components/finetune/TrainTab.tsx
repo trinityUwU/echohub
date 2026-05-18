@@ -60,11 +60,8 @@ export function TrainTab({ profileId, loadedModel, ftModel }: TrainTabProps): Re
     setSelectedJobId(jobId)
   }, [loadJobs])
 
-  // For eval: use the chat model (actually loaded in llama.cpp), not the FT model
-  // The FT model (activeModel) is safetensors — eval must run on whatever is loaded in chat
-  const evalLoadedModel = loadedModel
-    ? { id: loadedModel.id, path: undefined }
-    : null
+  // For eval: use the activeModel's HF id — EvalPanel will find+download GGUF itself
+  const evalModelId = activeModel?.id ?? null
 
   return (
     <div className="flex-1 overflow-y-auto p-5">
@@ -142,7 +139,7 @@ export function TrainTab({ profileId, loadedModel, ftModel }: TrainTabProps): Re
       <EvalPanel
         profileId={selectedProfile}
         jobId={selectedJobId}
-        loadedModel={evalLoadedModel}
+        selectedModelId={evalModelId}
         onEvalDone={loadJobs}
       />
 

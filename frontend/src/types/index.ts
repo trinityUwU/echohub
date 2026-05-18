@@ -292,6 +292,24 @@ export interface FtRecommendedConfig {
   rationale: string
 }
 
+export interface GgufFileCandidate {
+  name: string
+  size_gb: number
+}
+
+export interface GgufCandidate {
+  id: string
+  same_author: boolean
+  downloads: number
+  gguf_files?: GgufFileCandidate[]
+  recommended_file?: string | null
+}
+
+export interface GgufSearchResult {
+  candidates: GgufCandidate[]
+  query_model: string
+}
+
 export interface DownloadHistoryEntry {
   id: number
   model_id: string

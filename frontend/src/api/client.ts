@@ -565,3 +565,10 @@ export const recoverFinetuneJob = (id: string): Promise<{ status: string; output
 
 export const getFinetuneJobLogs = (id: string): Promise<{ lines: string[]; exists: boolean }> =>
   apiRequest(`/finetune/jobs/${id}/logs`)
+
+export const findGguf = (modelId: string): Promise<import('@/types').GgufSearchResult> =>
+  apiRequest(`/finetune/find-gguf?model_id=${encodeURIComponent(modelId)}`)
+
+export async function evalRunStreamUrl(): Promise<string> {
+  return apiUrl('/finetune/eval-run/stream')
+}

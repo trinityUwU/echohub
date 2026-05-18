@@ -62,6 +62,15 @@ class EvalRequest(BaseModel):
     model_path: str
 
 
+class EvalRunRequest(BaseModel):
+    profile_id: str
+    job_id: Optional[str] = None
+    stage: str  # "before" | "after"
+    gguf_model_id: str   # HF repo ID
+    gguf_file: str       # filename dans le repo
+    delete_after: bool = True
+
+
 class EvalResultItem(BaseModel):
     prompt_id: str
     prompt: str
@@ -401,6 +410,223 @@ async def export_job_stream(job_id: str) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── Find GGUF ─────────────────────────────────────────────────────────────
+
+@router.get("/find-gguf")
+def find_gguf(model_id: str) -> dict:
+    """Search HF for a GGUF version of a BF16 model."""
+    from huggingface_hub import HfApi
+    from backend.services.hf_service import _get_hf_token
+
+    api = HfApi()
+    author = model_id.split("/")[0].lower() if "/" in model_id else ""
+    name = model_id.split("/", 1)[1] if "/" in model_id else model_id
+
+    seen: set[str] = set()
+    candidates: list[dict] = []
+
+    for query in [f"{name}-GGUF", f"{name} GGUF"]:
+        try:
+            results = list(api.list_models(
+                search=query, filter="gguf", limit=8,
+                token=_get_hf_token(),
+            ))
+            for m in results:
+                mid = m.modelId
+                if mid in seen:
+                    continue
+                seen.add(mid)
+                same_author = mid.split("/")[0].lower() == author if "/" in mid else False
+                candidates.append({
+                    "id": mid,
+                    "same_author": same_author,
+                    "downloads": getattr(m, "downloads", 0) or 0,
+                })
+        except Exception:
+            pass
+
+    candidates.sort(key=lambda x: (not x["same_author"], -(x["downloads"] or 0)))
+    candidates = candidates[:5]
+
+    if candidates:
+        top = candidates[0]
+        try:
+            info = api.model_info(top["id"], files_metadata=True, token=_get_hf_token())
+
+            def _prio(f: dict) -> int:
+                n = f["name"].lower()
+                if "q4_k_m" in n: return 0
+                if "q4_k_s" in n: return 1
+                if "q5_k_m" in n: return 2
+                if "q4_0" in n: return 3
+                if "q8_0" in n: return 4
+                return 10
+
+            gguf_files = [
+                {"name": s.rfilename, "size_gb": round(getattr(s, "size", 0) / 1024**3, 2)}
+                for s in (info.siblings or [])
+                if s.rfilename.endswith(".gguf") and "mmproj" not in s.rfilename.lower()
+            ]
+            gguf_files.sort(key=_prio)
+            top["gguf_files"] = gguf_files
+            top["recommended_file"] = gguf_files[0]["name"] if gguf_files else None
+        except Exception:
+            top["gguf_files"] = []
+            top["recommended_file"] = None
+
+    return {"candidates": candidates, "query_model": model_id}
+
+
+# ── Eval run (SSE — download + load + run + unload) ────────────────────────
+
+@router.post("/eval-run/stream")
+async def eval_run_stream(body: EvalRunRequest) -> StreamingResponse:
+    return StreamingResponse(
+        _eval_run_generator(body),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def _eval_run_generator(body: EvalRunRequest):
+    """SSE generator: download GGUF → load → run prompts → score → unload → delete."""
+    import os
+    from huggingface_hub import hf_hub_download
+    from backend.services.hf_service import _model_dir, _get_hf_token
+
+    def _sse(data: dict) -> str:
+        return f"data: {json.dumps(data)}\n\n"
+
+    profile = db.get_finetune_profile(body.profile_id)
+    if not profile:
+        yield _sse({"type": "error", "text": "Profile not found"})
+        return
+
+    pairs = db.get_training_pairs_for_profile(body.profile_id)
+    if not pairs:
+        yield _sse({"type": "error", "text": "No pairs in this profile"})
+        return
+
+    eval_prompts = [{"id": p["id"], "prompt": p["prompt"]} for p in pairs[:20]]
+
+    # Step 1: Download GGUF
+    yield _sse({"type": "step", "label": f"Downloading {body.gguf_file}…"})
+    gguf_path: str | None = None
+    try:
+        gguf_path = hf_hub_download(
+            repo_id=body.gguf_model_id,
+            filename=body.gguf_file,
+            local_dir=str(_model_dir(body.gguf_model_id)),
+            token=_get_hf_token(),
+        )
+        yield _sse({"type": "log", "text": f"Downloaded to {gguf_path}"})
+    except Exception as e:
+        yield _sse({"type": "error", "text": f"Download failed: {e}"})
+        return
+
+    # Step 2: Load model via llama_service directly (bypasses inference model state)
+    yield _sse({"type": "step", "label": "Loading GGUF model…"})
+    try:
+        from backend.services import llama_service
+        from backend.services.engine_router import detect_gpu
+        gpu = detect_gpu()
+        await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: llama_service.load_model_async(
+                gguf_path=gguf_path,
+                model_id=body.gguf_model_id,
+                n_ctx=4096,
+                gpu_type=gpu["type"],
+            ),
+        )
+        # Wait for load to complete (up to 120s)
+        for _ in range(240):
+            state = llama_service.get_load_state()
+            if state.get("loaded_model_id"):
+                break
+            if state.get("error"):
+                raise RuntimeError(state["error"])
+            await asyncio.sleep(0.5)
+        else:
+            raise RuntimeError("Load timed out")
+        yield _sse({"type": "log", "text": "Model loaded"})
+    except Exception as e:
+        yield _sse({"type": "error", "text": f"Load failed: {e}"})
+        if gguf_path and body.delete_after:
+            try:
+                os.remove(gguf_path)
+            except Exception:
+                pass
+        return
+
+    # Step 3: Run prompts
+    yield _sse({"type": "step", "label": f"Running {len(eval_prompts)} prompts…"})
+    results: list[dict] = []
+    for i, p in enumerate(eval_prompts):
+        try:
+            response_text = ""
+            async for chunk in llama_service.generate(
+                messages=[{"role": "user", "content": p["prompt"]}],
+                stream=False,
+                temperature=0.0,
+                max_tokens=512,
+            ):
+                if isinstance(chunk, str) and chunk.startswith("data: "):
+                    raw = chunk[6:].strip()
+                    if raw and raw != "[DONE]":
+                        try:
+                            parsed = json.loads(raw)
+                            delta = (parsed.get("choices") or [{}])[0].get("delta", {}).get("content")
+                            if delta:
+                                response_text += delta
+                        except Exception:
+                            pass
+            results.append({"prompt_id": p["id"], "prompt": p["prompt"], "response": response_text, "score": None})
+        except Exception:
+            results.append({"prompt_id": p["id"], "prompt": p["prompt"], "response": "", "score": None})
+        yield _sse({"type": "progress", "current": i + 1, "total": len(eval_prompts)})
+
+    # Step 4: Unload
+    yield _sse({"type": "step", "label": "Unloading model…"})
+    try:
+        llama_service.unload_model()
+    except Exception:
+        pass
+
+    # Step 5: Delete temp GGUF
+    if body.delete_after and gguf_path:
+        try:
+            os.remove(gguf_path)
+            yield _sse({"type": "log", "text": "Temp GGUF deleted"})
+        except Exception:
+            pass
+
+    # Step 6: Score + persist
+    from backend.services.quality_scorer import score_general
+    for r in results:
+        try:
+            scored = score_general(r["prompt"], r["response"])
+            r["score"] = scored.get("score") if isinstance(scored, dict) else float(scored)
+        except Exception:
+            pass
+
+    valid = [r["score"] for r in results if r["score"] is not None]
+    score_avg = round(sum(valid) / len(valid), 2) if valid else None
+
+    model_path_to_store = body.gguf_file if body.delete_after else (gguf_path or body.gguf_file)
+    eval_record = db.create_finetune_eval(
+        id=str(uuid.uuid4()),
+        job_id=body.job_id,
+        profile_id=body.profile_id,
+        stage=body.stage,
+        model_path=model_path_to_store,
+        model_id=body.gguf_model_id,
+        results=results,
+        score_avg=score_avg,
+    )
+    yield _sse({"type": "done", "eval": eval_record, "score_avg": score_avg})
 
 
 # ── VRAM estimation ────────────────────────────────────────────────────────
