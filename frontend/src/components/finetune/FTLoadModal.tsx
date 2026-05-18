@@ -420,13 +420,18 @@ function EvalGgufPicker({
             </button>
           </div>
           {selected.gguf_files && selected.gguf_files.length > 1 && (
-            <select value={selectedFile} onChange={e => onSelectFile(e.target.value)}
-              className="text-[10px] bg-white/[0.03] border border-white/[0.06] rounded px-2 py-1
-                text-text-muted cursor-pointer focus:outline-none">
+            <div className="flex flex-wrap gap-1">
               {selected.gguf_files.map(f => (
-                <option key={f.name} value={f.name}>{f.name} ({f.size_gb.toFixed(1)} GB)</option>
+                <button key={f.name} onClick={() => onSelectFile(f.name)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono transition-colors cursor-pointer border ${
+                    f.name === selectedFile
+                      ? 'bg-accent/20 border-accent/30 text-accent'
+                      : 'bg-white/[0.03] border-white/[0.06] text-text-muted hover:border-white/[0.12] hover:text-text-secondary'
+                  }`}>
+                  {f.name.replace(/^.*?([^/\\]+)$/, '$1')} <span className="opacity-50">{f.size_gb.toFixed(1)}GB</span>
+                </button>
               ))}
-            </select>
+            </div>
           )}
         </div>
       )}
