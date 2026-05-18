@@ -185,6 +185,7 @@ else:
         max_seq_length=MAX_SEQ_LENGTH,
         dtype=None,
         load_in_4bit=True,
+        device_map={{"": 0}},
     )
 
 model = FastLanguageModel.get_peft_model(

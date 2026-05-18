@@ -141,6 +141,14 @@ export function FTLoadModal({
               </div>
             )}
 
+            {/* Warn if VRAM is likely occupied by a loaded model */}
+            {hw.vram_total_gb > 0 && hw.qlora_vram_estimate_gb !== null &&
+             hw.qlora_vram_estimate_gb > hw.vram_total_gb * 0.6 && (
+              <div className="bg-yellow/8 border border-yellow/20 rounded-md px-3 py-2 text-[10px] text-yellow">
+                If a model is loaded in EchoHub, it will be automatically unloaded before training starts to free VRAM.
+              </div>
+            )}
+
             {/* VRAM bar */}
             {vramUsed !== null && (
               <VramBar used={vramUsed} total={hw.vram_total_gb} />

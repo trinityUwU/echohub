@@ -279,6 +279,13 @@ async def run_job_stream(job_id: str) -> StreamingResponse:
         return StreamingResponse(_cancelled(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
+    # Unload any loaded inference model to free VRAM before training
+    try:
+        from backend.services.engine_router import unload_model as _unload_model
+        _unload_model()
+    except Exception:
+        pass
+
     cfg = job["config"]
 
     profile_id = cfg.get("profile_id")
