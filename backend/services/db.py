@@ -291,6 +291,17 @@ def delete_messages(conv_id: str) -> None:
         conn.commit()
 
 
+def delete_message(conv_id: str, message_id: str) -> bool:
+    with _lock:
+        conn = _get_conn()
+        cur = conn.execute(
+            "DELETE FROM messages WHERE conversation_id = ? AND id = ?",
+            (conv_id, message_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
 def get_app_state(key: str) -> str | None:
     with _lock:
         conn = _get_conn()

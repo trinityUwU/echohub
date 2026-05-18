@@ -129,6 +129,16 @@ def clear_messages(conv_id: str) -> dict:
     return {"status": "cleared"}
 
 
+@router.delete("/{conv_id}/messages/{message_id}")
+def delete_message(conv_id: str, message_id: str) -> dict:
+    if db.get_conversation(conv_id) is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    deleted = db.delete_message(conv_id, message_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return {"status": "deleted"}
+
+
 @router.patch("/{conv_id}/archive")
 def archive_conversation(conv_id: str) -> dict:
     with db._lock:

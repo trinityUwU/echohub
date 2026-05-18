@@ -30,6 +30,9 @@ export const addMessage = (convId: string, msg: {
 export const clearMessages = (convId: string): Promise<void> =>
   apiRequest(`/conversations/${convId}/messages`, { method: 'DELETE' })
 
+export const deleteMessage = (convId: string, messageId: string): Promise<void> =>
+  apiRequest(`/conversations/${convId}/messages/${messageId}`, { method: 'DELETE' })
+
 // ── Models ─────────────────────────────────────────────────────────────────
 
 export const searchModels = (

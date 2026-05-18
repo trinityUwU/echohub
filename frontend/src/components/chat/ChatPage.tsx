@@ -9,7 +9,7 @@ import { MigrationBanner } from '@/components/shared/MigrationBanner'
 import { MessageRow } from './MessageRow'
 import { InputBar } from './InputBar'
 import { RightPanel } from './RightPanel'
-import { clearMessages } from '@/api/client'
+import { clearMessages, deleteMessage } from '@/api/client'
 
 interface ChatPageProps {
   loadedModel: ModelInfo | null
@@ -87,14 +87,23 @@ export function ChatPage({
     const lastAssistant = [...messages].reverse().findIndex(m => m.role === 'assistant')
     if (lastAssistant === -1 || !loadedModel) return
     const idx = messages.length - 1 - lastAssistant
+    const msgToDelete = messages[idx]
     const history = messages.slice(0, idx)
-    // Don't setActiveMessages here — it triggers the sync useEffect which would override messages
-    // sendFromHistory sets streaming=true first, preventing the useEffect from firing
+    // Delete old assistant message from DB before regenerating
+    if (activeId && msgToDelete.id) {
+      deleteMessage(activeId, msgToDelete.id).catch(() => {})
+    }
     sendFromHistory(history)
   }
 
   const handleEditUser = (index: number, newText: string): void => {
     if (!loadedModel) return
+    // Delete all messages from this index onwards in DB
+    if (activeId) {
+      messages.slice(index).forEach(m => {
+        if (m.id) deleteMessage(activeId, m.id).catch(() => {})
+      })
+    }
     const updated = { ...messages[index], content: newText }
     const history = [...messages.slice(0, index), updated]
     sendFromHistory(history)
