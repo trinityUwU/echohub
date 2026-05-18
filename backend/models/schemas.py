@@ -81,6 +81,7 @@ class MessageStats(BaseModel):
     ttft_ms: Optional[int] = None
     engine: Optional[str] = None
     model_name: Optional[str] = None
+    oom: Optional[bool] = None
 
 
 class MessageOut(BaseModel):

@@ -71,6 +71,7 @@ export interface MessageStats {
   ttft_ms?: number | null
   engine?: string | null
   model_name?: string | null
+  oom?: boolean | null
 }
 
 export interface ConversationSummary {
@@ -139,6 +140,7 @@ export interface GenerationStats {
   ttftMs?: number | null
   engine?: string | null
   modelName?: string | null
+  oom?: boolean
 }
 
 export interface ChatRequest {

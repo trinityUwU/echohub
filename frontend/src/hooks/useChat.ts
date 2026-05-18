@@ -209,6 +209,7 @@ export function useChat(
           prompt_tokens: generationStats.promptTokens,
           ttft_ms: generationStats.ttftMs ?? undefined,
           engine: generationStats.engine ?? undefined,
+          oom: generationStats.oom ?? undefined,
         }
         const assistantFinal: ChatMessage = {
           role: 'assistant', content: accumulated, id: assistantMsgId,
@@ -302,6 +303,7 @@ export function useChat(
           prompt_tokens: generationStats.promptTokens,
           ttft_ms: generationStats.ttftMs ?? undefined,
           engine: generationStats.engine ?? undefined,
+          oom: generationStats.oom ?? undefined,
         }
         const assistantFinal2: ChatMessage = {
           role: 'assistant', content: accumulated, id: assistantMsgId,

@@ -181,8 +181,22 @@ export async function chatStream(
             continue
           }
           if (json?.error) {
-            if (json.error_type === 'oom') onOom?.()
-            else onError(new Error(json.error))
+            if (json.error_type === 'oom') {
+              onOom?.()
+              // Flush any remaining chunks then call onDone with oom flag
+              onDone({
+                tokensGenerated: completionTokens,
+                tokensPerSecond: 0,
+                timeMs: Date.now() - startTime,
+                promptTokens,
+                ttftMs: backendTtftMs,
+                engine: backendEngine,
+                modelName: backendModelName,
+                oom: true,
+              })
+            } else {
+              onError(new Error(json.error))
+            }
             return
           }
           if (json?.usage) {
