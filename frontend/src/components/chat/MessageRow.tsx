@@ -28,9 +28,27 @@ function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRe
     ? message.content.filter(p => p.type === 'image_url').map(p => (p as { type: 'image_url'; image_url: { url: string } }).image_url.url)
     : []
 
-  const thinkMatch = text.match(/^<think>([\s\S]*?)<\/think>([\s\S]*)$/s)
-  const thinkOpen  = !thinkMatch && text.startsWith('<think>')
-  const visibleText = thinkMatch ? thinkMatch[2].trim() : thinkOpen ? '' : text
+  // Match <think>...</think> anywhere in text (model sometimes emits preamble before <think>)
+  const thinkMatch = text.match(/^([\s\S]*?)<think>([\s\S]*?)<\/think>([\s\S]*)$/s)
+  // <think> open without closing — still streaming
+  const thinkOpen = !thinkMatch && text.includes('<think>') && !text.includes('</think>')
+  // </think> present but no <think> — opening tag was dropped by throttle, treat whole prefix as thinking
+  const thinkOrphanClose = !thinkMatch && !thinkOpen && text.includes('</think>')
+  const visibleText = thinkMatch
+    ? (thinkMatch[1] + thinkMatch[3]).trim()
+    : thinkOpen
+      ? ''
+      : thinkOrphanClose
+        ? text.slice(text.indexOf('</think>') + 8).trim()
+        : text
+  const thinkContent = thinkMatch
+    ? thinkMatch[2]
+    : thinkOpen
+      ? text.slice(text.indexOf('<think>') + 7)
+      : thinkOrphanClose
+        ? text.slice(0, text.indexOf('</think>'))
+        : ''
+  const hasThink = thinkMatch !== null || thinkOpen || thinkOrphanClose
 
   const copy = (): void => {
     navigator.clipboard.writeText(visibleText).then(() => {
@@ -76,8 +94,8 @@ function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRe
             ))}
           </div>
         )}
-        {(thinkMatch || thinkOpen) && !isUser && (
-          <ThinkingBlock content={thinkMatch ? thinkMatch[1] : text.slice(7)} streaming={thinkOpen} />
+        {hasThink && !isUser && (
+          <ThinkingBlock content={thinkContent} streaming={thinkOpen} />
         )}
 
         {editing ? (
@@ -121,13 +139,26 @@ function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRe
           <div className={`flex items-center gap-0.5 transition-opacity ${isUser ? 'flex-row-reverse' : ''}`}>
             {/* Stats — left side for assistant */}
             {!isUser && (genStats || message.stats) && (
-              <span className="text-xs text-text-muted mr-2">
-                {genStats
-                  ? <>{genStats.tokensGenerated} tokens · <span className="text-green">{genStats.tokensPerSecond.toFixed(1)} tok/s</span> · {(genStats.timeMs / 1000).toFixed(2)}s{modelName && <span className="text-text-muted/50"> · {modelName}</span>}</>
-                  : message.stats
-                    ? <>{message.stats.tokens} tokens · <span className="text-green">{message.stats.tok_per_sec.toFixed(1)} tok/s</span> · {(message.stats.time_ms / 1000).toFixed(2)}s{(modelName ?? message.stats.model_name) && <span className="text-text-muted/50"> · {modelName ?? message.stats.model_name}</span>}</>
-                    : null
-                }
+              <span className="text-xs text-text-muted mr-2 flex items-center gap-1.5 flex-wrap">
+                {genStats ? (
+                  <>
+                    <span>{genStats.tokensGenerated} tokens</span>
+                    <span className="text-green">{genStats.tokensPerSecond.toFixed(1)} tok/s</span>
+                    {genStats.ttftMs != null && <span>{genStats.ttftMs}ms TTFT</span>}
+                    <span>{(genStats.timeMs / 1000).toFixed(2)}s</span>
+                    {genStats.engine && <span className="text-text-muted/50">{genStats.engine}</span>}
+                    {(genStats.modelName ?? modelName) && <span className="text-text-muted/50 truncate max-w-[160px]">· {genStats.modelName ?? modelName}</span>}
+                  </>
+                ) : message.stats ? (
+                  <>
+                    <span>{message.stats.tokens} tokens</span>
+                    <span className="text-green">{message.stats.tok_per_sec.toFixed(1)} tok/s</span>
+                    {message.stats.ttft_ms != null && <span>{message.stats.ttft_ms}ms TTFT</span>}
+                    <span>{(message.stats.time_ms / 1000).toFixed(2)}s</span>
+                    {message.stats.engine && <span className="text-text-muted/50">{message.stats.engine}</span>}
+                    {message.stats.model_name && <span className="text-text-muted/50 truncate max-w-[160px]">· {message.stats.model_name}</span>}
+                  </>
+                ) : null}
               </span>
             )}
 
@@ -208,11 +239,13 @@ function Avatar({ role }: { role: string }): React.ReactElement {
 
 function GenStatsRow({ stats, modelName }: { stats: GenerationStats; modelName?: string | null }): React.ReactElement {
   return (
-    <div className="flex gap-2.5 px-0.5 text-xs text-text-muted items-center">
+    <div className="flex gap-2.5 px-0.5 text-xs text-text-muted items-center flex-wrap">
       <span>{stats.tokensGenerated} tokens</span>
       <span className="text-green">{stats.tokensPerSecond.toFixed(1)} tok/s</span>
+      {stats.ttftMs != null && <span>{stats.ttftMs}ms TTFT</span>}
       <span>{(stats.timeMs / 1000).toFixed(2)}s</span>
-      {modelName && <span className="text-text-muted/50 truncate max-w-[160px]">· {modelName}</span>}
+      {stats.engine && <span className="text-text-muted/50">{stats.engine}</span>}
+      {(stats.modelName ?? modelName) && <span className="text-text-muted/50 truncate max-w-[160px]">· {stats.modelName ?? modelName}</span>}
     </div>
   )
 }

@@ -78,6 +78,9 @@ class MessageStats(BaseModel):
     tok_per_sec: float = 0.0
     time_ms: int = 0
     prompt_tokens: int = 0
+    ttft_ms: Optional[int] = None
+    engine: Optional[str] = None
+    model_name: Optional[str] = None
 
 
 class MessageOut(BaseModel):

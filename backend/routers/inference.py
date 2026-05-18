@@ -134,12 +134,34 @@ async def chat(req: ChatRequest):
 
     if req.stream:
         async def event_stream():
+            import time as _t, json as _j
+            start = _t.perf_counter()
+            first_token_time: float | None = None
+            token_count = 0
+            active_engine = engine_router.get_active_engine()
+            model = engine_router.get_status()
             try:
                 async for chunk in engine_router.generate(messages=messages, **generate_kwargs):
+                    # Track first token for TTFT
+                    if first_token_time is None:
+                        try:
+                            parsed = _j.loads(chunk[6:]) if isinstance(chunk, str) and chunk.startswith("data: ") else None
+                            if parsed and parsed.get("choices", [{}])[0].get("delta", {}).get("content"):
+                                first_token_time = _t.perf_counter()
+                        except Exception:
+                            pass
+                    token_count += 1
                     yield f"{chunk}\n\n"
             except Exception as e:
                 logger.error(f"chat stream error: {e}")
                 yield f"data: {{\"error\": \"{str(e)}\"}}\n\n"
+                return
+
+            end = _t.perf_counter()
+            ttft_ms = round((first_token_time - start) * 1000) if first_token_time else None
+            total_ms = round((end - start) * 1000)
+            model_name = model.name if model else None
+            yield f"data: {_j.dumps({'type': 'echohub_stats', 'ttft_ms': ttft_ms, 'total_ms': total_ms, 'engine': active_engine, 'model_name': model_name})}\n\n"
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 

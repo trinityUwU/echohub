@@ -68,7 +68,9 @@ export interface MessageStats {
   tok_per_sec: number
   time_ms: number
   prompt_tokens: number
-  model_name?: string
+  ttft_ms?: number | null
+  engine?: string | null
+  model_name?: string | null
 }
 
 export interface ConversationSummary {
@@ -134,6 +136,9 @@ export interface GenerationStats {
   tokensPerSecond: number
   timeMs: number
   promptTokens: number
+  ttftMs?: number | null
+  engine?: string | null
+  modelName?: string | null
 }
 
 export interface ChatRequest {

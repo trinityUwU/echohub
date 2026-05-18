@@ -157,6 +157,9 @@ export async function chatStream(
     let buf = '', firstTokenTime: number | null = null
     const startTime = Date.now()
     let completionTokens = 0, promptTokens = 0
+    let backendTtftMs: number | null = null
+    let backendEngine: string | null = null
+    let backendModelName: string | null = null
 
     const processBlocks = (blocks: string[]): void => {
       for (const block of blocks) {
@@ -165,6 +168,13 @@ export async function chatStream(
         if (raw === '[DONE]') continue
         try {
           const json = JSON.parse(raw)
+          // Backend stats event
+          if (json?.type === 'echohub_stats') {
+            backendTtftMs = json.ttft_ms ?? null
+            backendEngine = json.engine ?? null
+            backendModelName = json.model_name ?? null
+            continue
+          }
           if (json?.usage) {
             completionTokens = json.usage.completion_tokens ?? completionTokens
             promptTokens = json.usage.prompt_tokens ?? promptTokens
@@ -194,11 +204,15 @@ export async function chatStream(
     const endTime = Date.now()
     const timeMs = endTime - startTime
     const generationMs = firstTokenTime !== null ? endTime - firstTokenTime : timeMs
+    const ttftMs = backendTtftMs ?? (firstTokenTime !== null ? firstTokenTime - startTime : null)
     onDone({
       tokensGenerated: completionTokens,
       tokensPerSecond: completionTokens > 0 && generationMs > 0 ? (completionTokens / generationMs) * 1000 : 0,
       timeMs,
       promptTokens,
+      ttftMs,
+      engine: backendEngine,
+      modelName: backendModelName,
     })
   } catch (e) {
     if (e instanceof Error && e.name === 'AbortError') {

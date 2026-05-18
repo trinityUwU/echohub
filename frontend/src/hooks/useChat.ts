@@ -196,14 +196,18 @@ export function useChat(
       (generationStats) => {
         setStats(generationStats)
         setStreaming(false)
+        const msgStats = {
+          tokens: generationStats.tokensGenerated,
+          model_name: generationStats.modelName ?? modelName ?? undefined,
+          tok_per_sec: generationStats.tokensPerSecond,
+          time_ms: generationStats.timeMs,
+          prompt_tokens: generationStats.promptTokens,
+          ttft_ms: generationStats.ttftMs ?? undefined,
+          engine: generationStats.engine ?? undefined,
+        }
         const assistantFinal: ChatMessage = {
           role: 'assistant', content: accumulated, id: assistantMsgId,
-          stats: {
-            tokens: generationStats.tokensGenerated, model_name: modelName ?? undefined,
-            tok_per_sec: generationStats.tokensPerSecond,
-            time_ms: generationStats.timeMs,
-            prompt_tokens: generationStats.promptTokens,
-          },
+          stats: msgStats,
         }
         const final = [...currentMessages, assistantFinal]
         setMessages(prev => { const u = [...prev]; u[u.length - 1] = assistantFinal; return u })
@@ -215,12 +219,7 @@ export function useChat(
             id: assistantMsgId,
             role: 'assistant',
             content: accumulated,
-            stats: {
-              tokens: generationStats.tokensGenerated, model_name: modelName ?? undefined,
-              tok_per_sec: generationStats.tokensPerSecond,
-              time_ms: generationStats.timeMs,
-              prompt_tokens: generationStats.promptTokens,
-            },
+            stats: msgStats,
           }).catch(() => {/* best-effort */})
         }
       },
@@ -287,9 +286,18 @@ export function useChat(
       (generationStats) => {
         setStats(generationStats)
         setStreaming(false)
+        const msgStats2 = {
+          tokens: generationStats.tokensGenerated,
+          model_name: generationStats.modelName ?? modelName ?? undefined,
+          tok_per_sec: generationStats.tokensPerSecond,
+          time_ms: generationStats.timeMs,
+          prompt_tokens: generationStats.promptTokens,
+          ttft_ms: generationStats.ttftMs ?? undefined,
+          engine: generationStats.engine ?? undefined,
+        }
         const assistantFinal2: ChatMessage = {
           role: 'assistant', content: accumulated, id: assistantMsgId,
-          stats: { tokens: generationStats.tokensGenerated, model_name: modelName ?? undefined, tok_per_sec: generationStats.tokensPerSecond, time_ms: generationStats.timeMs, prompt_tokens: generationStats.promptTokens },
+          stats: msgStats2,
         }
         setMessages(prev => { const u = [...prev]; u[u.length - 1] = assistantFinal2; return u })
         const final = [...history, assistantFinal2]
@@ -297,7 +305,7 @@ export function useChat(
         if (convId) {
           addMessage(convId, {
             id: assistantMsgId, role: 'assistant', content: accumulated,
-            stats: { tokens: generationStats.tokensGenerated, model_name: modelName ?? undefined, tok_per_sec: generationStats.tokensPerSecond, time_ms: generationStats.timeMs, prompt_tokens: generationStats.promptTokens },
+            stats: msgStats2,
           }).catch(() => {})
         }
       },
