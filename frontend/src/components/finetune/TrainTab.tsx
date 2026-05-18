@@ -127,8 +127,8 @@ export function TrainTab({ profileId, loadedModel, ftModel }: TrainTabProps): Re
               <JobRow
                 key={job.id}
                 job={job}
-                selected={job.id === selectedJobId}
-                onClick={() => setSelectedJobId(job.id === selectedJobId ? null : job.id)}
+                selected={false}
+                onClick={() => {}}
                 onRefresh={loadJobs}
               />
             ))}
@@ -227,11 +227,15 @@ interface JobRowProps {
   onRefresh: () => void
 }
 
-function JobRow({ job, selected, onClick, onRefresh }: JobRowProps): React.ReactElement {
+function JobRow({ job, onRefresh }: JobRowProps): React.ReactElement {
   const [logs, setLogs] = useState<string[]>([])
+  const [expanded, setExpanded] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const logRef = useRef<HTMLDivElement>(null)
   const isActive = job.status === 'pending' || job.status === 'running'
+
+  // Auto-expand active jobs, keep expanded after done
+  useEffect(() => { if (isActive) setExpanded(true) }, [isActive])
 
   const onRefreshRef = useRef(onRefresh)
   useEffect(() => { onRefreshRef.current = onRefresh }, [onRefresh])
@@ -269,11 +273,14 @@ function JobRow({ job, selected, onClick, onRefresh }: JobRowProps): React.React
     try { await cancelFinetuneJob(job.id); onRefresh() } catch { /* ignore */ } finally { setCancelling(false) }
   }
 
+  const hasLogs = logs.length > 0 || isActive
+
   return (
-    <div onClick={onClick} className={`rounded-md border transition-colors cursor-pointer ${
-      selected ? 'bg-white/[0.06] border-white/[0.1]' : 'bg-surface border-white/[0.04] hover:border-white/[0.08]'
-    }`}>
-      <div className="px-3 py-2.5 flex items-center gap-2">
+    <div className="rounded-md border border-white/[0.04] hover:border-white/[0.08] transition-colors bg-surface">
+      <div
+        onClick={() => setExpanded(e => !e)}
+        className="px-3 py-2.5 flex items-center gap-2 cursor-pointer"
+      >
         <span className={`text-xs font-medium flex-shrink-0 ${STATUS_COLOR[job.status] ?? 'text-text-muted'}`}>{job.status}</span>
         {isActive && <span className="w-3 h-3 border border-accent/30 border-t-accent rounded-full animate-spin flex-shrink-0" />}
         <span className="text-xs text-text-muted flex-1 truncate">{job.model_id.split('/').pop()}</span>
@@ -284,19 +291,27 @@ function JobRow({ job, selected, onClick, onRefresh }: JobRowProps): React.React
             {cancelling ? '…' : 'Cancel'}
           </button>
         )}
+        {hasLogs && (
+          <svg className={`w-3 h-3 text-text-muted/40 flex-shrink-0 transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`}
+            viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        )}
       </div>
-      {job.error && <p className="px-3 pb-2 text-xs text-red-400">{job.error}</p>}
-      {isActive && (
-        <div ref={logRef} className="mx-3 mb-3 font-mono text-xs bg-overlay rounded-sm p-2.5 max-h-48 overflow-y-auto leading-relaxed text-text-muted">
-          {logs.length === 0
-            ? <span className="animate-pulse opacity-50">Connecting…</span>
-            : logs.map((l, i) => <div key={i} className="py-[1px]">{l}</div>)
-          }
-        </div>
+      {job.error && !expanded && (
+        <p className="px-3 pb-2 text-xs text-red-400 truncate">{job.error}</p>
       )}
-      {!isActive && logs.length > 0 && (
-        <div className="mx-3 mb-3 font-mono text-xs bg-overlay rounded-sm p-2.5 max-h-24 overflow-y-auto leading-relaxed text-text-muted/60">
-          {logs.slice(-5).map((l, i) => <div key={i} className="py-[1px]">{l}</div>)}
+      {expanded && (
+        <div className="px-3 pb-3 flex flex-col gap-2">
+          {job.error && <p className="text-xs text-red-400 bg-red-400/8 rounded-sm px-2 py-1.5">{job.error}</p>}
+          <div ref={logRef} className="font-mono text-xs bg-overlay rounded-sm p-2.5 max-h-72 overflow-y-auto leading-relaxed text-text-muted">
+            {logs.length === 0 && isActive
+              ? <span className="animate-pulse opacity-50">Connecting…</span>
+              : logs.length === 0
+              ? <span className="opacity-40">No logs captured for this job</span>
+              : logs.map((l, i) => <div key={i} className="py-[1px]">{l}</div>)
+            }
+          </div>
         </div>
       )}
     </div>
