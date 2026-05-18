@@ -140,22 +140,29 @@ def _build_train_script(
 ) -> str:
     targets_repr = repr(target_modules)
     return f"""
-import torch
-from unsloth import FastLanguageModel
-from trl import SFTTrainer
-from transformers import TrainingArguments
-from datasets import Dataset
-import json, os
+import os, json, torch
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-max_seq_length = 2048
-dtype = None
-load_in_4bit = True
+from unsloth import FastLanguageModel
+from trl import SFTTrainer, SFTConfig
+from datasets import Dataset
+
+# RTX 3060 12GB safety settings
+MAX_SEQ_LENGTH = 512          # 2048 would OOM on 9B QLoRA
+VRAM_LIMIT_GB  = 10.0         # leave 2GB headroom for OS + other processes
+
+if torch.cuda.is_available():
+    vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    print(f"GPU: {{torch.cuda.get_device_name(0)}} — {{vram_gb:.1f}} GB VRAM", flush=True)
+    if vram_gb < 8:
+        print("WARNING: Less than 8GB VRAM — training may fail", flush=True)
 
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name="{model_path}",
-    max_seq_length=max_seq_length,
-    dtype=dtype,
-    load_in_4bit=load_in_4bit,
+    max_seq_length=MAX_SEQ_LENGTH,
+    dtype=None,
+    load_in_4bit=True,
+    max_memory={{0: f"{{int(VRAM_LIMIT_GB)}}GB"}},
 )
 
 model = FastLanguageModel.get_peft_model(
@@ -176,18 +183,19 @@ def fmt(p):
     return {{"text": f"### Human: {{p['prompt']}}\\n### Assistant: {{p['chosen']}}"}}
 
 dataset = Dataset.from_list([fmt(p) for p in pairs])
+print(f"Dataset: {{len(dataset)}} pairs — seq_length cap: {{MAX_SEQ_LENGTH}}", flush=True)
 
 trainer = SFTTrainer(
     model=model,
     tokenizer=tokenizer,
     train_dataset=dataset,
-    dataset_text_field="text",
-    max_seq_length=max_seq_length,
-    dataset_num_proc=2,
-    args=TrainingArguments(
+    args=SFTConfig(
+        dataset_text_field="text",
+        max_seq_length=MAX_SEQ_LENGTH,
         per_device_train_batch_size=1,
-        gradient_accumulation_steps=4,
-        warmup_steps=5,
+        gradient_accumulation_steps=8,
+        gradient_checkpointing=True,
+        warmup_steps=3,
         num_train_epochs={num_epochs},
         learning_rate={learning_rate},
         fp16=not torch.cuda.is_bf16_supported(),
@@ -199,6 +207,7 @@ trainer = SFTTrainer(
         seed=42,
         output_dir="{output_dir}/checkpoints",
         report_to="none",
+        dataloader_pin_memory=False,
     ),
 )
 
