@@ -257,7 +257,11 @@ function JobRow({ job, onRefresh }: JobRowProps): React.ReactElement {
       es.onmessage = (e) => {
         try {
           const d = JSON.parse(e.data) as { type: string; text?: string }
-          // Already terminal — just refresh status, don't pollute logs
+          if (d.type === 'pipeline_done') {
+            es?.close()
+            setTimeout(() => onRefreshRef.current(), 300)
+            return
+          }
           if (d.type === 'done' || d.type === 'error') {
             es?.close()
             setTimeout(() => onRefreshRef.current(), 300)

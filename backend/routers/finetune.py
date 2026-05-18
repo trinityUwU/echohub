@@ -411,9 +411,13 @@ async def _full_pipeline_inner(job_id: str, job: dict, cfg: dict, pairs: list[di
 
     def on_status(status: str, output_path: Optional[str]) -> None:
         nonlocal lora_output_dir
-        db.update_finetune_job(job_id, status=status, output_path=output_path)
         if output_path:
             lora_output_dir = output_path
+        # If eval_after is pending, don't set final status yet — pipeline continues
+        if status == "done" and eval_after:
+            db.update_finetune_job(job_id, status="running", output_path=output_path)
+        else:
+            db.update_finetune_job(job_id, status=status, output_path=output_path)
 
     async for chunk in ft.run_finetune_sse(
         job_id=job_id,
@@ -479,6 +483,10 @@ async def _full_pipeline_inner(job_id: str, job: dict, cfg: dict, pairs: list[di
         delete_after=False,
     ):
         yield chunk
+
+    # Pipeline fully complete — set final done status
+    db.update_finetune_job(job_id, status="done", output_path=lora_output_dir)
+    yield f"data: {json.dumps({'type': 'pipeline_done'})}\n\n"
 
 
 # ── Export GGUF ────────────────────────────────────────────────────────────
