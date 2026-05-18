@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
-import { searchModels, listDownloaded, getVramEstimate } from '@/api/client'
+import { searchModels, listDownloaded, getVramEstimate, startDownload } from '@/api/client'
 import type { ModelInfo } from '@/types'
 
 const PAGE_SIZE = 20
@@ -9,15 +9,17 @@ type SourceFilter = 'hf' | 'local'
 interface FTModelBrowserProps {
   vramTotalGb: number
   onSelect: (model: ModelInfo) => void
+  onDownloaded: () => void
 }
 
-export function FTModelBrowser({ vramTotalGb, onSelect }: FTModelBrowserProps): React.ReactElement {
+export function FTModelBrowser({ vramTotalGb, onSelect, onDownloaded }: FTModelBrowserProps): React.ReactElement {
   const [query, setQuery] = useState('')
   const [source, setSource] = useState<SourceFilter>('local')
   const [results, setResults] = useState<ModelInfo[]>([])
   const [page, setPage] = useState(0)
   const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set())
   const searchRef = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -27,7 +29,6 @@ export function FTModelBrowser({ vramTotalGb, onSelect }: FTModelBrowserProps): 
     try {
       const all = await listDownloaded()
       if (ticket !== searchRef.current) return
-      // Local: show safetensors only (no quantization = bf16 safetensors), filter by query
       const ftReady = all.filter(m => {
         const isSafetensors = !m.quantization || m.quantization.toLowerCase() === 'bf16' || m.quantization.toLowerCase() === 'safetensors'
         const matchesQuery = !q.trim() || m.id.toLowerCase().includes(q.toLowerCase()) || (m.name ?? '').toLowerCase().includes(q.toLowerCase())
@@ -67,6 +68,19 @@ export function FTModelBrowser({ vramTotalGb, onSelect }: FTModelBrowserProps): 
   useEffect(() => {
     if (page > 0 && source === 'hf') loadHF(query, page)
   }, [page]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleDownload = useCallback(async (modelId: string): Promise<void> => {
+    setDownloadingIds(prev => new Set(prev).add(modelId))
+    try {
+      await startDownload({ model_id: modelId })
+      setTimeout(() => {
+        onDownloaded()
+        setDownloadingIds(prev => { const s = new Set(prev); s.delete(modelId); return s })
+      }, 2000)
+    } catch {
+      setDownloadingIds(prev => { const s = new Set(prev); s.delete(modelId); return s })
+    }
+  }, [onDownloaded])
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -115,7 +129,9 @@ export function FTModelBrowser({ vramTotalGb, onSelect }: FTModelBrowserProps): 
               model={m}
               vramTotalGb={vramTotalGb}
               isLocal={source === 'local'}
+              isDownloading={downloadingIds.has(m.id)}
               onSelect={() => onSelect(m)}
+              onDownload={() => handleDownload(m.id)}
             />
           ))}
         </div>
@@ -141,8 +157,13 @@ export function FTModelBrowser({ vramTotalGb, onSelect }: FTModelBrowserProps): 
   )
 }
 
-function FTModelCard({ model, vramTotalGb, isLocal, onSelect }: {
-  model: ModelInfo; vramTotalGb: number; isLocal: boolean; onSelect: () => void
+function FTModelCard({ model, vramTotalGb, isLocal, isDownloading, onSelect, onDownload }: {
+  model: ModelInfo
+  vramTotalGb: number
+  isLocal: boolean
+  isDownloading: boolean
+  onSelect: () => void
+  onDownload: () => void
 }): React.ReactElement {
   const [vramGb, setVramGb] = useState<number | null>(null)
 
@@ -154,6 +175,7 @@ function FTModelCard({ model, vramTotalGb, isLocal, onSelect }: {
   }, [model.params_billion])
 
   const fits = vramGb !== null ? vramGb < vramTotalGb * 0.9 : null
+  const isHFNotDownloaded = !isLocal && !model.downloaded
 
   return (
     <motion.div
@@ -191,12 +213,23 @@ function FTModelCard({ model, vramTotalGb, isLocal, onSelect }: {
         )}
       </div>
 
-      <button
-        onClick={onSelect}
-        className="mt-auto px-3 py-1.5 text-xs bg-accent/10 hover:bg-accent/20 border border-accent/30 text-accent rounded-sm cursor-pointer transition-colors font-medium"
-      >
-        Select for training
-      </button>
+      {isHFNotDownloaded ? (
+        <button
+          onClick={onDownload}
+          disabled={isDownloading}
+          className="mt-auto px-3 py-1.5 text-xs bg-overlay hover:bg-overlay/80 border border-border text-text-muted hover:text-text-primary disabled:opacity-50 rounded-sm cursor-pointer transition-colors font-medium flex items-center gap-1.5"
+        >
+          {isDownloading && <span className="w-3 h-3 border-2 border-text-muted/30 border-t-text-muted rounded-full animate-spin" />}
+          {isDownloading ? 'Starting…' : 'Download'}
+        </button>
+      ) : (
+        <button
+          onClick={onSelect}
+          className="mt-auto px-3 py-1.5 text-xs bg-accent/10 hover:bg-accent/20 border border-accent/30 text-accent rounded-sm cursor-pointer transition-colors font-medium"
+        >
+          Select for training
+        </button>
+      )}
     </motion.div>
   )
 }

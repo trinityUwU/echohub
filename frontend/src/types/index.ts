@@ -229,3 +229,19 @@ export interface FtStatus {
   unsloth_venv: string
   pair_count: number
 }
+
+export interface DownloadHistoryEntry {
+  id: number
+  model_id: string
+  model_name: string | null
+  state: DownloadState
+  downloaded_gb: number
+  total_gb: number | null
+  error: string | null
+  started_at: string
+  completed_at: string | null
+  params_billion: number | null
+  quantization: string | null
+  size_gb: number | null
+  files_exist: boolean
+}

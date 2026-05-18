@@ -10,9 +10,10 @@ type Tab = 'models' | 'pairs' | 'train'
 interface FineTunePageProps {
   vramTotalGb: number
   vramFreeGb: number
+  onDownloaded: () => void
 }
 
-export function FineTunePage({ vramTotalGb }: FineTunePageProps): React.ReactElement {
+export function FineTunePage({ vramTotalGb, onDownloaded }: FineTunePageProps): React.ReactElement {
   const [activeTab, setActiveTab] = useState<Tab>('models')
   const [selectedModel, setSelectedModel] = useState<ModelInfo | null>(null)
 
@@ -26,7 +27,7 @@ export function FineTunePage({ vramTotalGb }: FineTunePageProps): React.ReactEle
       <TabBar active={activeTab} onSelect={setActiveTab} selectedModelName={selectedModel?.name ?? null} />
       <div className="flex flex-1 overflow-hidden">
         <div className={`flex flex-col flex-1 overflow-hidden ${activeTab === 'models' ? '' : 'hidden'}`}>
-          <FTModelBrowser vramTotalGb={vramTotalGb} onSelect={handleModelSelect} />
+          <FTModelBrowser vramTotalGb={vramTotalGb} onSelect={handleModelSelect} onDownloaded={onDownloaded} />
         </div>
         <div className={`flex flex-col flex-1 overflow-hidden ${activeTab === 'pairs' ? '' : 'hidden'}`}>
           <PairsTab />

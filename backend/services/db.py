@@ -120,6 +120,21 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL,
                 error TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS download_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                model_id TEXT NOT NULL UNIQUE,
+                model_name TEXT,
+                state TEXT NOT NULL DEFAULT 'pending',
+                downloaded_gb REAL NOT NULL DEFAULT 0.0,
+                total_gb REAL,
+                error TEXT,
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                params_billion REAL,
+                quantization TEXT,
+                size_gb REAL
+            );
         """)
         conn.commit()
         # Migrations — add columns/tables missing from older DBs
@@ -187,6 +202,22 @@ def init_db() -> None:
                     error TEXT
                 )
             """)
+            conn.commit()
+        if "download_history" not in existing_tables:
+            conn.execute("""CREATE TABLE download_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                model_id TEXT NOT NULL UNIQUE,
+                model_name TEXT,
+                state TEXT NOT NULL DEFAULT 'pending',
+                downloaded_gb REAL NOT NULL DEFAULT 0.0,
+                total_gb REAL,
+                error TEXT,
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                params_billion REAL,
+                quantization TEXT,
+                size_gb REAL
+            )""")
             conn.commit()
         # Seed builtin profiles — add any missing ones
         existing_names = {row[0] for row in conn.execute("SELECT name FROM benchmark_profiles WHERE builtin=1")}
@@ -598,6 +629,67 @@ def get_finetune_jobs(limit: int = 20) -> list[dict]:
             pass
         result.append(d)
     return result
+
+
+# ── Download history ──────────────────────────────────────────────────────
+
+def upsert_download_history(
+    model_id: str,
+    state: str,
+    downloaded_gb: float = 0.0,
+    total_gb: float | None = None,
+    error: str | None = None,
+    model_name: str | None = None,
+    params_billion: float | None = None,
+    quantization: str | None = None,
+    size_gb: float | None = None,
+    completed_at: str | None = None,
+) -> None:
+    now = _now()
+    with _lock:
+        conn = _get_conn()
+        existing = conn.execute("SELECT id FROM download_history WHERE model_id = ?", (model_id,)).fetchone()
+        if existing:
+            fields = ["state = ?", "downloaded_gb = ?", "total_gb = ?"]
+            values: list = [state, downloaded_gb, total_gb]
+            if error is not None:
+                fields.append("error = ?"); values.append(error)
+            if model_name is not None:
+                fields.append("model_name = ?"); values.append(model_name)
+            if params_billion is not None:
+                fields.append("params_billion = ?"); values.append(params_billion)
+            if quantization is not None:
+                fields.append("quantization = ?"); values.append(quantization)
+            if size_gb is not None:
+                fields.append("size_gb = ?"); values.append(size_gb)
+            if completed_at is not None:
+                fields.append("completed_at = ?"); values.append(completed_at)
+            values.append(model_id)
+            conn.execute(f"UPDATE download_history SET {', '.join(fields)} WHERE model_id = ?", values)
+        else:
+            conn.execute(
+                "INSERT INTO download_history (model_id, model_name, state, downloaded_gb, total_gb, error, started_at, completed_at, params_billion, quantization, size_gb) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (model_id, model_name, state, downloaded_gb, total_gb, error, now, completed_at, params_billion, quantization, size_gb)
+            )
+        conn.commit()
+
+
+def get_download_history(limit: int = 100) -> list[dict]:
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT * FROM download_history ORDER BY started_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def delete_download_history_entry(model_id: str) -> bool:
+    with _lock:
+        conn = _get_conn()
+        cur = conn.execute("DELETE FROM download_history WHERE model_id = ?", (model_id,))
+        conn.commit()
+    return cur.rowcount > 0
 
 
 _BUILTIN_PROFILES = [

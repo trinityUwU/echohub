@@ -473,6 +473,12 @@ export const clearChangelog = (): Promise<{ status: string }> =>
 
 // ── Fine-tuning ─────────────────────────────────────────────────────────────
 
+export const getDownloadHistory = (): Promise<import('@/types').DownloadHistoryEntry[]> =>
+  apiRequest('/models/history')
+
+export const deleteDownloadHistoryEntry = (modelId: string): Promise<void> =>
+  apiRequest(`/models/history/${encodeURIComponent(modelId)}`, { method: 'DELETE' })
+
 export const getFtStatus = (): Promise<import('@/types').FtStatus> =>
   apiRequest('/finetune/status')
 

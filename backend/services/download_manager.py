@@ -9,6 +9,12 @@ from huggingface_hub import snapshot_download, hf_hub_download
 from loguru import logger
 
 from backend.services.hf_service import MODELS_DIR, _model_dir
+from backend.services import db as _db
+
+
+def _db_now() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
 
 
 class DownloadState(str, Enum):
@@ -57,6 +63,7 @@ def _run_download(job: DownloadJob, revision: str, on_update: Callable, gguf_fil
     dest = _model_dir(job.model_id)
     dest.mkdir(parents=True, exist_ok=True)
     job.state = DownloadState.RUNNING
+    _db.upsert_download_history(model_id=job.model_id, state="running", total_gb=job.total_gb)
 
     # Progress polling thread
     stop_poll = threading.Event()
@@ -98,6 +105,11 @@ def _run_download(job: DownloadJob, revision: str, on_update: Callable, gguf_fil
             job.state = DownloadState.COMPLETE
             job.downloaded_gb = _disk_usage_gb(dest)
             logger.info(f"Download complete: {job.model_id} ({job.downloaded_gb:.2f} GB)")
+            _db.upsert_download_history(
+                model_id=job.model_id, state="complete",
+                downloaded_gb=job.downloaded_gb, total_gb=job.total_gb,
+                completed_at=_db_now()
+            )
 
     except Exception as e:
         if job.state not in (DownloadState.CANCELLED, DownloadState.PAUSED):
@@ -112,6 +124,10 @@ def _run_download(job: DownloadJob, revision: str, on_update: Callable, gguf_fil
             else:
                 job.error = err_str
             logger.error(f"Download error for {job.model_id}: {job.error}")
+            _db.upsert_download_history(
+                model_id=job.model_id, state="error",
+                downloaded_gb=job.downloaded_gb, error=job.error
+            )
     finally:
         stop_poll.set()
         poll_thread.join(timeout=3)
@@ -131,6 +147,7 @@ def start_download(
 
         job = DownloadJob(model_id=model_id, total_gb=total_gb)
         _jobs[model_id] = job
+        _db.upsert_download_history(model_id=model_id, state="pending", total_gb=total_gb)
 
     def on_update(j: DownloadJob):
         pass  # SSE endpoint polls _jobs directly
@@ -166,6 +183,7 @@ def cancel_download(model_id: str) -> bool:
 
     with _lock:
         _jobs.pop(model_id, None)
+    _db.upsert_download_history(model_id=model_id, state="cancelled")
     return True
 
 
@@ -175,4 +193,15 @@ def get_job(model_id: str) -> Optional[DownloadJob]:
 
 def get_all_jobs() -> list[dict]:
     with _lock:
-        return [j.to_dict() for j in _jobs.values()]
+        jobs = [j.to_dict() for j in _jobs.values()]
+    # Enrich with persisted metadata
+    try:
+        history = {h["model_id"]: h for h in _db.get_download_history()}
+        for job in jobs:
+            h = history.get(job["model_id"], {})
+            job.setdefault("model_name", h.get("model_name"))
+            job.setdefault("params_billion", h.get("params_billion"))
+            job.setdefault("quantization", h.get("quantization"))
+    except Exception:
+        pass
+    return jobs

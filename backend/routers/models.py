@@ -155,6 +155,29 @@ async def stream_downloads() -> StreamingResponse:
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@router.get("/history")
+def get_download_history() -> list[dict]:
+    """Return persisted download history (survives restarts)."""
+    from backend.services import db
+    history = db.get_download_history()
+    # Enrich: mark entries whose model files no longer exist on disk
+    from backend.services.hf_service import _model_dir
+    for entry in history:
+        model_path = _model_dir(entry["model_id"])
+        entry["files_exist"] = model_path.exists() and any(model_path.iterdir())
+    return history
+
+
+@router.delete("/history/{model_id:path}")
+def delete_history_entry(model_id: str) -> dict:
+    """Delete a history log entry (does NOT delete model files)."""
+    from backend.services import db
+    ok = db.delete_download_history_entry(model_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    return {"status": "deleted", "model_id": model_id}
+
+
 @router.get("/readme/{model_id:path}")
 def get_model_readme(model_id: str) -> dict:
     """Return the full README.md for a model (fetches from HF cache or downloads)."""

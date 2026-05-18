@@ -163,12 +163,14 @@ export default function App(): React.ReactElement {
             jobs={downloadJobs}
             onCancel={handleCancelDownload}
             onLoad={id => { requestLoad(id); setPage('chat') }}
+            gpu={gpu}
           />
         </div>
         <div className={`flex flex-1 overflow-hidden ${page === 'finetune' ? 'animate-fade-in' : 'hidden'}`}>
           <FineTunePage
             vramTotalGb={gpu ? gpu.vram_total_mb / 1024 : 0}
             vramFreeGb={gpu ? gpu.vram_free_mb / 1024 : 0}
+            onDownloaded={refresh}
           />
         </div>
         <div className={`flex flex-1 overflow-hidden ${page === 'settings' ? 'animate-fade-in' : 'hidden'}`}>
