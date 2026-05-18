@@ -171,6 +171,7 @@ export default function App(): React.ReactElement {
             vramTotalGb={gpu ? gpu.vram_total_mb / 1024 : 0}
             vramFreeGb={gpu ? gpu.vram_free_mb / 1024 : 0}
             onDownloaded={refresh}
+            downloadJobs={Object.fromEntries(downloadJobs.map(j => [j.model_id, j]))}
           />
         </div>
         <div className={`flex flex-1 overflow-hidden ${page === 'settings' ? 'animate-fade-in' : 'hidden'}`}>

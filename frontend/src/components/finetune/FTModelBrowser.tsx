@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { searchModels, listDownloaded, getVramEstimate, startDownload } from '@/api/client'
-import type { ModelInfo } from '@/types'
+import type { DownloadJob, ModelInfo } from '@/types'
 
 const PAGE_SIZE = 20
 type SourceFilter = 'hf' | 'local'
@@ -10,16 +10,16 @@ interface FTModelBrowserProps {
   vramTotalGb: number
   onSelect: (model: ModelInfo) => void
   onDownloaded: () => void
+  downloadJobs: Record<string, DownloadJob>
 }
 
-export function FTModelBrowser({ vramTotalGb, onSelect, onDownloaded }: FTModelBrowserProps): React.ReactElement {
+export function FTModelBrowser({ vramTotalGb, onSelect, downloadJobs }: FTModelBrowserProps): React.ReactElement {
   const [query, setQuery] = useState('')
   const [source, setSource] = useState<SourceFilter>('local')
   const [results, setResults] = useState<ModelInfo[]>([])
   const [page, setPage] = useState(0)
   const [hasMore, setHasMore] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [downloadingIds, setDownloadingIds] = useState<Set<string>>(new Set())
   const searchRef = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -70,17 +70,11 @@ export function FTModelBrowser({ vramTotalGb, onSelect, onDownloaded }: FTModelB
   }, [page]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDownload = useCallback(async (modelId: string): Promise<void> => {
-    setDownloadingIds(prev => new Set(prev).add(modelId))
     try {
       await startDownload({ model_id: modelId })
-      setTimeout(() => {
-        onDownloaded()
-        setDownloadingIds(prev => { const s = new Set(prev); s.delete(modelId); return s })
-      }, 2000)
-    } catch {
-      setDownloadingIds(prev => { const s = new Set(prev); s.delete(modelId); return s })
-    }
-  }, [onDownloaded])
+      // App.tsx's subscribeDownloads SSE will update downloadJobs automatically
+    } catch { /* best-effort */ }
+  }, [])
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -129,7 +123,7 @@ export function FTModelBrowser({ vramTotalGb, onSelect, onDownloaded }: FTModelB
               model={m}
               vramTotalGb={vramTotalGb}
               isLocal={source === 'local'}
-              isDownloading={downloadingIds.has(m.id)}
+              downloadJob={downloadJobs[m.id] ?? null}
               onSelect={() => onSelect(m)}
               onDownload={() => handleDownload(m.id)}
             />
@@ -157,11 +151,11 @@ export function FTModelBrowser({ vramTotalGb, onSelect, onDownloaded }: FTModelB
   )
 }
 
-function FTModelCard({ model, vramTotalGb, isLocal, isDownloading, onSelect, onDownload }: {
+function FTModelCard({ model, vramTotalGb, isLocal, downloadJob, onSelect, onDownload }: {
   model: ModelInfo
   vramTotalGb: number
   isLocal: boolean
-  isDownloading: boolean
+  downloadJob: DownloadJob | null
   onSelect: () => void
   onDownload: () => void
 }): React.ReactElement {
@@ -175,7 +169,9 @@ function FTModelCard({ model, vramTotalGb, isLocal, isDownloading, onSelect, onD
   }, [model.params_billion])
 
   const fits = vramGb !== null ? vramGb < vramTotalGb * 0.9 : null
-  const isHFNotDownloaded = !isLocal && !model.downloaded
+  const isActive = downloadJob?.state === 'running' || downloadJob?.state === 'pending'
+  const isComplete = downloadJob?.state === 'complete' || model.downloaded
+  const pct = downloadJob?.progress != null ? Math.round(downloadJob.progress * 100) : 0
 
   return (
     <motion.div
@@ -202,27 +198,40 @@ function FTModelCard({ model, vramTotalGb, isLocal, isDownloading, onSelect, onD
       </div>
 
       <div className="flex items-center gap-2 text-xs text-text-muted flex-wrap">
-        {model.params_billion !== null && (
-          <span>{model.params_billion}B params</span>
-        )}
-        {vramGb !== null && (
-          <span className="text-accent">~{vramGb.toFixed(1)} GB QLoRA</span>
-        )}
-        {vramGb === null && model.params_billion !== null && (
-          <span className="text-text-muted/50 animate-pulse">estimating…</span>
-        )}
+        {model.params_billion !== null && <span>{model.params_billion}B params</span>}
+        {vramGb !== null && <span className="text-accent">~{vramGb.toFixed(1)} GB QLoRA</span>}
+        {vramGb === null && model.params_billion !== null && <span className="text-text-muted/50 animate-pulse">estimating…</span>}
       </div>
 
-      {isHFNotDownloaded ? (
+      {isActive && (
+        <div className="flex flex-col gap-1.5">
+          <div className="h-[3px] bg-overlay rounded-full overflow-hidden">
+            <motion.div
+              className="h-full bg-accent rounded-full"
+              initial={{ width: 0 }}
+              animate={{ width: `${pct}%` }}
+              transition={{ duration: 0.4 }}
+            />
+          </div>
+          <div className="flex items-center justify-between text-[10px] text-text-muted">
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 border border-accent/40 border-t-accent rounded-full animate-spin" />
+              Downloading…
+            </span>
+            <span className="font-mono">{pct}% · {downloadJob?.downloaded_gb.toFixed(2)} / {downloadJob?.total_gb?.toFixed(2) ?? '?'} GB</span>
+          </div>
+        </div>
+      )}
+
+      {!isActive && !isComplete && (
         <button
           onClick={onDownload}
-          disabled={isDownloading}
-          className="mt-auto px-3 py-1.5 text-xs bg-overlay hover:bg-overlay/80 border border-border text-text-muted hover:text-text-primary disabled:opacity-50 rounded-sm cursor-pointer transition-colors font-medium flex items-center gap-1.5"
+          className="mt-auto px-3 py-1.5 text-xs bg-overlay hover:bg-overlay/80 border border-border text-text-muted hover:text-text-primary rounded-sm cursor-pointer transition-colors font-medium"
         >
-          {isDownloading && <span className="w-3 h-3 border-2 border-text-muted/30 border-t-text-muted rounded-full animate-spin" />}
-          {isDownloading ? 'Starting…' : 'Download'}
+          Download
         </button>
-      ) : (
+      )}
+      {(isComplete || isLocal) && (
         <button
           onClick={onSelect}
           className="mt-auto px-3 py-1.5 text-xs bg-accent/10 hover:bg-accent/20 border border-accent/30 text-accent rounded-sm cursor-pointer transition-colors font-medium"
