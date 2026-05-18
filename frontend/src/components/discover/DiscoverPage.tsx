@@ -5,7 +5,14 @@ import type { DownloadJob, ModelInfo } from '@/types'
 import { ModelCard } from './ModelCard'
 import { ModelDetailPanel } from './ModelDetailPanel'
 
-const FORMAT_FILTERS = ['GGUF', 'AWQ', 'GPTQ', 'FP8', 'EXL2']
+const FORMAT_FILTERS = [
+  { value: 'GGUF', label: 'GGUF' },
+  { value: 'AWQ', label: 'AWQ' },
+  { value: 'GPTQ', label: 'GPTQ' },
+  { value: 'FP8', label: 'FP8' },
+  { value: 'EXL2', label: 'EXL2' },
+  { value: 'safetensors', label: 'FT-ready' },
+]
 const CAP_FILTERS    = ['Vision', 'Thinking']
 const PAGE_SIZE      = 20
 
@@ -129,7 +136,7 @@ export function DiscoverPage({ onLoad, onDownloaded, downloadJobs, vramTotalGb, 
               <div className="flex items-center gap-1 flex-shrink-0">
                 <span className="text-2xs text-text-muted/60 mr-1 uppercase tracking-widest">Format</span>
                 {FORMAT_FILTERS.map(f => (
-                  <FilterToggle key={f} label={f} active={activeFilters.has(f)} onClick={() => toggleFilter(f)} />
+                  <FilterToggle key={f.value} label={f.label} active={activeFilters.has(f.value)} onClick={() => toggleFilter(f.value)} />
                 ))}
               </div>
               <div className="w-px h-4 bg-border/60 flex-shrink-0" />
