@@ -189,7 +189,7 @@ export interface DownloadJob {
   error: string | null
 }
 
-// ── Fine-tuning ─────────────────────────────────────────────────────────────
+// ── Finetune training pairs ──────────────────────────────────────────────────
 
 export interface TrainingPair {
   id: string
@@ -199,29 +199,66 @@ export interface TrainingPair {
   source_conv_id: string | null
   source_msg_id: string | null
   model_id: string | null
+  profile_id: string | null
   created_at: string
-}
-
-export interface FinetuneConfig {
-  model_id: string
-  model_path: string
-  lora_rank: 8 | 16 | 32 | 64
-  lora_alpha: number
-  target_modules: string[]
-  num_epochs: number
-  learning_rate: number
-  pair_ids?: string[] | null
 }
 
 export interface FinetuneJob {
   id: string
-  status: 'pending' | 'running' | 'done' | 'error' | 'cancelled'
   model_id: string
-  output_path: string | null
-  config: FinetuneConfig
-  created_at: string
-  updated_at: string
+  status: 'pending' | 'running' | 'done' | 'error'
+  progress: number | null
   error: string | null
+  created_at: string
+  profile_id?: string | null
+}
+
+// ── Finetune profiles ────────────────────────────────────────────────────────
+
+export interface FinetuneProfile {
+  id: string
+  name: string
+  description: string
+  domain: 'dev' | 'reasoning' | 'general' | 'analysis' | 'debug' | string
+  target_pairs: number
+  color: string
+  created_at: string
+  builtin: boolean
+  pair_count?: number
+}
+
+export interface EvalPrompt {
+  id: string
+  prompt: string
+}
+
+export interface EvalResult {
+  prompt_id: string
+  prompt: string
+  response: string
+  score: number | null
+}
+
+export interface FinetuneEval {
+  id: string
+  job_id: string | null
+  profile_id: string | null
+  stage: 'before' | 'after'
+  model_id: string
+  model_path: string
+  results: EvalResult[]
+  score_avg: number | null
+  created_at: string
+}
+
+export interface EvalReadyResponse {
+  eval_id: string
+  profile_id: string
+  stage: string
+  model_id: string
+  prompt_count: number
+  prompts: EvalPrompt[]
+  status: string
 }
 
 export interface FtStatus {

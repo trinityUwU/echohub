@@ -487,7 +487,8 @@ export const listTrainingPairs = (): Promise<import('@/types').TrainingPair[]> =
 
 export const createTrainingPair = (data: {
   prompt: string; chosen: string; rejected: string
-  source_conv_id?: string | null; source_msg_id?: string | null; model_id?: string | null
+  source_conv_id?: string | null; source_msg_id?: string | null
+  model_id?: string | null; profile_id?: string | null
 }): Promise<import('@/types').TrainingPair> =>
   apiRequest('/finetune/pairs', { method: 'POST', body: JSON.stringify(data) })
 
@@ -497,8 +498,10 @@ export const deleteTrainingPair = (id: string): Promise<void> =>
 export const listFinetuneJobs = (): Promise<import('@/types').FinetuneJob[]> =>
   apiRequest('/finetune/jobs')
 
-export const createFinetuneJob = (config: import('@/types').FinetuneConfig): Promise<import('@/types').FinetuneJob> =>
-  apiRequest('/finetune/jobs', { method: 'POST', body: JSON.stringify(config) })
+export const createFinetuneJob = (data: {
+  model_id: string; profile_id?: string | null
+}): Promise<import('@/types').FinetuneJob> =>
+  apiRequest('/finetune/jobs', { method: 'POST', body: JSON.stringify(data) })
 
 export const cancelFinetuneJob = (id: string): Promise<{ cancelled: boolean }> =>
   apiRequest(`/finetune/jobs/${id}/cancel`, { method: 'DELETE' })
@@ -509,11 +512,43 @@ export const getVramEstimate = (paramsBillion: number): Promise<{ vram_gb: numbe
 export async function ftJobStreamUrl(jobId: string): Promise<string> {
   return apiUrl(`/finetune/jobs/${jobId}/stream`)
 }
-
 export async function ftExportStreamUrl(jobId: string): Promise<string> {
   return apiUrl(`/finetune/jobs/${jobId}/export/stream`)
 }
-
 export async function ftInstallStreamUrl(): Promise<string> {
   return apiUrl('/finetune/install/stream')
+}
+
+// ── Finetune profiles ────────────────────────────────────────────────────────
+
+export const listFinetuneProfiles = (): Promise<import('@/types').FinetuneProfile[]> =>
+  apiRequest('/finetune/profiles')
+
+export const createFinetuneProfile = (data: {
+  name: string; description: string; domain: string; target_pairs: number; color: string
+}): Promise<import('@/types').FinetuneProfile> =>
+  apiRequest('/finetune/profiles', { method: 'POST', body: JSON.stringify(data) })
+
+export const deleteFinetuneProfile = (id: string): Promise<void> =>
+  apiRequest(`/finetune/profiles/${id}`, { method: 'DELETE' })
+
+export const listProfilePairs = (profileId: string): Promise<import('@/types').TrainingPair[]> =>
+  apiRequest(`/finetune/profiles/${profileId}/pairs`)
+
+export const initEval = (data: {
+  profile_id: string; stage: string; model_id: string; model_path: string; job_id?: string
+}): Promise<import('@/types').EvalReadyResponse> =>
+  apiRequest('/finetune/evals', { method: 'POST', body: JSON.stringify(data) })
+
+export const submitEval = (data: {
+  profile_id: string; stage: string; model_id: string; model_path: string
+  job_id?: string; results: import('@/types').EvalResult[]
+}): Promise<import('@/types').FinetuneEval> =>
+  apiRequest('/finetune/evals/submit', { method: 'POST', body: JSON.stringify(data) })
+
+export const listEvals = (params?: { job_id?: string; profile_id?: string }): Promise<import('@/types').FinetuneEval[]> => {
+  const q = new URLSearchParams()
+  if (params?.job_id) q.set('job_id', params.job_id)
+  if (params?.profile_id) q.set('profile_id', params.profile_id)
+  return apiRequest(`/finetune/evals${q.toString() ? '?' + q : ''}`)
 }

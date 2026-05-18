@@ -1,79 +1,95 @@
 import { useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import type { ModelInfo } from '@/types'
-import { FTModelBrowser } from './FTModelBrowser'
-import { PairsTab } from './PairsTab'
+import { ProfilesTab } from './ProfilesTab'
 import { TrainTab } from './TrainTab'
 
-type Tab = 'models' | 'pairs' | 'train'
-
 interface FineTunePageProps {
-  vramTotalGb: number
-  vramFreeGb: number
-  onDownloaded: () => void
-  downloadJobs: Record<string, import('@/types').DownloadJob>
+  loadedModel: ModelInfo | null
 }
 
-export function FineTunePage({ vramTotalGb, onDownloaded, downloadJobs }: FineTunePageProps): React.ReactElement {
-  const [activeTab, setActiveTab] = useState<Tab>('models')
-  const [selectedModel, setSelectedModel] = useState<ModelInfo | null>(null)
+type TabId = 'models' | 'profiles' | 'train'
 
-  const handleModelSelect = (model: ModelInfo): void => {
-    setSelectedModel(model)
-    setActiveTab('train')
-  }
+interface Tab {
+  id: TabId
+  label: string
+}
+
+export function FineTunePage({ loadedModel }: FineTunePageProps): React.ReactElement {
+  const [activeTab, setActiveTab] = useState<TabId>('profiles')
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
+
+  const tabs: Tab[] = [
+    { id: 'models', label: 'Models' },
+    { id: 'profiles', label: 'Profiles' },
+    { id: 'train', label: loadedModel ? `Train · ${loadedModel.name}` : 'Train' },
+  ]
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-      <TabBar active={activeTab} onSelect={setActiveTab} selectedModelName={selectedModel?.name ?? null} />
-      <div className="flex flex-1 overflow-hidden">
-        <div className={`flex flex-col flex-1 overflow-hidden ${activeTab === 'models' ? '' : 'hidden'}`}>
-          <FTModelBrowser vramTotalGb={vramTotalGb} onSelect={handleModelSelect} onDownloaded={onDownloaded} downloadJobs={downloadJobs} />
-        </div>
-        <div className={`flex flex-col flex-1 overflow-hidden ${activeTab === 'pairs' ? '' : 'hidden'}`}>
-          <PairsTab />
-        </div>
-        <div className={`flex flex-col flex-1 overflow-hidden ${activeTab === 'train' ? '' : 'hidden'}`}>
-          <TrainTab
-            selectedModel={selectedModel}
-            vramTotalGb={vramTotalGb}
-            onNavigateToModels={() => setActiveTab('models')}
+      <div className="h-[54px] bg-surface border-b border-white/[0.06] flex items-center px-5 gap-1 flex-shrink-0">
+        <span className="text-sm font-semibold text-text-muted mr-4">Fine-tune</span>
+        {tabs.map(tab => (
+          <TabButton
+            key={tab.id}
+            label={tab.label}
+            active={activeTab === tab.id}
+            onClick={() => setActiveTab(tab.id)}
           />
-        </div>
+        ))}
       </div>
+
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={activeTab}
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -4 }}
+          transition={{ duration: 0.15 }}
+          className="flex flex-1 overflow-hidden"
+        >
+          {activeTab === 'profiles' && (
+            <ProfilesTab
+              selectedProfileId={selectedProfileId}
+              onSelectProfile={setSelectedProfileId}
+            />
+          )}
+          {activeTab === 'train' && (
+            <TrainTab
+              profileId={selectedProfileId}
+              loadedModel={loadedModel}
+            />
+          )}
+          {activeTab === 'models' && (
+            <ModelsPlaceholder />
+          )}
+        </motion.div>
+      </AnimatePresence>
     </div>
   )
 }
 
-
-function TabBar({ active, onSelect, selectedModelName }: {
-  active: Tab; onSelect: (t: Tab) => void; selectedModelName: string | null
+function TabButton({ label, active, onClick }: {
+  label: string; active: boolean; onClick: () => void
 }): React.ReactElement {
-  const tabs: { id: Tab; label: string }[] = [
-    { id: 'models', label: 'Models' },
-    { id: 'pairs', label: 'Pairs' },
-    { id: 'train', label: selectedModelName ? `Train · ${selectedModelName}` : 'Train' },
-  ]
-
   return (
-    <div className="flex items-center gap-0 px-5 border-b border-border bg-surface flex-shrink-0">
-      {tabs.map(t => (
-        <button
-          key={t.id}
-          onClick={() => onSelect(t.id)}
-          className={`relative px-4 py-3 text-sm cursor-pointer transition-colors truncate max-w-[200px] ${
-            active === t.id ? 'text-text-primary' : 'text-text-muted hover:text-text-secondary'
-          }`}
-        >
-          {t.label}
-          {active === t.id && (
-            <motion.div
-              layoutId="ft-tab-indicator"
-              className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent rounded-t-full"
-            />
-          )}
-        </button>
-      ))}
+    <button
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded-sm text-sm transition-colors cursor-pointer ${
+        active
+          ? 'bg-accent-dim text-accent font-medium'
+          : 'text-text-muted hover:text-text-secondary hover:bg-overlay'
+      }`}
+    >
+      {label}
+    </button>
+  )
+}
+
+function ModelsPlaceholder(): React.ReactElement {
+  return (
+    <div className="flex flex-1 items-center justify-center text-text-muted text-sm">
+      Model management coming soon
     </div>
   )
 }

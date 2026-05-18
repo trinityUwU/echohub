@@ -135,6 +135,29 @@ def init_db() -> None:
                 quantization TEXT,
                 size_gb REAL
             );
+
+            CREATE TABLE IF NOT EXISTS finetune_profiles (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                domain TEXT NOT NULL DEFAULT 'general',
+                target_pairs INTEGER NOT NULL DEFAULT 100,
+                color TEXT NOT NULL DEFAULT '#6366f1',
+                created_at TEXT NOT NULL,
+                builtin INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS finetune_evals (
+                id TEXT PRIMARY KEY,
+                job_id TEXT,
+                profile_id TEXT,
+                stage TEXT NOT NULL,
+                model_path TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                results TEXT NOT NULL,
+                score_avg REAL,
+                created_at TEXT NOT NULL
+            );
         """)
         conn.commit()
         # Migrations — add columns/tables missing from older DBs
@@ -219,7 +242,38 @@ def init_db() -> None:
                 size_gb REAL
             )""")
             conn.commit()
-        # Seed builtin profiles — add any missing ones
+        if "finetune_profiles" not in existing_tables:
+            conn.execute("""CREATE TABLE finetune_profiles (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                domain TEXT NOT NULL DEFAULT 'general',
+                target_pairs INTEGER NOT NULL DEFAULT 100,
+                color TEXT NOT NULL DEFAULT '#6366f1',
+                created_at TEXT NOT NULL, builtin INTEGER NOT NULL DEFAULT 0
+            )""")
+            conn.commit()
+        if "finetune_evals" not in existing_tables:
+            conn.execute("""CREATE TABLE finetune_evals (
+                id TEXT PRIMARY KEY, job_id TEXT, profile_id TEXT,
+                stage TEXT NOT NULL, model_path TEXT NOT NULL, model_id TEXT NOT NULL,
+                results TEXT NOT NULL, score_avg REAL, created_at TEXT NOT NULL
+            )""")
+            conn.commit()
+        # Add profile_id to training_pairs if missing
+        pair_cols = {row[1] for row in conn.execute("PRAGMA table_info(training_pairs)")}
+        if "profile_id" not in pair_cols:
+            conn.execute("ALTER TABLE training_pairs ADD COLUMN profile_id TEXT")
+            conn.commit()
+        # Seed builtin finetune profiles — add any missing ones
+        existing_profile_names = {row[0] for row in conn.execute("SELECT name FROM finetune_profiles WHERE builtin=1")}
+        for p in _BUILTIN_FT_PROFILES:
+            if p["name"] not in existing_profile_names:
+                conn.execute(
+                    "INSERT INTO finetune_profiles (id, name, description, domain, target_pairs, color, created_at, builtin) VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+                    (str(__import__('uuid').uuid4()), p["name"], p["description"], p["domain"], p["target_pairs"], p["color"], _now())
+                )
+        conn.commit()
+        # Seed builtin benchmark profiles — add any missing ones
         existing_names = {row[0] for row in conn.execute("SELECT name FROM benchmark_profiles WHERE builtin=1")}
         missing = [p for p in _BUILTIN_PROFILES if p["name"] not in existing_names]
         if missing:
@@ -482,6 +536,106 @@ def clear_benchmarks() -> None:
         conn.commit()
 
 
+# ── Finetune profiles ─────────────────────────────────────────────────────
+
+def get_finetune_profiles() -> list[dict]:
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute("SELECT * FROM finetune_profiles ORDER BY builtin DESC, created_at ASC").fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def get_finetune_profile(profile_id: str) -> dict | None:
+    with _lock:
+        conn = _get_conn()
+        row = conn.execute("SELECT * FROM finetune_profiles WHERE id = ?", (profile_id,)).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def create_finetune_profile(id: str, name: str, description: str, domain: str,
+                             target_pairs: int, color: str) -> dict:
+    now = _now()
+    with _lock:
+        conn = _get_conn()
+        conn.execute(
+            "INSERT INTO finetune_profiles (id, name, description, domain, target_pairs, color, created_at, builtin) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+            (id, name, description, domain, target_pairs, color, now)
+        )
+        conn.commit()
+    return {"id": id, "name": name, "description": description, "domain": domain,
+            "target_pairs": target_pairs, "color": color, "created_at": now, "builtin": 0}
+
+
+def delete_finetune_profile(profile_id: str) -> bool:
+    with _lock:
+        conn = _get_conn()
+        row = conn.execute("SELECT builtin FROM finetune_profiles WHERE id = ?", (profile_id,)).fetchone()
+        if not row or row["builtin"]:
+            return False
+        conn.execute("DELETE FROM finetune_profiles WHERE id = ?", (profile_id,))
+        conn.commit()
+    return True
+
+
+def get_training_pairs_for_profile(profile_id: str) -> list[dict]:
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT * FROM training_pairs WHERE profile_id = ? ORDER BY created_at DESC", (profile_id,)
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def get_profile_pair_counts() -> dict[str, int]:
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT profile_id, COUNT(*) as cnt FROM training_pairs WHERE profile_id IS NOT NULL GROUP BY profile_id"
+        ).fetchall()
+    return {row["profile_id"]: row["cnt"] for row in rows}
+
+
+# ── Finetune evals ────────────────────────────────────────────────────────
+
+def create_finetune_eval(id: str, job_id: str | None, profile_id: str | None,
+                          stage: str, model_path: str, model_id: str,
+                          results: list[dict], score_avg: float | None) -> dict:
+    import json as _json
+    now = _now()
+    with _lock:
+        conn = _get_conn()
+        conn.execute(
+            "INSERT INTO finetune_evals (id, job_id, profile_id, stage, model_path, model_id, results, score_avg, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (id, job_id, profile_id, stage, model_path, model_id, _json.dumps(results), score_avg, now)
+        )
+        conn.commit()
+    return {"id": id, "job_id": job_id, "profile_id": profile_id, "stage": stage,
+            "model_path": model_path, "model_id": model_id, "results": results,
+            "score_avg": score_avg, "created_at": now}
+
+
+def get_finetune_evals(job_id: str | None = None, profile_id: str | None = None) -> list[dict]:
+    import json as _json
+    with _lock:
+        conn = _get_conn()
+        if job_id:
+            rows = conn.execute("SELECT * FROM finetune_evals WHERE job_id = ? ORDER BY created_at ASC", (job_id,)).fetchall()
+        elif profile_id:
+            rows = conn.execute("SELECT * FROM finetune_evals WHERE profile_id = ? ORDER BY created_at DESC LIMIT 20", (profile_id,)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM finetune_evals ORDER BY created_at DESC LIMIT 50").fetchall()
+    result = []
+    for row in rows:
+        d = _row_to_dict(row)
+        try:
+            d["results"] = _json.loads(d["results"])
+        except Exception:
+            d["results"] = []
+        result.append(d)
+    return result
+
+
 # ── Training pairs ────────────────────────────────────────────────────────
 
 def create_training_pair(
@@ -492,14 +646,15 @@ def create_training_pair(
     source_conv_id: str | None,
     source_msg_id: str | None,
     model_id: str | None,
+    profile_id: str | None = None,
 ) -> dict:
     now = _now()
     with _lock:
         conn = _get_conn()
         conn.execute(
-            "INSERT INTO training_pairs (id, prompt, chosen, rejected, source_conv_id, source_msg_id, model_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (id, prompt, chosen, rejected, source_conv_id, source_msg_id, model_id, now),
+            "INSERT INTO training_pairs (id, prompt, chosen, rejected, source_conv_id, source_msg_id, model_id, profile_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (id, prompt, chosen, rejected, source_conv_id, source_msg_id, model_id, profile_id, now),
         )
         conn.commit()
     return {
@@ -510,6 +665,7 @@ def create_training_pair(
         "source_conv_id": source_conv_id,
         "source_msg_id": source_msg_id,
         "model_id": model_id,
+        "profile_id": profile_id,
         "created_at": now,
     }
 
@@ -869,6 +1025,45 @@ _BUILTIN_PROFILES = [
         ),
         "max_tokens": 200,
         "temperature": 0.0,
+    },
+]
+
+
+_BUILTIN_FT_PROFILES = [
+    {
+        "name": "Dev",
+        "description": "Code generation, debugging, architecture explanations. Target: precise, well-structured code with explanations.",
+        "domain": "dev",
+        "target_pairs": 100,
+        "color": "#3b82f6",
+    },
+    {
+        "name": "Reasoning",
+        "description": "Deep analysis, step-by-step reasoning, logic problems. Target: structured thinking with explicit reasoning chains.",
+        "domain": "reasoning",
+        "target_pairs": 80,
+        "color": "#8b5cf6",
+    },
+    {
+        "name": "General",
+        "description": "General knowledge, factual Q&A, explanations. Target: accurate, concise, well-sourced answers.",
+        "domain": "general",
+        "target_pairs": 150,
+        "color": "#6366f1",
+    },
+    {
+        "name": "Analysis",
+        "description": "Document analysis, summarization, critique. Target: comprehensive coverage of key points without hallucination.",
+        "domain": "analysis",
+        "target_pairs": 80,
+        "color": "#06b6d4",
+    },
+    {
+        "name": "Debug",
+        "description": "Error diagnosis, root cause analysis, fix suggestions. Target: systematic diagnosis with actionable fixes.",
+        "domain": "debug",
+        "target_pairs": 60,
+        "color": "#f59e0b",
     },
 ]
 

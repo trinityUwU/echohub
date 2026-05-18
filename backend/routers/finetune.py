@@ -1,6 +1,7 @@
 """Fine-tuning API router."""
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Optional
 
@@ -23,6 +24,7 @@ class TrainingPairCreate(BaseModel):
     source_conv_id: Optional[str] = None
     source_msg_id: Optional[str] = None
     model_id: Optional[str] = None
+    profile_id: Optional[str] = None
 
 
 class FinetuneJobCreate(BaseModel):
@@ -34,6 +36,40 @@ class FinetuneJobCreate(BaseModel):
     num_epochs: int = 3
     learning_rate: float = 2e-4
     pair_ids: Optional[list[str]] = None  # None = use all pairs
+    profile_id: Optional[str] = None
+
+
+class FinetuneProfileCreate(BaseModel):
+    name: str
+    description: str = ""
+    domain: str = "general"
+    target_pairs: int = 100
+    color: str = "#6366f1"
+
+
+class EvalRequest(BaseModel):
+    profile_id: str
+    job_id: Optional[str] = None
+    stage: str  # "before" | "after"
+    model_id: str
+    # model_path MUST be a GGUF file — BF16 is forbidden for eval
+    model_path: str
+
+
+class EvalResultItem(BaseModel):
+    prompt_id: str
+    prompt: str
+    response: str
+    score: Optional[float] = None
+
+
+class EvalSubmit(BaseModel):
+    profile_id: str
+    job_id: Optional[str] = None
+    stage: str
+    model_id: str
+    model_path: str
+    results: list[EvalResultItem]
 
 
 # ── Training pairs ─────────────────────────────────────────────────────────
@@ -53,6 +89,7 @@ def create_pair(body: TrainingPairCreate) -> dict:
         source_conv_id=body.source_conv_id,
         source_msg_id=body.source_msg_id,
         model_id=body.model_id,
+        profile_id=body.profile_id,
     )
 
 
@@ -62,6 +99,111 @@ def delete_pair(pair_id: str) -> dict:
     if not ok:
         raise HTTPException(404, "Pair not found")
     return {"status": "deleted"}
+
+
+# ── Profiles ──────────────────────────────────────────────────────────────
+
+@router.get("/profiles")
+def list_profiles() -> list[dict]:
+    profiles = db.get_finetune_profiles()
+    counts = db.get_profile_pair_counts()
+    for p in profiles:
+        p["pair_count"] = counts.get(p["id"], 0)
+    return profiles
+
+
+@router.post("/profiles")
+def create_profile(body: FinetuneProfileCreate) -> dict:
+    return db.create_finetune_profile(
+        id=str(uuid.uuid4()),
+        name=body.name, description=body.description,
+        domain=body.domain, target_pairs=body.target_pairs, color=body.color,
+    )
+
+
+@router.delete("/profiles/{profile_id}")
+def delete_profile(profile_id: str) -> dict:
+    ok = db.delete_finetune_profile(profile_id)
+    if not ok:
+        raise HTTPException(404, "Profile not found or builtin")
+    return {"status": "deleted"}
+
+
+@router.get("/profiles/{profile_id}/pairs")
+def list_profile_pairs(profile_id: str) -> list[dict]:
+    return db.get_training_pairs_for_profile(profile_id)
+
+
+# ── Evals ─────────────────────────────────────────────────────────────────
+
+@router.post("/evals")
+def create_eval(body: EvalRequest) -> dict:
+    if not body.model_path.endswith(".gguf"):
+        raise HTTPException(400, "Eval must use a GGUF model. BF16 is not allowed for evaluation.")
+
+    profile = db.get_finetune_profile(body.profile_id)
+    if not profile:
+        raise HTTPException(404, "Profile not found")
+
+    pairs = db.get_training_pairs_for_profile(body.profile_id)
+    if not pairs:
+        raise HTTPException(400, "No pairs in this profile")
+
+    eval_pairs = pairs[:20]
+
+    return {
+        "eval_id": str(uuid.uuid4()),
+        "profile_id": body.profile_id,
+        "stage": body.stage,
+        "model_id": body.model_id,
+        "prompt_count": len(eval_pairs),
+        "prompts": [{"id": p["id"], "prompt": p["prompt"]} for p in eval_pairs],
+        "status": "ready",
+        "note": "Run these prompts against the loaded model, then POST results to /finetune/evals/submit",
+    }
+
+
+@router.post("/evals/submit")
+def submit_eval(body: EvalSubmit) -> dict:
+    if not body.model_path.endswith(".gguf"):
+        raise HTTPException(400, "Eval must use a GGUF model.")
+
+    from backend.services.quality_scorer import score_general
+    results_with_scores = []
+    for r in body.results:
+        auto_score = r.score
+        if auto_score is None:
+            try:
+                scored = score_general(r.prompt, r.response)
+                auto_score = scored.get("score") if isinstance(scored, dict) else float(scored)
+            except Exception:
+                auto_score = None
+        results_with_scores.append({
+            "prompt_id": r.prompt_id,
+            "prompt": r.prompt,
+            "response": r.response,
+            "score": auto_score,
+        })
+
+    valid_scores = [r["score"] for r in results_with_scores if r["score"] is not None]
+    score_avg = round(sum(valid_scores) / len(valid_scores), 2) if valid_scores else None
+
+    eval_record = db.create_finetune_eval(
+        id=str(uuid.uuid4()),
+        job_id=body.job_id,
+        profile_id=body.profile_id,
+        stage=body.stage,
+        model_path=body.model_path,
+        model_id=body.model_id,
+        results=results_with_scores,
+        score_avg=score_avg,
+    )
+    return eval_record
+
+
+@router.get("/evals")
+def list_evals(job_id: Optional[str] = None, profile_id: Optional[str] = None) -> list[dict]:
+    return db.get_finetune_evals(job_id=job_id, profile_id=profile_id)
 
 
 # ── Status ─────────────────────────────────────────────────────────────────
@@ -130,7 +272,12 @@ async def run_job_stream(job_id: str) -> StreamingResponse:
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     cfg = job["config"]
-    all_pairs = db.get_training_pairs()
+
+    profile_id = cfg.get("profile_id")
+    if profile_id:
+        all_pairs = db.get_training_pairs_for_profile(profile_id)
+    else:
+        all_pairs = db.get_training_pairs()
 
     pair_ids = cfg.get("pair_ids")
     pairs = [p for p in all_pairs if p["id"] in set(pair_ids)] if pair_ids else all_pairs
