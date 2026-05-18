@@ -152,10 +152,9 @@ export function FTLoadModal({
                   onChange={v => update('lora_rank', v as FtTrainingConfig['lora_rank'])} />
               </ParamRow>
 
-              <ParamRow label="Alpha">
-                <input type="number" min={1} max={256} value={config.lora_alpha}
-                  onChange={e => update('lora_alpha', Number(e.target.value))}
-                  className="w-20 bg-elevated border border-white/[0.08] focus:border-accent/40 rounded px-2 py-1 text-xs text-text-primary outline-none transition-colors" />
+              <ParamRow label={`Alpha · ${config.lora_alpha}`}>
+                <ToggleGroup options={RANK_OPTIONS as unknown as number[]} value={config.lora_alpha}
+                  onChange={v => update('lora_alpha', v)} />
               </ParamRow>
 
               <ParamRow label="Epochs">
@@ -183,10 +182,18 @@ export function FTLoadModal({
               </ParamRow>
 
               <ParamRow label="Optimizer">
-                <select value={config.optim} onChange={e => update('optim', e.target.value)}
-                  className="bg-elevated border border-white/[0.08] focus:border-accent/40 rounded px-2 py-1 text-xs text-text-primary outline-none transition-colors">
-                  {OPTIM_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                </select>
+                <div className="flex gap-1 flex-wrap">
+                  {OPTIM_OPTIONS.map(o => (
+                    <button key={o} onClick={() => update('optim', o)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono transition-colors cursor-pointer border ${
+                        o === config.optim
+                          ? 'bg-accent/20 border-accent/30 text-accent'
+                          : 'bg-white/[0.03] border-white/[0.06] text-text-muted hover:border-white/[0.12] hover:text-text-secondary'
+                      }`}>
+                      {o}
+                    </button>
+                  ))}
+                </div>
               </ParamRow>
             </div>
 
