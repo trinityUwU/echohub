@@ -384,9 +384,11 @@ def search_models(
         # Separate quant filters from capability filters
         _QUANT_TAGS = {"awq", "gptq", "gguf", "fp8", "exl2"}
         _CAP_FILTERS = {"vision", "thinking"}
+        _FINETUNE_FILTER = "safetensors"
 
         active_filters = [f.lower() for f in (filters or ["awq", "gptq", "gguf"])]
-        quant_filters = [f for f in active_filters if f in _QUANT_TAGS] or ["awq", "gptq", "gguf"]
+        finetune_mode = _FINETUNE_FILTER in active_filters
+        quant_filters = [f for f in active_filters if f in _QUANT_TAGS] or ([] if finetune_mode else ["awq", "gptq", "gguf"])
         cap_filters = {f for f in active_filters if f in _CAP_FILTERS}
 
         hf_sort = sort if sort in ("downloads", "likes", "created_at") else "downloads"
@@ -394,6 +396,62 @@ def search_models(
         fetch_limit = (page + 1) * page_size + 20  # extra buffer for dedup
 
         results: list[ModelInfo] = []
+
+        # Finetuneable mode — search safetensors models (no quant filter), exclude quantized
+        if finetune_mode:
+            list_kwargs: dict = dict(
+                search=query,
+                filter="safetensors",
+                limit=fetch_limit,
+                sort=hf_sort,
+                full=True,
+                token=_get_hf_token(),
+            )
+            try:
+                import inspect as _inspect
+                if "direction" in _inspect.signature(_api.list_models).parameters:
+                    list_kwargs["direction"] = -1 if direction == "desc" else 1
+            except Exception:
+                pass
+            _QUANTIZED = {"awq", "gptq", "gguf", "fp8", "exl2", "int4", "int8"}
+            for m in _api.list_models(**list_kwargs):
+                tags = list(m.tags or [])
+                tags_lower = [t.lower() for t in tags]
+                name_lower = m.modelId.lower()
+                # Skip any quantized variant
+                if any(q in tags_lower or q in name_lower for q in _QUANTIZED):
+                    continue
+                quant_type = _detect_quantization(tags, m.modelId)
+                # Only keep float16, bfloat16, or undetected (pure safetensors base)
+                if quant_type not in (None, "fp16", "bf16", "none"):
+                    continue
+                caps = _detect_capabilities(tags, m.modelId)
+                if "vision" in cap_filters and not caps.vision:
+                    continue
+                if "thinking" in cap_filters and not caps.thinking:
+                    continue
+                params_b = _extract_params_billion(m.modelId, tags)
+                vram_est = _estimate_vram_gb(params_b, "bf16") if params_b else None
+                ctx = _extract_context_window(m.modelId, tags)
+                results.append(ModelInfo(
+                    id=m.modelId,
+                    name=m.modelId.split("/")[-1],
+                    quantization="bf16",
+                    capabilities=caps,
+                    params_billion=params_b,
+                    vram_estimate_gb=vram_est,
+                    max_context_window=ctx,
+                    downloads=m.downloads,
+                    likes=m.likes,
+                    last_modified=str(m.lastModified)[:10] if m.lastModified else None,
+                    pipeline_tag=m.pipeline_tag,
+                ))
+            # Dedup + paginate
+            seen: set[str] = set()
+            unique = [r for r in results if not (r.id in seen or seen.add(r.id))]  # type: ignore
+            start = page * page_size
+            return unique[start:start + page_size]
+
         for quant in quant_filters:
             list_kwargs: dict = dict(
                 search=query,

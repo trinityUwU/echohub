@@ -629,11 +629,12 @@ const SORT_OPTIONS = [
 ]
 
 const FORMAT_OPTIONS = [
-  { value: 'gguf',  label: 'GGUF',  color: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
-  { value: 'awq',   label: 'AWQ',   color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
-  { value: 'gptq',  label: 'GPTQ',  color: 'bg-sky-500/20 text-sky-300 border-sky-500/30' },
-  { value: 'fp8',   label: 'FP8',   color: 'bg-violet-500/20 text-violet-300 border-violet-500/30' },
-  { value: 'exl2',  label: 'EXL2',  color: 'bg-pink-500/20 text-pink-300 border-pink-500/30' },
+  { value: 'gguf',         label: 'GGUF',         color: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
+  { value: 'awq',          label: 'AWQ',           color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+  { value: 'gptq',         label: 'GPTQ',          color: 'bg-sky-500/20 text-sky-300 border-sky-500/30' },
+  { value: 'fp8',          label: 'FP8',           color: 'bg-violet-500/20 text-violet-300 border-violet-500/30' },
+  { value: 'exl2',         label: 'EXL2',          color: 'bg-pink-500/20 text-pink-300 border-pink-500/30' },
+  { value: 'safetensors',  label: 'Finetuneable',  color: 'bg-orange-500/20 text-orange-300 border-orange-500/30' },
 ]
 
 const DEFAULT_FORMATS = ['gguf', 'awq', 'gptq']
