@@ -295,9 +295,15 @@ def cancel_job(job_id: str) -> dict:
         raise HTTPException(404, "Job not found")
     if job["status"] not in ("pending", "running"):
         return {"cancelled": False, "reason": "already_terminal"}
-    # Kill process if running, then always mark cancelled in DB
+    # Kill process + set cancelled flag (checked by eval pipeline between steps)
     ft.cancel_finetune(job_id)
     db.update_finetune_job(job_id, status="cancelled")
+    # Unload any model that may have been loaded by eval pipeline
+    try:
+        from backend.services.engine_router import unload_model as _unload
+        _unload()
+    except Exception:
+        pass
     return {"cancelled": True}
 
 
@@ -376,6 +382,7 @@ async def run_job_stream(job_id: str) -> StreamingResponse:
 
 async def _full_pipeline(job_id: str, job: dict, cfg: dict, pairs: list[dict]):
     """Orchestrates: eval_before → fine-tune → eval_after (with GGUF export)."""
+    ft.clear_cancelled(job_id)  # reset any stale cancel flag from a previous run
     profile_id: Optional[str] = cfg.get("profile_id")
     eval_before: bool = cfg.get("eval_before", False)
     eval_after: bool = cfg.get("eval_after", False)

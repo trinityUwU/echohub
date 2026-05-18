@@ -15,6 +15,7 @@ from backend.services.user_data import get_user_data_dir
 
 _UNSLOTH_VENV = Path.home() / ".local" / "share" / "echohub" / "unsloth-env"
 _active_jobs: dict[str, asyncio.subprocess.Process] = {}
+_cancelled_jobs: set[str] = set()  # jobs cancelled mid-pipeline
 
 
 def get_unsloth_python() -> Path:
@@ -340,11 +341,19 @@ async def run_finetune_sse(
 
 
 def cancel_finetune(job_id: str) -> bool:
+    _cancelled_jobs.add(job_id)
     proc = _active_jobs.get(job_id)
-    if proc is None:
-        return False
-    proc.terminate()
+    if proc is not None:
+        proc.terminate()
     return True
+
+
+def is_cancelled(job_id: str) -> bool:
+    return job_id in _cancelled_jobs
+
+
+def clear_cancelled(job_id: str) -> None:
+    _cancelled_jobs.discard(job_id)
 
 
 async def export_gguf_sse(
@@ -428,6 +437,9 @@ async def _eval_pipeline_sse(
     def _sse(data: dict) -> str:
         return f"data: {json.dumps(data)}\n\n"
 
+    def _check_cancelled() -> bool:
+        return is_cancelled(job_id)
+
     # ── Step 1: resolve GGUF path ──────────────────────────────────────────
     is_local_path = gguf_file.startswith("/")
 
@@ -449,6 +461,10 @@ async def _eval_pipeline_sse(
         except Exception as e:
             yield _sse({"type": "error", "text": f"[Eval {stage}] Download failed: {e}"})
             return
+
+    if _check_cancelled():
+        yield _sse({"type": "error", "text": "Job cancelled"})
+        return
 
     # ── Step 2: load model via llama_service directly ──────────────────────
     yield _sse({"type": "step", "label": f"[Eval {stage}] Loading model…"})
@@ -474,6 +490,8 @@ async def _eval_pipeline_sse(
         )
         # Poll until THIS model is loaded (check model_id match)
         for _ in range(240):
+            if _check_cancelled():
+                raise RuntimeError("Job cancelled")
             state = llama_service.get_load_state()
             if state.get("loaded_model_id") == gguf_model_id:
                 break
@@ -482,6 +500,9 @@ async def _eval_pipeline_sse(
             await asyncio.sleep(0.5)
         else:
             raise RuntimeError("Model load timed out")
+        if _check_cancelled():
+            yield _sse({"type": "error", "text": "Job cancelled"})
+            return
         yield _sse({"type": "log", "text": f"[Eval {stage}] Model loaded"})
     except Exception as e:
         yield _sse({"type": "error", "text": f"[Eval {stage}] Load failed: {e}"})
@@ -500,6 +521,9 @@ async def _eval_pipeline_sse(
     # ── Step 4: run prompts ────────────────────────────────────────────────
     results: list[dict] = []
     for i, p in enumerate(eval_prompts):
+        if _check_cancelled():
+            yield _sse({"type": "error", "text": "Job cancelled"})
+            return
         try:
             response_text = ""
             async for chunk in llama_service.generate(
