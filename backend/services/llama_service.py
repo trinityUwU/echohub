@@ -328,6 +328,7 @@ async def generate(
                             })
                             asyncio.run_coroutine_threadsafe(queue.put(f"data: {usage_payload}"), loop)
                     if finish:
+                        _log(f"[llama] finish_reason={finish} | prompt_tokens={prompt_tokens} | completion_tokens={completion_tokens}")
                         break
             except Exception as e:
                 if not _eject_requested:
