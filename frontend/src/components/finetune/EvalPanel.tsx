@@ -15,7 +15,7 @@ export function EvalPanel({ profileId, jobId, loadedModel, onEvalDone }: EvalPan
   const [running, setRunning] = useState<'before' | 'after' | null>(null)
   const [runningProgress, setRunningProgress] = useState(0)
 
-  const isGguf = checkIsGguf(loadedModel)
+  const isBf16Warning = checkIsBf16(loadedModel)
 
   const loadEvals = useCallback(async (): Promise<void> => {
     if (!profileId) return
@@ -69,9 +69,12 @@ export function EvalPanel({ profileId, jobId, loadedModel, onEvalDone }: EvalPan
     <div className="border-t border-white/[0.06] p-4">
       <div className="flex items-center gap-2 mb-4">
         <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">Eval</span>
-        {!isGguf && loadedModel && (
+        {!loadedModel && (
+          <span className="text-xs text-text-muted/60">Load a model in Chat to run eval</span>
+        )}
+        {loadedModel && isBf16Warning && (
           <span className="text-xs text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded">
-            Load a GGUF model to run eval. BF16 will damage your GPU.
+            BF16 model detected — use a GGUF for eval to avoid VRAM issues
           </span>
         )}
       </div>
@@ -80,7 +83,7 @@ export function EvalPanel({ profileId, jobId, loadedModel, onEvalDone }: EvalPan
         <EvalStageCard
           label="Before"
           eval={beforeEval}
-          canRun={!!loadedModel && isGguf && running === null}
+          canRun={!!loadedModel && !isBf16Warning && running === null}
           running={running === 'before'}
           progress={running === 'before' ? runningProgress : 0}
           onRun={() => runEval('before')}
@@ -89,7 +92,7 @@ export function EvalPanel({ profileId, jobId, loadedModel, onEvalDone }: EvalPan
         <EvalStageCard
           label="After"
           eval={afterEval}
-          canRun={!!loadedModel && isGguf && running === null && jobId !== null}
+          canRun={!!loadedModel && !isBf16Warning && running === null && jobId !== null}
           running={running === 'after'}
           progress={running === 'after' ? runningProgress : 0}
           onRun={() => runEval('after')}
@@ -222,9 +225,11 @@ function PromptComparisonRow({ before, after }: {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function checkIsGguf(model: { id: string; path?: string } | null): boolean {
+function checkIsBf16(model: { id: string; path?: string } | null): boolean {
   if (!model) return false
-  return model.id.toLowerCase().includes('gguf') || (model.path?.endsWith('.gguf') ?? false)
+  // Only flag if explicitly bf16/safetensors in the name — GGUF loaded via llama.cpp has no extension
+  const id = model.id.toLowerCase()
+  return id.includes('bf16') || id.includes('safetensors') || id.includes('fp16')
 }
 
 async function runPrompts(

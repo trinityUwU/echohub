@@ -60,8 +60,10 @@ export function TrainTab({ profileId, loadedModel, ftModel }: TrainTabProps): Re
     setSelectedJobId(jobId)
   }, [loadJobs])
 
-  const evalLoadedModel = activeModel
-    ? { id: activeModel.id, path: undefined }
+  // For eval: use the chat model (actually loaded in llama.cpp), not the FT model
+  // The FT model (activeModel) is safetensors — eval must run on whatever is loaded in chat
+  const evalLoadedModel = loadedModel
+    ? { id: loadedModel.id, path: undefined }
     : null
 
   return (

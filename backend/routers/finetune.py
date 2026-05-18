@@ -144,9 +144,6 @@ def list_profile_pairs(profile_id: str) -> list[dict]:
 
 @router.post("/evals")
 def create_eval(body: EvalRequest) -> dict:
-    if not body.model_path.endswith(".gguf"):
-        raise HTTPException(400, "Eval must use a GGUF model. BF16 is not allowed for evaluation.")
-
     profile = db.get_finetune_profile(body.profile_id)
     if not profile:
         raise HTTPException(404, "Profile not found")
@@ -171,9 +168,6 @@ def create_eval(body: EvalRequest) -> dict:
 
 @router.post("/evals/submit")
 def submit_eval(body: EvalSubmit) -> dict:
-    if not body.model_path.endswith(".gguf"):
-        raise HTTPException(400, "Eval must use a GGUF model.")
-
     from backend.services.quality_scorer import score_general
     results_with_scores = []
     for r in body.results:
