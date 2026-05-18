@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { FinetuneJob, FinetuneProfile, FtStatus, ModelInfo } from '@/types'
-import { listFinetuneJobs, createFinetuneJob, listFinetuneProfiles, getFtStatus, ftInstallStreamUrl } from '@/api/client'
+import { listFinetuneJobs, createFinetuneJob, listFinetuneProfiles, getFtStatus, ftInstallStreamUrl, cancelFinetuneJob, ftJobStreamUrl } from '@/api/client'
 import { EvalPanel } from './EvalPanel'
 
 const MAX_LOG_LINES = 50
@@ -147,6 +147,7 @@ export function TrainTab({ profileId, loadedModel, ftModel }: TrainTabProps): Re
                 job={job}
                 selected={job.id === selectedJobId}
                 onClick={() => setSelectedJobId(job.id === selectedJobId ? null : job.id)}
+                onRefresh={loadJobs}
               />
             ))}
           </div>
@@ -218,46 +219,80 @@ function ProfileSelector({ profiles, value, onChange }: ProfileSelectorProps): R
 
 // ── JobRow ─────────────────────────────────────────────────────────────────
 
+const STATUS_COLOR: Record<FinetuneJob['status'], string> = {
+  pending: 'text-text-muted',
+  running: 'text-accent',
+  done: 'text-green-400',
+  error: 'text-red-400',
+  cancelled: 'text-text-muted/50',
+}
+
 interface JobRowProps {
   job: FinetuneJob
   selected: boolean
   onClick: () => void
+  onRefresh: () => void
 }
 
-function JobRow({ job, selected, onClick }: JobRowProps): React.ReactElement {
-  const statusColor: Record<FinetuneJob['status'], string> = {
-    pending: 'text-text-muted',
-    running: 'text-accent',
-    done: 'text-green-400',
-    error: 'text-red-400',
+function JobRow({ job, selected, onClick, onRefresh }: JobRowProps): React.ReactElement {
+  const [logs, setLogs] = useState<string[]>([])
+  const [cancelling, setCancelling] = useState(false)
+  const logRef = useRef<HTMLDivElement>(null)
+  const isActive = job.status === 'pending' || job.status === 'running'
+
+  useEffect(() => {
+    if (!isActive) return
+    let es: EventSource | null = null
+    ftJobStreamUrl(job.id).then(url => {
+      es = new EventSource(url)
+      es.onmessage = (e) => {
+        try {
+          const d = JSON.parse(e.data) as { type: string; text?: string }
+          if (d.type === 'done' || d.type === 'error') { es?.close(); setTimeout(onRefresh, 300) }
+          if (d.type === 'log' && d.text) setLogs(l => [...l.slice(-MAX_LOG_LINES + 1), d.text!])
+          if (d.type === 'start') setLogs(l => [...l, 'Training started…'])
+          if (d.type === 'error' && d.text) setLogs(l => [...l, `ERROR: ${d.text}`])
+        } catch { /* skip */ }
+      }
+      es.onerror = () => { es?.close(); setTimeout(onRefresh, 500) }
+    }).catch(() => {})
+    return () => { es?.close() }
+  }, [job.id, job.status, isActive, onRefresh])
+
+  useEffect(() => {
+    logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
+  }, [logs])
+
+  const handleCancel = async (e: React.MouseEvent): Promise<void> => {
+    e.stopPropagation()
+    setCancelling(true)
+    try { await cancelFinetuneJob(job.id); onRefresh() } catch { /* ignore */ } finally { setCancelling(false) }
   }
 
   return (
-    <div
-      onClick={onClick}
-      className={`px-3 py-2.5 rounded-md border cursor-pointer transition-colors ${
-        selected
-          ? 'bg-white/[0.06] border-white/[0.1]'
-          : 'bg-surface border-white/[0.04] hover:border-white/[0.08]'
-      }`}
-    >
-      <div className="flex items-center gap-2">
-        <span className={`text-xs font-medium ${statusColor[job.status]}`}>{job.status}</span>
-        <span className="text-xs text-text-muted flex-1 truncate">{job.model_id}</span>
-        <span className="text-[10px] text-text-muted">
-          {new Date(job.created_at).toLocaleDateString()}
-        </span>
+    <div onClick={onClick} className={`rounded-md border transition-colors cursor-pointer ${
+      selected ? 'bg-white/[0.06] border-white/[0.1]' : 'bg-surface border-white/[0.04] hover:border-white/[0.08]'
+    }`}>
+      <div className="px-3 py-2.5 flex items-center gap-2">
+        <span className={`text-xs font-medium flex-shrink-0 ${STATUS_COLOR[job.status] ?? 'text-text-muted'}`}>{job.status}</span>
+        {isActive && <span className="w-3 h-3 border border-accent/30 border-t-accent rounded-full animate-spin flex-shrink-0" />}
+        <span className="text-xs text-text-muted flex-1 truncate">{job.model_id.split('/').pop()}</span>
+        <span className="text-[10px] text-text-muted flex-shrink-0">{new Date(job.created_at).toLocaleDateString()}</span>
+        {isActive && (
+          <button onClick={handleCancel} disabled={cancelling}
+            className="text-[10px] px-2 py-0.5 border border-white/[0.08] rounded-sm text-text-muted hover:text-red-400 hover:border-red-400/30 cursor-pointer transition-colors flex-shrink-0 disabled:opacity-40">
+            {cancelling ? '…' : 'Cancel'}
+          </button>
+        )}
       </div>
-      {job.status === 'running' && job.progress !== null && (
-        <div className="h-0.5 bg-white/[0.06] rounded-full mt-2 overflow-hidden">
-          <div
-            className="h-full bg-accent rounded-full transition-all duration-500"
-            style={{ width: `${job.progress * 100}%` }}
-          />
+      {job.error && <p className="px-3 pb-2 text-xs text-red-400">{job.error}</p>}
+      {(logs.length > 0 || isActive) && (
+        <div ref={logRef} className="mx-3 mb-3 font-mono text-xs bg-overlay rounded-sm p-2.5 max-h-40 overflow-y-auto leading-relaxed text-text-muted">
+          {logs.length === 0
+            ? <span className="animate-pulse">Connecting to training process…</span>
+            : logs.map((l, i) => <div key={i}>{l}</div>)
+          }
         </div>
-      )}
-      {job.error && (
-        <p className="text-xs text-red-400 mt-1">{job.error}</p>
       )}
     </div>
   )

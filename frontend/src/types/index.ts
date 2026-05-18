@@ -206,7 +206,7 @@ export interface TrainingPair {
 export interface FinetuneJob {
   id: string
   model_id: string
-  status: 'pending' | 'running' | 'done' | 'error'
+  status: 'pending' | 'running' | 'done' | 'error' | 'cancelled'
   progress: number | null
   error: string | null
   created_at: string
