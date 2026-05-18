@@ -85,6 +85,7 @@ export function useChat(
   const [stats, setStats] = useState<GenerationStats | null>(null)
   const [lastCompact, setLastCompact] = useState<CompactEvent | null>(null)
   const [liveTokens, setLiveTokens] = useState<{ prompt: number; completion: number } | null>(null)
+  const [oomError, setOomError] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
 
   const updateMessages = useCallback((next: ChatMessage[]) => {
@@ -133,6 +134,7 @@ export function useChat(
     if (!modelLoaded) return
     setError(null)
     setStats(null)
+    setOomError(false)
 
     const content = buildUserContent(text, attachments)
     const userMsgId = crypto.randomUUID()
@@ -233,6 +235,7 @@ export function useChat(
       modelId,
       controller.signal,
       (prompt, completion) => setLiveTokens({ prompt, completion }),
+      () => { setOomError(true); setStreaming(false) },
     )
     abortRef.current = null
   }, [messages, params, updateMessages, onMessagesChange, maxContextTokens, compact, modelId, convId])
@@ -318,6 +321,7 @@ export function useChat(
       modelId,
       controller.signal,
       (prompt, completion) => setLiveTokens({ prompt, completion }),
+      () => { setOomError(true); setStreaming(false) },
     )
     abortRef.current = null
   }, [params, onMessagesChange, modelId, convId])
@@ -334,6 +338,7 @@ export function useChat(
     streaming,
     compacting,
     error,
+    oomError,
     stats,
     lastCompact,
     usedTokens,

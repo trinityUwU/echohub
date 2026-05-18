@@ -332,7 +332,15 @@ async def generate(
                         break
             except Exception as e:
                 if not _eject_requested:
-                    asyncio.run_coroutine_threadsafe(queue.put(f"data: {{\"error\": \"{e}\"}}"), loop)
+                    err_str = str(e).lower()
+                    is_oom = any(k in err_str for k in (
+                        "out of memory", "cuda error", "cuda out", "ggml_cuda",
+                        "failed to allocate", "memory allocation", "killed",
+                    ))
+                    err_type = "oom" if is_oom else "error"
+                    _log(f"[llama] {'OOM detected' if is_oom else 'Error'} during generation: {e}")
+                    payload = json.dumps({"error": str(e), "error_type": err_type})
+                    asyncio.run_coroutine_threadsafe(queue.put(f"data: {payload}"), loop)
             finally:
                 asyncio.run_coroutine_threadsafe(queue.put(None), loop)  # sentinel
 

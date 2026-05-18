@@ -119,6 +119,7 @@ export async function chatStream(
   modelId?: string,
   signal?: AbortSignal,
   onTokensUpdate?: (prompt: number, completion: number) => void,
+  onOom?: () => void,
 ): Promise<void> {
   const stopList = params.stop.trim()
     ? params.stop.split(',').map(s => s.trim()).filter(Boolean)
@@ -178,6 +179,11 @@ export async function chatStream(
             backendEngine = json.engine ?? null
             backendModelName = json.model_name ?? null
             continue
+          }
+          if (json?.error) {
+            if (json.error_type === 'oom') onOom?.()
+            else onError(new Error(json.error))
+            return
           }
           if (json?.usage) {
             completionTokens = json.usage.completion_tokens ?? completionTokens
