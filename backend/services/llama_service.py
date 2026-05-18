@@ -293,14 +293,14 @@ async def generate(
     )
 
     if stream:
-        # Compute real prompt token count via tokenizer before streaming
+        # Compute real prompt token count using the model's chat template
+        # llama-cpp-python applies_apply_chat_template internally, so we probe with max_tokens=1
         try:
-            prompt_text = " ".join(
-                m.get("content", "") if isinstance(m.get("content"), str)
-                else " ".join(p.get("text", "") for p in m.get("content", []) if isinstance(p, dict))
-                for m in messages
+            probe = _llm.create_chat_completion(
+                messages=messages, max_tokens=1, stream=False,
+                temperature=0.0,
             )
-            prompt_tokens = len(_llm.tokenize(prompt_text.encode("utf-8"), add_bos=False))
+            prompt_tokens = probe.get("usage", {}).get("prompt_tokens", 0)
         except Exception:
             prompt_tokens = 0
 
