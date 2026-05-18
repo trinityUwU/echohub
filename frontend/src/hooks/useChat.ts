@@ -82,6 +82,7 @@ export function useChat(
   const [error, setError] = useState<string | null>(null)
   const [stats, setStats] = useState<GenerationStats | null>(null)
   const [lastCompact, setLastCompact] = useState<CompactEvent | null>(null)
+  const [liveTokens, setLiveTokens] = useState<{ prompt: number; completion: number } | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   const updateMessages = useCallback((next: ChatMessage[]) => {
@@ -130,6 +131,7 @@ export function useChat(
     if (!modelLoaded) return
     setError(null)
     setStats(null)
+    setLiveTokens(null)
 
     const content = buildUserContent(text, attachments)
     const userMsgId = crypto.randomUUID()
@@ -229,6 +231,7 @@ export function useChat(
       },
       modelId,
       controller.signal,
+      (prompt, completion) => setLiveTokens({ prompt, completion }),
     )
     abortRef.current = null
   }, [messages, params, updateMessages, onMessagesChange, maxContextTokens, compact, modelId, convId])
@@ -237,6 +240,7 @@ export function useChat(
     setMessages(msgs)
     setError(null)
     setStats(null)
+    setLiveTokens(null)
   }, [])
 
   const clear = useCallback(() => {
@@ -312,9 +316,15 @@ export function useChat(
       (err) => { setError(err.message); setStreaming(false) },
       modelId,
       controller.signal,
+      (prompt, completion) => setLiveTokens({ prompt, completion }),
     )
     abortRef.current = null
   }, [params, onMessagesChange, modelId, convId])
+
+  const isTokensExact = liveTokens !== null
+  const usedTokens = isTokensExact
+    ? liveTokens!.prompt + liveTokens!.completion
+    : estimateTokens(messages)
 
   return {
     messages,
@@ -324,6 +334,8 @@ export function useChat(
     error,
     stats,
     lastCompact,
+    usedTokens,
+    isTokensExact,
     send,
     sendFromHistory,
     stop,

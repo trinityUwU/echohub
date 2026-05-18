@@ -57,7 +57,7 @@ export function ChatPage({
   const activeConv = conversations.find(cv => cv.id === activeId)
   const activeModelName = loadedModel?.name ?? activeConv?.model_id?.split('/').pop() ?? null
 
-  const { messages, streaming, stats, send, sendFromHistory, stop, setMessages } = useChat(
+  const { messages, streaming, stats, send, sendFromHistory, stop, setMessages, usedTokens, isTokensExact } = useChat(
     params,
     activeMessages,
     setActiveMessages,
@@ -165,6 +165,9 @@ export function ChatPage({
           visionEnabled={!!loadedModel?.capabilities?.vision}
           streaming={streaming}
           params={params}
+          usedTokens={usedTokens}
+          maxTokens={loadedModel?.max_context_window ?? null}
+          tokensExact={isTokensExact}
           onSend={(text, attachments) => send(text, !!loadedModel, attachments)}
           onStop={stop}
         />

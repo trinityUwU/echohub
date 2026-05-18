@@ -293,13 +293,24 @@ async def generate(
     )
 
     if stream:
+        # Compute real prompt token count via tokenizer before streaming
+        try:
+            prompt_text = " ".join(
+                m.get("content", "") if isinstance(m.get("content"), str)
+                else " ".join(p.get("text", "") for p in m.get("content", []) if isinstance(p, dict))
+                for m in messages
+            )
+            prompt_tokens = len(_llm.tokenize(prompt_text.encode("utf-8"), add_bos=False))
+        except Exception:
+            prompt_tokens = 0
+
         # Streaming via thread + queue
         queue: asyncio.Queue = asyncio.Queue()
         completion_tokens = 0
-        prompt_tokens = 0
+        USAGE_INTERVAL = 10  # envoyer un chunk usage tous les N tokens générés
 
         def _stream_sync() -> None:
-            nonlocal completion_tokens, prompt_tokens
+            nonlocal completion_tokens
             try:
                 for chunk in _llm.create_chat_completion(stream=True, **common_kwargs):
                     if _eject_requested:
@@ -313,6 +324,12 @@ async def generate(
                             "choices": [{"delta": {"content": delta}, "finish_reason": None}]
                         })
                         asyncio.run_coroutine_threadsafe(queue.put(f"data: {payload}"), loop)
+                        # Usage intermédiaire toutes les USAGE_INTERVAL tokens
+                        if completion_tokens % USAGE_INTERVAL == 0:
+                            usage_payload = json.dumps({
+                                "usage": {"completion_tokens": completion_tokens, "prompt_tokens": prompt_tokens}
+                            })
+                            asyncio.run_coroutine_threadsafe(queue.put(f"data: {usage_payload}"), loop)
                     if finish:
                         break
             except Exception as e:
@@ -328,7 +345,7 @@ async def generate(
             if item is None:
                 # Envoyer le chunk usage final (compatible avec stream_options vLLM)
                 usage_payload = json.dumps({
-                    "usage": {"completion_tokens": completion_tokens, "prompt_tokens": 0}
+                    "usage": {"completion_tokens": completion_tokens, "prompt_tokens": prompt_tokens}
                 })
                 yield f"data: {usage_payload}"
                 break

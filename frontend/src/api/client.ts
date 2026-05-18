@@ -115,6 +115,7 @@ export async function chatStream(
   onError: (err: Error) => void,
   modelId?: string,
   signal?: AbortSignal,
+  onTokensUpdate?: (prompt: number, completion: number) => void,
 ): Promise<void> {
   const stopList = params.stop.trim()
     ? params.stop.split(',').map(s => s.trim()).filter(Boolean)
@@ -177,7 +178,8 @@ export async function chatStream(
           }
           if (json?.usage) {
             completionTokens = json.usage.completion_tokens ?? completionTokens
-            promptTokens = json.usage.prompt_tokens ?? promptTokens
+            if (json.usage.prompt_tokens) promptTokens = json.usage.prompt_tokens
+            onTokensUpdate?.(promptTokens, completionTokens)
           }
           const delta = json?.choices?.[0]?.delta?.content
           if (delta) {

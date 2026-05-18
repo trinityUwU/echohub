@@ -6,11 +6,14 @@ interface InputBarProps {
   visionEnabled: boolean
   streaming: boolean
   params: ChatParams
+  usedTokens?: number
+  maxTokens?: number | null
+  tokensExact?: boolean
   onSend: (text: string, attachments: Attachment[]) => void
   onStop: () => void
 }
 
-export function InputBar({ modelLoaded, visionEnabled, streaming, params, onSend, onStop }: InputBarProps): React.ReactElement {
+export function InputBar({ modelLoaded, visionEnabled, streaming, params, usedTokens, maxTokens, tokensExact, onSend, onStop }: InputBarProps): React.ReactElement {
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const textRef = useRef<HTMLTextAreaElement>(null)
@@ -132,6 +135,11 @@ export function InputBar({ modelLoaded, visionEnabled, streaming, params, onSend
           : <SendBtn onClick={submit} disabled={!canSend} />
         }
       </div>
+      {/* Context usage bar */}
+      {maxTokens != null && usedTokens != null && (
+        <ContextBar used={usedTokens} max={maxTokens} exact={!!tokensExact} />
+      )}
+
       <div className="flex justify-between items-center mt-1.5 px-0.5">
         <span className="text-xs text-text-muted">Enter to send · Shift+Enter for newline</span>
         <div className="flex gap-2">
@@ -168,5 +176,26 @@ function StopBtn({ onClick }: { onClick: () => void }): React.ReactElement {
 function ParamChip({ label }: { label: string }): React.ReactElement {
   return (
     <span className="text-xs text-text-muted bg-overlay rounded px-1.5 py-0.5">{label}</span>
+  )
+}
+
+function ContextBar({ used, max, exact }: { used: number; max: number; exact: boolean }): React.ReactElement {
+  const pct = Math.min(used / max, 1)
+  const color = pct >= 0.9 ? 'bg-red' : pct >= 0.75 ? 'bg-yellow-500' : 'bg-accent'
+  const usedK = used >= 1000 ? `${(used / 1000).toFixed(1)}K` : `${used}`
+  const maxK = max >= 1000 ? `${(max / 1000).toFixed(0)}K` : `${max}`
+
+  return (
+    <div className="mt-2 mb-0.5 px-0.5 flex items-center gap-2">
+      <div className="flex-1 h-[3px] bg-overlay rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-300 ${color}`}
+          style={{ width: `${pct * 100}%` }}
+        />
+      </div>
+      <span className="text-xs text-text-muted tabular-nums flex-shrink-0">
+        {!exact && <span className="opacity-50 mr-0.5">~</span>}{usedK} / {maxK} ctx
+      </span>
+    </div>
   )
 }
