@@ -7,6 +7,9 @@ import {
 import type { FinetuneJob, FtStatus, ModelInfo } from '@/types'
 import { FTLoadModal } from './FTLoadModal'
 
+// Jobs that were just created this session and need their SSE stream opened immediately
+const _autoStartJobs = new Set<string>()
+
 const MAX_LOG_LINES = 50
 
 interface TrainTabProps {
@@ -61,7 +64,8 @@ export function TrainTab({ selectedModel, vramTotalGb, onNavigateToModels }: Tra
 
   const handleJobStarted = (job: FinetuneJob): void => {
     setShowConfig(false)
-    setJobs(prev => [job, ...prev])
+    _autoStartJobs.add(job.id)
+    setJobs(prev => [{ ...job, status: 'running' }, ...prev])
   }
 
   return (
@@ -187,10 +191,12 @@ function JobRow({ job, onCancel, onJobUpdate, onRefresh }: {
   const logRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (job.status !== 'running') return
+    const shouldConnect = job.status === 'running' || job.status === 'pending'
+    if (!shouldConnect) return
     let es: EventSource | null = null
     ftJobStreamUrl(job.id).then(url => {
       es = new EventSource(url)
+      _autoStartJobs.delete(job.id)
       es.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data) as { type: string; text?: string; output_dir?: string }
@@ -200,6 +206,7 @@ function JobRow({ job, onCancel, onJobUpdate, onRefresh }: {
           } else if (data.type === 'error') {
             setLogs(l => [...l.slice(-MAX_LOG_LINES + 1), `ERROR: ${data.text ?? ''}`])
             es?.close()
+            onRefresh()
           } else if (data.type === 'log' && data.text) {
             setLogs(l => [...l.slice(-MAX_LOG_LINES + 1), data.text!])
           } else if (data.type === 'start') {
@@ -207,10 +214,10 @@ function JobRow({ job, onCancel, onJobUpdate, onRefresh }: {
           }
         } catch { /* skip */ }
       }
-      es.onerror = () => es?.close()
-    }).catch(() => {})
+      es.onerror = () => { es?.close(); onRefresh() }
+    }).catch(() => { onRefresh() })
     return () => { es?.close() }
-  }, [job.id, job.status, onJobUpdate])
+  }, [job.id, job.status, onJobUpdate, onRefresh])
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
@@ -243,7 +250,7 @@ function JobRow({ job, onCancel, onJobUpdate, onRefresh }: {
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
           <StatusBadge status={job.status} />
-          {job.status === 'running' && (
+          {(job.status === 'running' || job.status === 'pending') && (
             <span className="w-3.5 h-3.5 border-2 border-accent/30 border-t-accent rounded-full animate-spin flex-shrink-0" />
           )}
           <span className="text-xs text-text-muted truncate">{job.model_id.split('/').pop()}</span>
@@ -274,7 +281,7 @@ function JobRow({ job, onCancel, onJobUpdate, onRefresh }: {
       )}
 
       <AnimatePresence>
-        {(logs.length > 0 || job.status === 'running') && (
+        {(logs.length > 0 || job.status === 'running' || job.status === 'pending') && (
           <motion.div
             key="logs"
             initial={{ opacity: 0, height: 0 }}
