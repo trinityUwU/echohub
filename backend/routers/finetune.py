@@ -78,7 +78,7 @@ def get_status() -> dict:
 # ── Install Unsloth ────────────────────────────────────────────────────────
 
 @router.get("/install/stream")
-def install_stream() -> StreamingResponse:
+async def install_stream() -> StreamingResponse:
     return StreamingResponse(
         ft.install_unsloth_sse(),
         media_type="text/event-stream",
@@ -118,22 +118,29 @@ def cancel_job(job_id: str) -> dict:
 
 
 @router.get("/jobs/{job_id}/stream")
-def run_job_stream(job_id: str) -> StreamingResponse:
+async def run_job_stream(job_id: str) -> StreamingResponse:
     job = db.get_finetune_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
+
+    if job["status"] == "cancelled":
+        async def _cancelled():
+            yield f"data: {json.dumps({'type': 'error', 'text': 'Job was cancelled'})}\n\n"
+        return StreamingResponse(_cancelled(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     cfg = job["config"]
     all_pairs = db.get_training_pairs()
 
     pair_ids = cfg.get("pair_ids")
-    if pair_ids:
-        pairs = [p for p in all_pairs if p["id"] in set(pair_ids)]
-    else:
-        pairs = all_pairs
+    pairs = [p for p in all_pairs if p["id"] in set(pair_ids)] if pair_ids else all_pairs
 
     if not pairs:
-        raise HTTPException(400, "No training pairs available")
+        async def _no_pairs():
+            db.update_finetune_job(job_id, status="error", error="No training pairs — add pairs in the Pairs tab first")
+            yield f"data: {json.dumps({'type': 'error', 'text': 'No training pairs available. Go to Pairs tab and add some first.'})}\n\n"
+        return StreamingResponse(_no_pairs(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     def on_status(status: str, output_path: str | None) -> None:
         db.update_finetune_job(job_id, status=status, output_path=output_path)
@@ -159,7 +166,7 @@ def run_job_stream(job_id: str) -> StreamingResponse:
 # ── Export GGUF ────────────────────────────────────────────────────────────
 
 @router.get("/jobs/{job_id}/export/stream")
-def export_job_stream(job_id: str) -> StreamingResponse:
+async def export_job_stream(job_id: str) -> StreamingResponse:
     job = db.get_finetune_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")

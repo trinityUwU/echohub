@@ -214,7 +214,7 @@ function JobRow({ job, onCancel, onJobUpdate, onRefresh }: {
           }
         } catch { /* skip */ }
       }
-      es.onerror = () => { es?.close(); onRefresh() }
+      es.onerror = () => { es?.close(); setTimeout(onRefresh, 500) }
     }).catch(() => { onRefresh() })
     return () => { es?.close() }
   }, [job.id, job.status, onJobUpdate, onRefresh])
