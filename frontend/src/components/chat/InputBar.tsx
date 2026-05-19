@@ -61,7 +61,6 @@ export function InputBar({ modelLoaded, visionEnabled, streaming, params, usedTo
   }
 
   const handlePaste = (e: React.ClipboardEvent): void => {
-    if (!visionEnabled) return
 
     // Try standard clipboardData.items first (works in Chrome/Electron)
     const items = Array.from(e.clipboardData.items)

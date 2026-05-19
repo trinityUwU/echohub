@@ -92,8 +92,19 @@ export default function App(): React.ReactElement {
   }
 
   const handleReloadFromConfig = (config: LoadConfig): void => {
-    loadModel(config.model_id, {
+    // model_id may be a short name (from stats.model_name) — resolve to full HF id
+    const resolvedId = downloaded.find(m =>
+      m.id === config.model_id ||
+      m.name === config.model_id ||
+      m.id.split('/').pop() === config.model_id ||
+      m.name.startsWith(config.model_id.replace('...', ''))
+    )?.id ?? config.model_id
+
+    loadModel(resolvedId, {
       gpuMemoryUtilization: config.gpu_memory_utilization ?? 0.75,
+      maxModelLen: config.n_ctx ?? null,
+      enforceEager: false,
+      maxCudagraphCaptureSize: null,
       n_gpu_layers: config.n_gpu_layers ?? null,
       cpu_overflow: config.cpu_overflow ?? false,
       is_moe: config.is_moe ?? false,

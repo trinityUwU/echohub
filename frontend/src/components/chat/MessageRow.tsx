@@ -201,15 +201,23 @@ function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRe
               </ActionBtn>
             )}
 
-            {!isUser && message.loadConfig && onReload && (
-              (!loadedModelId || loadedModelId !== message.loadConfig.model_id)
-            ) && (
-              <ActionBtn onClick={() => onReload(message.loadConfig!)} title={`Reload model: ${message.loadConfig.model_id.split('/').pop()}`}>
-                <svg className="w-3.5 h-3.5 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.01"/>
-                </svg>
-              </ActionBtn>
-            )}
+            {!isUser && onReload && (() => {
+              const cfg = message.loadConfig ?? (
+                message.stats?.model_name
+                  ? { model_id: message.stats.model_name, engine: message.stats.engine ?? undefined }
+                  : null
+              )
+              if (!cfg) return null
+              const modelMismatch = !loadedModelId || loadedModelId !== cfg.model_id
+              if (!modelMismatch) return null
+              return (
+                <ActionBtn onClick={() => onReload(cfg)} title={`Reload: ${cfg.model_id.split('/').pop()}`}>
+                  <svg className="w-3.5 h-3.5 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.01"/>
+                  </svg>
+                </ActionBtn>
+              )
+            })()}
           </div>
         )}
 
