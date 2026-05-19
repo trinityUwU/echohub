@@ -526,6 +526,10 @@ async def _eval_pipeline_sse(
     # ── Step 1: resolve GGUF path ──────────────────────────────────────────
     is_local_path = gguf_file.startswith("/")
 
+    # For local paths, use the filename as model_id (avoids "None-finetuned" issue)
+    if is_local_path:
+        gguf_model_id = os.path.basename(gguf_file).replace(".gguf", "")
+
     if is_local_path:
         gguf_path: str | None = gguf_file
         yield _sse({"type": "log", "text": f"[Eval {stage}] Using local GGUF: {gguf_path}"})
