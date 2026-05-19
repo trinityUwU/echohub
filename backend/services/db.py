@@ -175,6 +175,12 @@ def init_db() -> None:
                 )
             """)
             conn.commit()
+        # Add pipeline_stage to finetune_jobs if missing
+        ft_job_cols = {row[1] for row in conn.execute("PRAGMA table_info(finetune_jobs)")}
+        if "pipeline_stage" not in ft_job_cols:
+            conn.execute("ALTER TABLE finetune_jobs ADD COLUMN pipeline_stage TEXT")
+            conn.commit()
+
         # Add name/archived columns to benchmarks if missing
         bench_cols = {row[1] for row in conn.execute("PRAGMA table_info(benchmarks)")}
         if "name" not in bench_cols:
@@ -724,6 +730,7 @@ def update_finetune_job(
     status: str | None = None,
     output_path: str | None = None,
     error: str | None = None,
+    pipeline_stage: str | None = None,
 ) -> dict | None:
     import json as _json
     now = _now()
@@ -738,6 +745,9 @@ def update_finetune_job(
     if error is not None:
         fields.append("error = ?")
         values.append(error)
+    if pipeline_stage is not None:
+        fields.append("pipeline_stage = ?")
+        values.append(pipeline_stage)
     values.append(job_id)
     with _lock:
         conn = _get_conn()

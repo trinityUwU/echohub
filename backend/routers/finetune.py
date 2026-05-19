@@ -307,13 +307,18 @@ async def run_job_stream(job_id: str) -> StreamingResponse:
     if not job:
         raise HTTPException(404, "Job not found")
 
-    # Auto-recover: if LoRA exists on disk but status is wrong, fix it first
+    # Auto-recover: if LoRA exists and no eval_after pending → mark done
     from backend.services.user_data import get_user_data_dir as _gud
     lora_check = _gud() / "finetune" / job_id / "lora" / "adapter_config.json"
-    if lora_check.exists() and job["status"] != "done":
+    pipeline_stage = (job.get("pipeline_stage") or "start")
+    has_eval_after = job.get("config", {}).get("eval_after", False)
+    lora_done_terminal = (lora_check.exists() and job["status"] not in ("done", "cancelled")
+                          and not has_eval_after and not ft.is_pipeline_active(job_id)
+                          and pipeline_stage not in ("export_gguf", "eval_after", "finetune_done"))
+    if lora_done_terminal:
         output_dir = str(_gud() / "finetune" / job_id)
         db.update_finetune_job(job_id, status="done", output_path=output_dir)
-        job = db.get_finetune_job(job_id)  # refresh
+        job = db.get_finetune_job(job_id)
 
     # Jobs in terminal state — stream status only, don't relaunch
     if job["status"] in ("cancelled", "done", "error"):
@@ -385,95 +390,131 @@ async def _full_pipeline(job_id: str, job: dict, cfg: dict, pairs: list[dict]):
 
 
 async def _full_pipeline_inner(job_id: str, job: dict, cfg: dict, pairs: list[dict]):
+    """Resume-safe pipeline. Reads pipeline_stage from DB to skip completed steps."""
+    from pathlib import Path as _Path
+
     profile_id: Optional[str] = cfg.get("profile_id")
     eval_before: bool = cfg.get("eval_before", False)
     eval_after: bool = cfg.get("eval_after", False)
     eval_gguf_model_id: Optional[str] = cfg.get("eval_gguf_model_id")
     eval_gguf_file: Optional[str] = cfg.get("eval_gguf_file")
 
+    def _set_stage(stage: str) -> None:
+        db.update_finetune_job(job_id, pipeline_stage=stage)
+
+    def _current_stage() -> str:
+        j = db.get_finetune_job(job_id)
+        return (j or {}).get("pipeline_stage") or "start"
+
+    def _lora_done() -> bool:
+        j = db.get_finetune_job(job_id)
+        if not j: return False
+        op = j.get("output_path")
+        return bool(op and (_Path(op) / "lora" / "adapter_config.json").exists())
+
+    def _gguf_exported() -> Optional[str]:
+        j = db.get_finetune_job(job_id)
+        if not j: return None
+        op = j.get("output_path")
+        if not op: return None
+        for p in [_Path(op) / "gguf_export" / "model-Q4_K_M.gguf"]:
+            if p.exists(): return str(p)
+        return None
+
     # ── Step 1: eval before ────────────────────────────────────────────────
+    stage = _current_stage()
     if eval_before and eval_gguf_model_id and eval_gguf_file and profile_id:
-        async for chunk in ft._eval_pipeline_sse(
-            job_id=job_id,
-            profile_id=profile_id,
-            stage="before",
-            gguf_model_id=eval_gguf_model_id,
-            gguf_file=eval_gguf_file,
-        ):
-            yield chunk
+        if stage in ("start",):
+            _set_stage("eval_before")
+            async for chunk in ft._eval_pipeline_sse(
+                job_id=job_id, profile_id=profile_id, stage="before",
+                gguf_model_id=eval_gguf_model_id, gguf_file=eval_gguf_file,
+            ):
+                yield chunk
+        else:
+            yield f"data: {json.dumps({'type': 'log', 'text': 'Resuming — eval before already done'})}\n\n"
 
     if ft.is_cancelled(job_id):
         yield f"data: {json.dumps({'type': 'error', 'text': 'Job cancelled'})}\n\n"
         return
 
     # ── Step 2: fine-tune ──────────────────────────────────────────────────
-    lora_output_dir: Optional[str] = None
+    stage = _current_stage()
+    if not _lora_done():
+        _set_stage("finetune")
 
-    def on_status(status: str, output_path: Optional[str]) -> None:
-        nonlocal lora_output_dir
-        if output_path:
-            lora_output_dir = output_path
-        # If eval_after is pending, don't set final status yet — pipeline continues
-        if status == "done" and eval_after:
-            db.update_finetune_job(job_id, status="running", output_path=output_path)
-        else:
-            db.update_finetune_job(job_id, status=status, output_path=output_path)
+        def on_status(status: str, output_path: Optional[str]) -> None:
+            if output_path:
+                pass  # output_path stored by update below
+            if status == "done" and eval_after:
+                db.update_finetune_job(job_id, status="running", output_path=output_path, pipeline_stage="finetune_done")
+            else:
+                db.update_finetune_job(job_id, status=status, output_path=output_path)
 
-    async for chunk in ft.run_finetune_sse(
-        job_id=job_id,
-        model_path=cfg["model_path"],
-        pairs=pairs,
-        lora_rank=cfg.get("lora_rank", 16),
-        lora_alpha=cfg.get("lora_alpha", 16),
-        target_modules=cfg.get("target_modules", ["q_proj", "v_proj"]),
-        num_epochs=cfg.get("num_epochs", 3),
-        learning_rate=cfg.get("learning_rate", 2e-4),
-        on_status=on_status,
-        max_seq_length=cfg.get("max_seq_length", 512),
-        per_device_train_batch_size=cfg.get("per_device_train_batch_size", 1),
-        gradient_accumulation_steps=cfg.get("gradient_accumulation_steps", 8),
-        optim=cfg.get("optim", "adamw_8bit"),
-        cpu_offload_gb=cfg.get("cpu_offload_gb", 0),
-    ):
-        yield chunk
+        async for chunk in ft.run_finetune_sse(
+            job_id=job_id, model_path=cfg["model_path"], pairs=pairs,
+            lora_rank=cfg.get("lora_rank", 16), lora_alpha=cfg.get("lora_alpha", 16),
+            target_modules=cfg.get("target_modules", ["q_proj", "v_proj"]),
+            num_epochs=cfg.get("num_epochs", 3), learning_rate=cfg.get("learning_rate", 2e-4),
+            on_status=on_status, max_seq_length=cfg.get("max_seq_length", 512),
+            per_device_train_batch_size=cfg.get("per_device_train_batch_size", 1),
+            gradient_accumulation_steps=cfg.get("gradient_accumulation_steps", 8),
+            optim=cfg.get("optim", "adamw_8bit"), cpu_offload_gb=cfg.get("cpu_offload_gb", 0),
+        ):
+            yield chunk
+    else:
+        yield f"data: {json.dumps({'type': 'log', 'text': 'Resuming — LoRA already saved, skipping training'})}\n\n"
+        _set_stage("finetune_done")
+        if eval_after:
+            db.update_finetune_job(job_id, status="running")
 
-    # Abort pipeline if fine-tune didn't succeed or was cancelled
     if ft.is_cancelled(job_id):
         yield f"data: {json.dumps({'type': 'error', 'text': 'Job cancelled'})}\n\n"
         return
-
-    current_job = db.get_finetune_job(job_id)
-    if not current_job or current_job["status"] != "done":
-        return
+    if not _lora_done():
+        return  # training failed
 
     # ── Step 3: eval after ─────────────────────────────────────────────────
-    # Re-read output_path from DB (closure may have threading visibility issues)
-    refreshed = db.get_finetune_job(job_id)
-    lora_output_dir = refreshed.get("output_path") if refreshed else lora_output_dir
-
-    if not (eval_after and lora_output_dir and profile_id and eval_gguf_model_id and eval_gguf_file):
-        yield f"data: {json.dumps({'type': 'log', 'text': f'Skipping after-eval: eval_after={eval_after} lora_dir={lora_output_dir} profile={profile_id}'})}\n\n"
+    if not eval_after:
+        db.update_finetune_job(job_id, status="done")
+        yield f"data: {json.dumps({'type': 'pipeline_done'})}\n\n"
         return
 
-    # Export LoRA → GGUF first
-    from pathlib import Path as _Path
+    refreshed = db.get_finetune_job(job_id)
+    lora_output_dir = (refreshed or {}).get("output_path")
+    if not (lora_output_dir and profile_id):
+        yield f"data: {json.dumps({'type': 'log', 'text': f'Skipping after-eval: lora_dir={lora_output_dir} profile={profile_id}'})}\n\n"
+        db.update_finetune_job(job_id, status="done")
+        yield f"data: {json.dumps({'type': 'pipeline_done'})}\n\n"
+        return
+
     lora_path = str(_Path(lora_output_dir) / "lora")
-    export_gguf_path: Optional[str] = None
 
-    def _on_export_done(gguf_path: str) -> None:
-        nonlocal export_gguf_path
-        export_gguf_path = gguf_path
+    # Export only if not already done
+    export_gguf_path = _gguf_exported()
+    if not export_gguf_path:
+        _set_stage("export_gguf")
+        export_done_path: list[str] = []
 
-    yield f"data: {json.dumps({'type': 'step', 'label': 'Exporting LoRA to GGUF for after-eval…'})}\n\n"
-    async for chunk in ft.export_gguf_sse(job_id=job_id, lora_path=lora_path, on_done=_on_export_done):
-        yield chunk
+        def _on_export_done(p: str) -> None:
+            export_done_path.append(p)
+
+        yield f"data: {json.dumps({'type': 'step', 'label': 'Exporting LoRA → GGUF Q4_K_M…'})}\n\n"
+        async for chunk in ft.export_gguf_sse(job_id=job_id, lora_path=lora_path, on_done=_on_export_done):
+            yield chunk
+
+        export_gguf_path = export_done_path[0] if export_done_path else None
+    else:
+        yield f"data: {json.dumps({'type': 'log', 'text': f'Resuming — GGUF already exported: {export_gguf_path}'})}\n\n"
 
     if not export_gguf_path:
         yield f"data: {json.dumps({'type': 'log', 'text': 'GGUF export failed — skipping after-eval'})}\n\n"
+        db.update_finetune_job(job_id, status="done")
+        yield f"data: {json.dumps({'type': 'pipeline_done'})}\n\n"
         return
 
-    # Use the finetuned GGUF (local path) for after-eval
-    export_model_id = f"{eval_gguf_model_id}-finetuned"
+    _set_stage("eval_after")
+    export_model_id = f"{eval_gguf_model_id or 'finetuned'}-finetuned"
     async for chunk in ft._eval_pipeline_sse(
         job_id=job_id,
         profile_id=profile_id,
