@@ -76,6 +76,9 @@ A few things that aren't obvious from the UI:
 - Storage paths are configurable, and changing them triggers an automatic file migration
 - Fine-tuning runs in its own isolated venv, separate from the backend
 - MTP detection: scans GGUF binary for speculative decoding tensors, activates automatically in llama.cpp when present — see docs/v0.5-mtp.md
+- Vision support for GGUF models: detects mmproj file at load time, selects the right chat handler automatically (Qwen2-VL, LLaVA, MiniCPM, Llama3-Vision…)
+- Reload model from message footer: each message stores its exact load config, one click reloads the same model with the same parameters if it was ejected
+- Capability badges everywhere: quant, MTP, MoE, thinking, vision in Discover, Library, LoadModal, ChatTopBar, ModelPicker
 
 Full technical breakdown:
 - [v0.1 — Foundation](docs/v0.1-foundation.md)
@@ -83,6 +86,7 @@ Full technical breakdown:
 - [v0.3 — UX & automation](docs/v0.3-ux-automation.md)
 - [v0.4 — Fine-tuning & RLHF](docs/v0.4-finetune.md)
 - [v0.5 — MTP support](docs/v0.5-mtp.md)
+- [v0.6 — Vision, MTP, UX polish](docs/v0.6-vision-mtp-ux.md)
 
 ---
 
@@ -95,6 +99,7 @@ Full technical breakdown:
 | [v0.3 — UX & automation](docs/v0.3-ux-automation.md) | ✅ Stable | Benchmark suite, quality scoring, context bar, chat polish, installer |
 | [v0.4 — Fine-tuning](docs/v0.4-finetune.md) | 🚧 In progress | QLoRA fine-tuning, RLHF pairs, eval before/after, GGUF export, download history |
 | [v0.5 — MTP support](docs/v0.5-mtp.md) | ✅ Stable | MTP detection, badge in Discover/Library, fine-tune export preserves MTP tensors |
+| [v0.6 — Vision, MTP, UX polish](docs/v0.6-vision-mtp-ux.md) | ✅ Stable | Vision for GGUF (mmproj auto-detect), capability badges everywhere, reload model from footer, image lightbox, Wayland clipboard paste, vLLM fixes |
 
 ---
 
