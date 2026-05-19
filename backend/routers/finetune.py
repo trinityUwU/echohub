@@ -371,22 +371,83 @@ async def run_job_stream(job_id: str) -> StreamingResponse:
         return StreamingResponse(_no_pairs(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
+    # Launch pipeline as independent asyncio Task — survives SSE disconnects
+    _ensure_pipeline_task(job_id, job, cfg, pairs)
+
+    # SSE: stream from the job's log queue
     return StreamingResponse(
-        _full_pipeline(job_id=job_id, job=job, cfg=cfg, pairs=pairs),
+        _sse_log_reader(job_id),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-async def _full_pipeline(job_id: str, job: dict, cfg: dict, pairs: list[dict]):
-    """Orchestrates: eval_before → fine-tune → eval_after (with GGUF export)."""
+# ── Job log queues (one per active job_id) ─────────────────────────────────
+
+_job_log_queues: dict[str, asyncio.Queue] = {}
+
+
+def _get_log_queue(job_id: str) -> asyncio.Queue:
+    if job_id not in _job_log_queues:
+        _job_log_queues[job_id] = asyncio.Queue(maxsize=500)
+    return _job_log_queues[job_id]
+
+
+async def _sse_log_reader(job_id: str):
+    """Read from job log queue and stream to SSE client. Reconnect-safe."""
+    q = _get_log_queue(job_id)
+    while True:
+        try:
+            msg = await asyncio.wait_for(q.get(), timeout=30.0)
+            yield msg
+            if '"pipeline_done"' in msg or ('"type": "done"' in msg and 'pipeline' in msg):
+                break
+        except asyncio.TimeoutError:
+            # Heartbeat — keep connection alive
+            yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+            # Check if job finished in DB
+            j = db.get_finetune_job(job_id)
+            if j and j["status"] in ("done", "cancelled", "error") and not ft.is_pipeline_active(job_id):
+                yield f"data: {json.dumps({'type': 'pipeline_done'})}\n\n"
+                break
+
+
+_pipeline_tasks: dict[str, asyncio.Task] = {}
+
+
+def _ensure_pipeline_task(job_id: str, job: dict, cfg: dict, pairs: list[dict]) -> None:
+    """Start pipeline task if not already running."""
+    if job_id in _pipeline_tasks and not _pipeline_tasks[job_id].done():
+        return
+    task = asyncio.ensure_future(_run_pipeline_task(job_id, job, cfg, pairs))
+    _pipeline_tasks[job_id] = task
+
+
+async def _run_pipeline_task(job_id: str, job: dict, cfg: dict, pairs: list[dict]) -> None:
+    """Runs the full pipeline. Pushes SSE messages to the job's log queue."""
+    q = _get_log_queue(job_id)
     ft.clear_cancelled(job_id)
     ft.register_pipeline(job_id)
     try:
         async for chunk in _full_pipeline_inner(job_id, job, cfg, pairs):
-            yield chunk
+            try:
+                q.put_nowait(chunk)
+            except asyncio.QueueFull:
+                pass  # Drop if no SSE consumer — task continues regardless
+        # Signal done
+        try:
+            q.put_nowait(f"data: {json.dumps({'type': 'pipeline_done'})}\n\n")
+        except asyncio.QueueFull:
+            pass
+    except Exception as e:
+        try:
+            q.put_nowait(f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n")
+        except asyncio.QueueFull:
+            pass
+        db.update_finetune_job(job_id, status="error", error=str(e))
     finally:
         ft.unregister_pipeline(job_id)
+        _pipeline_tasks.pop(job_id, None)
 
 
 async def _full_pipeline_inner(job_id: str, job: dict, cfg: dict, pairs: list[dict]):
