@@ -23,25 +23,68 @@ fn get_backend_port(state: State<BackendState>) -> u16 {
     state.port
 }
 
-/// Read an image from the system clipboard. Returns a data URL (data:image/png;base64,...) or null.
+/// Read an image from the system clipboard.
+/// On Wayland: uses wl-paste (wl-clipboard). On X11: uses xclip/xsel via arboard.
+/// Returns a data URL (data:image/png;base64,...) or null.
 #[tauri::command]
 fn read_clipboard_image() -> Option<String> {
+    // Try Wayland first (wl-paste)
+    if std::env::var("WAYLAND_DISPLAY").is_ok() {
+        return read_clipboard_image_wayland();
+    }
+    // Fallback: arboard for X11 / other platforms
+    read_clipboard_image_arboard()
+}
+
+fn read_clipboard_image_wayland() -> Option<String> {
+    use std::process::Command;
+
+    // Check available image types
+    let types_out = Command::new("wl-paste")
+        .args(["--list-types"])
+        .output()
+        .ok()?;
+    let types = String::from_utf8_lossy(&types_out.stdout);
+    let mime = types.lines()
+        .find(|l| l.starts_with("image/png") || l.starts_with("image/"))
+        .map(|l| l.trim().to_string())?;
+
+    // Read raw image bytes
+    let out = Command::new("wl-paste")
+        .args(["--no-newline", "--type", &mime])
+        .output()
+        .ok()?;
+
+    if out.stdout.is_empty() {
+        return None;
+    }
+
+    // If PNG, encode directly; otherwise convert via image crate
+    let png_bytes = if mime == "image/png" {
+        out.stdout
+    } else {
+        let img = image::load_from_memory(&out.stdout).ok()?;
+        let mut buf = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png).ok()?;
+        buf
+    };
+
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+    Some(format!("data:image/png;base64,{}", b64))
+}
+
+fn read_clipboard_image_arboard() -> Option<String> {
     let mut ctx = arboard::Clipboard::new().ok()?;
     let img = ctx.get_image().ok()?;
-
-    // Convert RGBA raw bytes to PNG via the `image` crate
     let rgba = image::RgbaImage::from_raw(
         img.width as u32,
         img.height as u32,
         img.bytes.into_owned(),
     )?;
-
     let mut png_bytes: Vec<u8> = Vec::new();
-    let mut cursor = std::io::Cursor::new(&mut png_bytes);
     image::DynamicImage::ImageRgba8(rgba)
-        .write_to(&mut cursor, image::ImageFormat::Png)
+        .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
         .ok()?;
-
     let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
     Some(format!("data:image/png;base64,{}", b64))
 }

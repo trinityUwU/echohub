@@ -76,14 +76,19 @@ export function InputBar({ modelLoaded, visionEnabled, streaming, params, usedTo
     // clipboardData.items is empty for images on WebKitGTK — read directly from clipboard
     e.preventDefault()
     invoke<string | null>('read_clipboard_image').then(dataUrl => {
-      if (!dataUrl) return
+      if (!dataUrl) {
+        console.warn('[paste] read_clipboard_image returned null — no image in clipboard?')
+        return
+      }
       const byteStr = atob(dataUrl.split(',')[1])
       const arr = new Uint8Array(byteStr.length)
       for (let i = 0; i < byteStr.length; i++) arr[i] = byteStr.charCodeAt(i)
       const blob = new Blob([arr], { type: 'image/png' })
       const file = new File([blob], 'clipboard.png', { type: 'image/png' })
       handleFiles([file] as unknown as FileList)
-    }).catch(() => {})
+    }).catch((err) => {
+      console.error('[paste] read_clipboard_image failed:', err)
+    })
   }
 
   return (
