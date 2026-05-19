@@ -1,11 +1,11 @@
 # STATE — EchoHub
-*Dernière mise à jour : 2026-05-19 (sessions 13-15)*
+*Dernière mise à jour : 2026-05-19 (sessions 13-16)*
 
 ## Résumé de l'état actuel
 
-Application Tauri v2 native avec pipeline fine-tuning complet : collecte RLHF, entraînement Unsloth QLoRA, export GGUF, évaluation before/after. Les GGUFs fine-tunés sont visibles dans Library et ModelPicker. llama-cpp-python est gérable depuis Settings → Engines. Pipeline résistant aux disconnexions SSE (asyncio.Task indépendant + resume logic par stages). Premier run end-to-end validé sur RTX 3060 12GB : fine-tune 9B, GGUF 5.4GB exporté, eval before score 100.
+Application Tauri v2 native avec pipeline fine-tuning complet + support MoE. Fine-tune : collecte RLHF, entraînement Unsloth QLoRA, export GGUF, évaluation before/after. GGUFs fine-tunés visibles dans Library + ModelPicker. llama-cpp-python gérable depuis Settings → Engines. MoE : Qwen3-30B-A3B charge sur RTX 3060 avec CPU overflow (40 layers GPU + 6GB RAM), badge amber dans Discover/Picker, defaults auto-remplis dans LoadModal. Pushé sur GitHub.
 
-Matériel Reddit prêt — validation technique : Qwen3.5-9B GGUF @ 100K ctx, 10.5GB VRAM, génération fluide.
+Matériel Reddit prêt — 100K ctx validé, Qwen3-30B-A3B MoE fonctionnel sur 12GB.
 
 ## Ce qui a été fait — sessions 13-15 (2026-05-19)
 
@@ -108,6 +108,19 @@ Matériel Reddit prêt — validation technique : Qwen3.5-9B GGUF @ 100K ctx, 10
 - `~` indicateur reste après stream (race condition)
 - OOM kernel SIGKILL non détectable
 - Vieux composants héritage présents
+
+## Ce qui a été fait — session 16 (2026-05-19, fin de session)
+
+### Support MoE (Mixture of Experts)
+- `_is_moe()` : détection via pattern `XB-AYB`, keywords (`mixtral`, `deepseek-v`, `moe`), tags HF
+- `_extract_active_params_billion()` : extrait les params actifs (ex : 3B de 30B-A3B)
+- `ModelInfo` : champs `is_moe` et `active_params_billion`
+- `GET /models/moe-load-config` : calcule `n_gpu_layers` recommandé selon VRAM dispo
+  - Qwen3-30B-A3B + RTX 3060 12GB → 40 layers GPU (~10.5GB) + ~6GB RAM overflow
+- `llama_service.load_model` : `is_moe=True` + `cpu_overflow=True` → `n_batch=128`, `no_perf=True` → évite crash CUDA graph à 88%
+- `LoadModelModal` : banner amber MoE, pré-remplit n_gpu_layers/cpu_overflow/ctx=32768 depuis `getMoeLoadConfig`
+- Badge "MoE A3B" amber dans `ModelCard` (Discover) et `ModelPickerModal`
+- Tout pushé sur GitHub (37 commits d'un coup)
 
 ## Historique
 

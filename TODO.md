@@ -1,5 +1,5 @@
 # TODO — EchoHub
-*Dernière mise à jour : 2026-05-19 (session 13-15)*
+*Dernière mise à jour : 2026-05-19 (session 13-16)*
 
 ## En cours
 - [ ] Construction karma Reddit (r/LocalLLaMA) — 1-2 commentaires/jour, sujets perfs/vLLM/GGUF/CUDA
@@ -46,6 +46,13 @@
 - [ ] Modèle juge fiable (après fine-tuning + évaluation itérative)
 - [ ] Multi-GPU support vLLM (tensor_parallel_size)
 - [ ] Chat avec GGUFs fine-tunés via llama-cli si llama-cpp-python incompatible
+
+## Terminé ✅ (session 16 — 2026-05-19)
+- [x] Support MoE : détection is_moe, active_params_billion, badge amber Discover/Picker
+- [x] LoadModelModal MoE : banner + auto-fill n_gpu_layers/cpu_overflow depuis /moe-load-config
+- [x] llama_service MoE : n_batch=128 + no_perf=True → évite crash CUDA graph à 88%
+- [x] Badge MoE dans ModelCard (Discover) et ModelPickerModal
+- [x] Push GitHub — 37 commits
 
 ## Terminé ✅ (sessions 13-15 — 2026-05-19)
 - [x] Section Fine-tune complète : Models / Profiles / Train
