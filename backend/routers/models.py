@@ -8,6 +8,7 @@ from loguru import logger
 
 from backend.models.schemas import DownloadRequest, ModelInfo
 from backend.services import hf_service
+from backend.services.gguf_utils import detect_mtp
 from backend.services.hf_service import _get_hf_token
 from huggingface_hub import model_info as hf_model_info
 from backend.services import download_manager
@@ -36,7 +37,14 @@ def search_models(
 @router.get("/downloaded", response_model=list[ModelInfo])
 def list_downloaded() -> list[ModelInfo]:
     try:
-        return hf_service.list_downloaded()
+        models = hf_service.list_downloaded()
+        models_dir = hf_service._get_models_dir()
+        for model in models:
+            model_dir = models_dir / model.id.replace("/", "--")
+            gguf_files = list(model_dir.glob("*.gguf")) if model_dir.exists() else []
+            if gguf_files:
+                model.has_mtp = detect_mtp(str(gguf_files[0]))
+        return models
     except Exception as e:
         logger.error(f"list_downloaded failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

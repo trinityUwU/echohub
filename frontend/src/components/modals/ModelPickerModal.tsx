@@ -189,6 +189,7 @@ function PickerItem({ model, isLoaded, isSelected, onClick }: {
             MoE{model.active_params_billion ? ` A${model.active_params_billion}B` : ''}
           </span>
         )}
+        {model.has_mtp && <Badge variant="mtp">MTP</Badge>}
         {model.vram_estimate_gb && <span>{model.vram_estimate_gb} GB VRAM</span>}
       </div>
     </button>

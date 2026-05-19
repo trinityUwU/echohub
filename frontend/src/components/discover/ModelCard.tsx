@@ -41,6 +41,7 @@ export function ModelCard({ model, job, onClick, isFavorite, onToggleFavorite }:
               MoE{model.active_params_billion ? ` A${model.active_params_billion}B` : ''}
             </span>
           )}
+          {model.has_mtp && <Badge variant="mtp">MTP</Badge>}
           {model.capabilities.thinking && <Badge variant="think">thinking</Badge>}
           {model.capabilities.vision && <Badge variant="vision">vision</Badge>}
           {model.gated && <Badge variant="gated">gated</Badge>}

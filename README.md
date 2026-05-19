@@ -29,6 +29,7 @@ cd echohub
 - Load a model with one click — there's a live VRAM preview before you commit
 - Chat with streaming responses, conversation history, and image attachments for vision models
 - Collect training pairs from real conversations, fine-tune locally with QLoRA, evaluate before and after, and export as GGUF
+- Detects and preserves MTP (Multi-Token Prediction) — models like Qwen3 get 1.5–2x faster generation automatically, with a badge in Discover and Library
 - Export any conversation as Markdown
 - Once a model is downloaded, everything works offline
 
@@ -74,12 +75,14 @@ A few things that aren't obvious from the UI:
 - Compatibility check before download: fetches config.json from HF and warns if the model needs a different engine version
 - Storage paths are configurable, and changing them triggers an automatic file migration
 - Fine-tuning runs in its own isolated venv, separate from the backend
+- MTP detection: scans GGUF binary for speculative decoding tensors, activates automatically in llama.cpp when present — see docs/v0.5-mtp.md
 
 Full technical breakdown:
 - [v0.1 — Foundation](docs/v0.1-foundation.md)
 - [v0.2 — Multi-engine vLLM](docs/v0.2-multi-vllm.md)
 - [v0.3 — UX & automation](docs/v0.3-ux-automation.md)
 - [v0.4 — Fine-tuning & RLHF](docs/v0.4-finetune.md)
+- [v0.5 — MTP support](docs/v0.5-mtp.md)
 
 ---
 
@@ -91,6 +94,7 @@ Full technical breakdown:
 | [v0.2 — Multi-engine](docs/v0.2-multi-vllm.md) | ✅ Stable | Multiple vLLM versions, automatic compatibility routing, onboarding, configurable paths |
 | [v0.3 — UX & automation](docs/v0.3-ux-automation.md) | ✅ Stable | Benchmark suite, quality scoring, context bar, chat polish, installer |
 | [v0.4 — Fine-tuning](docs/v0.4-finetune.md) | 🚧 In progress | QLoRA fine-tuning, RLHF pairs, eval before/after, GGUF export, download history |
+| [v0.5 — MTP support](docs/v0.5-mtp.md) | ✅ Stable | MTP detection, badge in Discover/Library, fine-tune export preserves MTP tensors |
 
 ---
 

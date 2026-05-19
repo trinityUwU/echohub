@@ -149,6 +149,19 @@ def _extract_active_params_billion(model_id: str) -> Optional[float]:
     return None
 
 
+def _has_mtp_heuristic(model_id: str, tags: list[str]) -> bool:
+    """Detect MTP support from HF tags or model name heuristic.
+
+    On HF we don't have the local GGUF — detect by known families that ship MTP heads.
+    Currently: Qwen3 and Gemma3 series.
+    """
+    name = model_id.lower()
+    tags_lower = [t.lower() for t in tags]
+    if "mtp" in tags_lower:
+        return True
+    return any(family in name for family in ("qwen3", "gemma3"))
+
+
 def _is_moe(model_id: str, tags: list[str]) -> bool:
     """Detect MoE architecture from model name or tags."""
     import re
@@ -469,6 +482,7 @@ def search_models(
                     last_modified=str(m.lastModified)[:10] if m.lastModified else None,
                     pipeline_tag=m.pipeline_tag,
                     is_moe=_is_moe(m.modelId, tags),
+                    has_mtp=_has_mtp_heuristic(m.modelId, tags),
                     active_params_billion=_extract_active_params_billion(m.modelId),
                 ))
             # Dedup + paginate
@@ -523,6 +537,7 @@ def search_models(
                     vram_estimate_gb=vram_est,
                     max_context_window=ctx,
                     is_moe=_is_moe(m.modelId, tags),
+                    has_mtp=_has_mtp_heuristic(m.modelId, tags),
                     active_params_billion=_extract_active_params_billion(m.modelId),
                 )
                 results.append(info)
@@ -598,6 +613,7 @@ def get_model_info(model_id: str) -> ModelInfo:
             more_from_author=more_from_author,
             gated=bool(getattr(info, "gated", False)),
             is_moe=_is_moe(model_id, tags),
+            has_mtp=_has_mtp_heuristic(model_id, tags),
             active_params_billion=_extract_active_params_billion(model_id),
         )
     except Exception as e:
@@ -681,6 +697,7 @@ def list_downloaded() -> list[ModelInfo]:
                 vram_estimate_gb=_estimate_vram_gb(params_b, quant) if params_b else None,
                 max_context_window=ctx,
                 is_moe=_is_moe(model_id, []),
+                has_mtp=_has_mtp_heuristic(model_id, []),
                 active_params_billion=_extract_active_params_billion(model_id),
             )
         )

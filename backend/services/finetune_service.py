@@ -12,6 +12,7 @@ from pathlib import Path
 from loguru import logger
 
 from backend.services.user_data import get_user_data_dir
+from backend.services.gguf_utils import detect_mtp
 
 _UNSLOTH_VENV = Path.home() / ".local" / "share" / "echohub" / "unsloth-env"
 _active_jobs: dict[str, asyncio.subprocess.Process] = {}
@@ -439,6 +440,20 @@ except: pass
 size_gb = os.path.getsize("{gguf_q4_path}") / 1024**3
 print(f"GGUF_PATH:{gguf_q4_path}", flush=True)
 print(f"=== Export complete: {{size_gb:.2f}} GB ===", flush=True)
+
+# Step 4: Detect MTP tensors in exported GGUF
+print("Step 4/4: Checking for MTP tensors...", flush=True)
+import sys as _sys
+_project_root = "{str(Path(__file__).resolve().parents[2])}"
+if _project_root not in _sys.path:
+    _sys.path.insert(0, _project_root)
+try:
+    from backend.services.gguf_utils import detect_mtp as _detect_mtp
+    _has_mtp = _detect_mtp("{gguf_q4_path}")
+except Exception as _e:
+    print(f"  MTP check error: {{_e}}", flush=True)
+    _has_mtp = False
+print(f"MTP_DETECTED:{{str(_has_mtp).lower()}}", flush=True)
 """
     export_script_path = os.path.join(output_dir, "export_gguf.py")
     with open(export_script_path, "w") as f:
@@ -456,6 +471,7 @@ print(f"=== Export complete: {{size_gb:.2f}} GB ===", flush=True)
     _active_jobs[f"{job_id}_export"] = proc
 
     detected_path: str | None = None
+    detected_mtp: bool = False
     try:
         assert proc.stdout is not None
         # Stream with timeout — heartbeat every 30s even if no output
@@ -488,6 +504,8 @@ print(f"=== Export complete: {{size_gb:.2f}} GB ===", flush=True)
                 yield item  # heartbeat already formatted
             elif item.startswith("GGUF_PATH:"):
                 detected_path = item[10:].strip()
+            elif item.startswith("MTP_DETECTED:"):
+                detected_mtp = item[13:].strip() == "true"
             elif item:
                 yield f"data: {json.dumps({'type': 'log', 'text': item})}\n\n"
 
@@ -500,7 +518,7 @@ print(f"=== Export complete: {{size_gb:.2f}} GB ===", flush=True)
         return
 
     final_path = detected_path or os.path.join(gguf_dir, "model-Q4_K_M.gguf")
-    yield f"data: {json.dumps({'type': 'done', 'gguf_path': final_path})}\n\n"
+    yield f"data: {json.dumps({'type': 'done', 'gguf_path': final_path, 'has_mtp': detected_mtp})}\n\n"
     on_done(final_path)
 
 

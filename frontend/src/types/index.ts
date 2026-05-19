@@ -41,6 +41,7 @@ export interface ModelInfo {
   gated: boolean
   engine?: string | null
   is_moe?: boolean
+  has_mtp?: boolean
   active_params_billion?: number | null
 }
 

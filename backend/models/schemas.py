@@ -35,6 +35,7 @@ class ModelInfo(BaseModel):
     gated: bool = False  # modèle nécessitant acceptation de licence sur HF
     engine: Optional[str] = None  # "llama" | "vllm" | None
     is_moe: bool = False
+    has_mtp: bool = False
     active_params_billion: Optional[float] = None  # MoE only: active params per token
 
 
