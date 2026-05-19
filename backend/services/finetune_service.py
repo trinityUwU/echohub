@@ -553,12 +553,20 @@ async def _eval_pipeline_sse(
         yield _sse({"type": "error", "text": "Job cancelled"})
         return
 
-    # ── Step 2: load model via llama_service directly ──────────────────────
-    yield _sse({"type": "step", "label": f"[Eval {stage}] Loading model…"})
-    try:
+    # ── Step 2: fetch eval prompts ─────────────────────────────────────────
+    pairs = _db.get_training_pairs_for_profile(profile_id)
+    eval_prompts = [{"id": p["id"], "prompt": p["prompt"]} for p in pairs[:20]]
+    yield _sse({"type": "step", "label": f"[Eval {stage}] Running {len(eval_prompts)} prompts…"})
+
+    # ── Step 3: run prompts via llama-cli (compatible with Unsloth GGUFs) ──
+    llama_cli = str(Path.home() / ".unsloth" / "llama.cpp" / "build" / "bin" / "llama-cli")
+    use_llama_cli = is_local_path and Path(llama_cli).exists()
+
+    if not use_llama_cli:
+        # Fallback: use backend llama_service (only for HF-downloaded GGUFs)
         from backend.services import llama_service
         from backend.services.engine_router import detect_gpu, unload_model as _unload_first
-        # Unload any currently loaded model first
+        yield _sse({"type": "log", "text": f"[Eval {stage}] Loading via llama-cpp-python…"})
         try:
             _unload_first()
             await asyncio.sleep(1)
@@ -566,74 +574,57 @@ async def _eval_pipeline_sse(
             pass
         gpu = detect_gpu()
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: llama_service.load_model_async(
-                gguf_path=gguf_path,
-                model_id=gguf_model_id,
-                n_ctx=2048,
-                gpu_type=gpu["type"],
-            ),
-        )
-        # Poll until THIS model is loaded (check model_id match)
+        await loop.run_in_executor(None, lambda: llama_service.load_model_async(
+            gguf_path=gguf_path, model_id=gguf_model_id, n_ctx=2048, gpu_type=gpu["type"],
+        ))
         for _ in range(240):
             if _check_cancelled():
-                raise RuntimeError("Job cancelled")
+                yield _sse({"type": "error", "text": "Job cancelled"}); return
             state = llama_service.get_load_state()
-            if state.get("loaded_model_id") == gguf_model_id:
-                break
-            if state.get("error"):
-                raise RuntimeError(state["error"])
+            if state.get("loaded_model_id") == gguf_model_id: break
+            if state.get("error"): raise RuntimeError(state["error"])
             await asyncio.sleep(0.5)
         else:
-            raise RuntimeError("Model load timed out")
-        if _check_cancelled():
-            yield _sse({"type": "error", "text": "Job cancelled"})
-            return
-        yield _sse({"type": "log", "text": f"[Eval {stage}] Model loaded"})
-    except Exception as e:
-        yield _sse({"type": "error", "text": f"[Eval {stage}] Load failed: {e}"})
-        if not is_local_path and delete_after and gguf_path:
-            try:
-                os.remove(gguf_path)
-            except Exception:
-                pass
-        return
+            yield _sse({"type": "error", "text": "[Eval] Model load timed out"}); return
 
-    # ── Step 3: fetch eval prompts ─────────────────────────────────────────
-    pairs = _db.get_training_pairs_for_profile(profile_id)
-    eval_prompts = [{"id": p["id"], "prompt": p["prompt"]} for p in pairs[:20]]
-    yield _sse({"type": "step", "label": f"[Eval {stage}] Running {len(eval_prompts)} prompts…"})
-
-    # ── Step 4: run prompts ────────────────────────────────────────────────
     results: list[dict] = []
     for i, p in enumerate(eval_prompts):
         if _check_cancelled():
-            yield _sse({"type": "error", "text": "Job cancelled"})
-            return
+            yield _sse({"type": "error", "text": "Job cancelled"}); return
         try:
-            response_text = ""
-            async for chunk in llama_service.generate(
-                messages=[{"role": "user", "content": p["prompt"]}],
-                stream=False,
-                temperature=0.0,
-                max_tokens=512,
-            ):
-                # stream=False yields a single dict with OpenAI-style structure
-                if isinstance(chunk, dict):
-                    # stream=False returns a single dict
-                    response_text = (chunk.get("choices") or [{}])[0].get("message", {}).get("content", "")
+            if use_llama_cli:
+                # Use llama-cli directly — compatible with all Unsloth GGUF versions
+                r = await asyncio.create_subprocess_exec(
+                    llama_cli, "--model", gguf_path,
+                    "--n-gpu-layers", "-1", "--ctx-size", "2048",
+                    "--temp", "0.0", "--n-predict", "512",
+                    "--no-display-prompt", "--log-disable",
+                    "--prompt", f"<|im_start|>user\n{p['prompt']}<|im_end|>\n<|im_start|>assistant\n",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                )
+                stdout, _ = await asyncio.wait_for(r.communicate(), timeout=120)
+                response_text = stdout.decode(errors="replace").strip()
+            else:
+                response_text = ""
+                async for chunk in llama_service.generate(
+                    messages=[{"role": "user", "content": p["prompt"]}],
+                    stream=False, temperature=0.0, max_tokens=512,
+                ):
+                    if isinstance(chunk, dict):
+                        response_text = (chunk.get("choices") or [{}])[0].get("message", {}).get("content", "")
             results.append({"prompt_id": p["id"], "prompt": p["prompt"], "response": response_text, "score": None})
-        except Exception:
-            results.append({"prompt_id": p["id"], "prompt": p["prompt"], "response": "", "score": None})
+        except Exception as ex:
+            results.append({"prompt_id": p["id"], "prompt": p["prompt"], "response": f"[Error: {ex}]", "score": None})
         yield _sse({"type": "progress", "eval_stage": stage, "current": i + 1, "total": len(eval_prompts)})
 
-    # ── Step 5: unload ─────────────────────────────────────────────────────
-    yield _sse({"type": "step", "label": f"[Eval {stage}] Unloading model…"})
-    try:
-        llama_service.unload_model()
-    except Exception:
-        pass
+    # ── Step 5: unload (only needed for llama-cpp-python path) ────────────
+    if not use_llama_cli:
+        yield _sse({"type": "step", "label": f"[Eval {stage}] Unloading model…"})
+        try:
+            from backend.services import llama_service as _ls
+            _ls.unload_model()
+        except Exception:
+            pass
 
     # ── Step 6: delete temp GGUF if requested ─────────────────────────────
     if delete_after and not is_local_path and gguf_path:
