@@ -43,7 +43,7 @@ def list_downloaded() -> list[ModelInfo]:
             model_dir = models_dir / model.id.replace("/", "--")
             gguf_files = list(model_dir.glob("*.gguf")) if model_dir.exists() else []
             if gguf_files:
-                model.has_mtp = detect_mtp(str(gguf_files[0]))
+                model.has_mtp = detect_mtp(str(gguf_files[0])) or model.has_mtp
         return models
     except Exception as e:
         logger.error(f"list_downloaded failed: {e}")

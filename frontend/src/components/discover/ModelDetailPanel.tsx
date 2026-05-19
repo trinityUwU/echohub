@@ -118,6 +118,7 @@ export function ModelDetailPanel({ model, loading, vramFreeGb, job, isFavorite, 
         {/* Badges */}
         <div className="flex gap-1 flex-wrap">
           {model.quantization && <Badge variant="quant">{model.quantization.split('/')[0]}</Badge>}
+          {model.has_mtp && <Badge variant="mtp">MTP</Badge>}
           {model.capabilities.thinking && <Badge variant="think">thinking</Badge>}
           {model.capabilities.vision && <Badge variant="vision">vision</Badge>}
           {model.capabilities.code && <Badge variant="cap">code</Badge>}
