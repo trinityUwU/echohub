@@ -388,41 +388,57 @@ async def export_gguf_sse(
     cache_dir = str(Path.home() / ".cache" / "unsloth")
     py = get_unsloth_python()
 
+    llama_cpp_dir = str(Path.home() / ".unsloth" / "llama.cpp")
+    llama_quantize_bin = str(Path(llama_cpp_dir) / "build" / "bin" / "llama-quantize")
+    convert_script_py = str(Path(llama_cpp_dir) / "convert_hf_to_gguf.py")
+    gguf_bf16_path = os.path.join(gguf_dir, "model-BF16.gguf")
+    gguf_q4_path = os.path.join(gguf_dir, "model-Q4_K_M.gguf")
+
     export_script = f"""
-import os, sys, glob, psutil, time
-os.environ["UNSLOTH_COMPILE_LOCATION"] = "{cache_dir}"
-os.makedirs("{cache_dir}", exist_ok=True)
+import os, sys, time, subprocess, psutil
+
 os.makedirs("{gguf_dir}", exist_ok=True)
+os.environ["UNSLOTH_COMPILE_LOCATION"] = "{cache_dir}"
 
-def _ram_gb():
+def _ram():
     v = psutil.virtual_memory()
-    return v.used / 1024**3, v.total / 1024**3
+    return f"{{v.used/1024**3:.1f}}/{{v.total/1024**3:.1f}}GB RAM"
 
-print("=== GGUF Export starting ===", flush=True)
-used, total = _ram_gb()
-print(f"RAM before load: {{used:.1f}} / {{total:.1f}} GB", flush=True)
+print("=== GGUF Export starting === " + _ram(), flush=True)
 
+# Step 1: Merge LoRA into BF16 safetensors
+print("Step 1/3: Merging LoRA into BF16 safetensors...", flush=True)
 from unsloth import FastLanguageModel
-print("Step 1/3: Loading LoRA model into memory...", flush=True)
 model, tokenizer = FastLanguageModel.from_pretrained("{lora_path}", load_in_4bit=True)
-used, _ = _ram_gb()
-print(f"Step 1/3 done. RAM after load: {{used:.1f}} GB", flush=True)
+print("  Loaded: " + _ram(), flush=True)
+model.save_pretrained_merged("{gguf_dir}", tokenizer, save_method="merged_16bit")
+print("Step 1/3 done — BF16 safetensors saved", flush=True)
+del model, tokenizer
+import gc, torch; gc.collect(); torch.cuda.empty_cache()
+print("  After unload: " + _ram(), flush=True)
 
-print("Step 2/3: Merging LoRA weights + quantizing to Q4_K_M...", flush=True)
-print("  (This takes 5-15 min on a 9B model — no intermediate progress available)", flush=True)
+# Step 2: BF16 safetensors → GGUF BF16 (using llama.cpp convert_hf_to_gguf.py)
+print("Step 2/3: Converting to GGUF BF16...", flush=True)
 t0 = time.time()
-model.save_pretrained_gguf("{gguf_dir}", tokenizer, quantization_method="q4_k_m")
-elapsed = time.time() - t0
-print(f"Step 2/3 done in {{elapsed:.0f}}s", flush=True)
+r = subprocess.run([sys.executable, "{convert_script_py}", "{gguf_dir}", "--outtype", "bf16", "--outfile", "{gguf_bf16_path}"])
+if r.returncode != 0:
+    print(f"ERROR: convert_hf_to_gguf.py failed (code {{r.returncode}})", flush=True); sys.exit(1)
+print(f"Step 2/3 done in {{time.time()-t0:.0f}}s", flush=True)
 
-print("Step 3/3: Locating exported file...", flush=True)
-files = sorted(glob.glob("{gguf_dir}/*.gguf"))
-if not files:
-    print("ERROR: No .gguf file found after export!", flush=True)
-    sys.exit(1)
-print(f"GGUF_PATH:{{files[0]}}", flush=True)
-used, _ = _ram_gb()
-print(f"=== Export complete. File: {{files[0]}} | RAM: {{used:.1f}} GB ===", flush=True)
+# Step 3: GGUF BF16 → Q4_K_M
+print("Step 3/3: Quantizing to Q4_K_M...", flush=True)
+t0 = time.time()
+r = subprocess.run(["{llama_quantize_bin}", "{gguf_bf16_path}", "{gguf_q4_path}", "Q4_K_M"])
+if r.returncode != 0:
+    print(f"ERROR: llama-quantize failed (code {{r.returncode}})", flush=True); sys.exit(1)
+print(f"Step 3/3 done in {{time.time()-t0:.0f}}s", flush=True)
+
+try: os.remove("{gguf_bf16_path}")
+except: pass
+
+size_gb = os.path.getsize("{gguf_q4_path}") / 1024**3
+print(f"GGUF_PATH:{gguf_q4_path}", flush=True)
+print(f"=== Export complete: {{size_gb:.2f}} GB ===", flush=True)
 """
     export_script_path = os.path.join(output_dir, "export_gguf.py")
     with open(export_script_path, "w") as f:
