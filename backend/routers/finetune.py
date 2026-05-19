@@ -330,13 +330,13 @@ async def run_job_stream(job_id: str) -> StreamingResponse:
         return StreamingResponse(_terminal(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-    # Pipeline already active for this job — don't start a second
+    # Pipeline already active — attach to its log queue instead of starting a new one
     if ft.is_pipeline_active(job_id):
-        async def _already_running():
-            yield f"data: {json.dumps({'type': 'log', 'text': 'Pipeline already running…'})}\n\n"
-            await asyncio.sleep(60)
-        return StreamingResponse(_already_running(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+        return StreamingResponse(
+            _sse_log_reader(job_id),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     # Job running but no active pipeline → backend restarted mid-training
     if job["status"] == "running":
