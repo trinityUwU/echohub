@@ -2,6 +2,44 @@
 import re
 import struct
 from pathlib import Path
+from typing import Optional
+
+
+# Maps model name patterns to llama_cpp chat handler class names
+_VISION_HANDLERS: list[tuple[str, str]] = [
+    ("qwen2-vl", "Qwen25VLChatHandler"),
+    ("qwen2.5-vl", "Qwen25VLChatHandler"),
+    ("qwen25vl", "Qwen25VLChatHandler"),
+    ("llava-1.5", "Llava15ChatHandler"),
+    ("llava-v1.5", "Llava15ChatHandler"),
+    ("llava-1.6", "Llava16ChatHandler"),
+    ("llava-v1.6", "Llava16ChatHandler"),
+    ("llava", "Llava15ChatHandler"),
+    ("minicpm-v-2_6", "MiniCPMv26ChatHandler"),
+    ("minicpm", "MiniCPMv26ChatHandler"),
+    ("moondream", "MoondreamChatHandler"),
+    ("llama-3.2", "Llama3VisionAlphaChatHandler"),
+    ("llama3.2", "Llama3VisionAlphaChatHandler"),
+]
+
+
+def find_mmproj(model_dir: str) -> Optional[str]:
+    """Return path to the multimodal projector GGUF in model_dir, or None."""
+    p = Path(model_dir)
+    for candidate in p.glob("*.gguf"):
+        name = candidate.name.lower()
+        if "mmproj" in name or "projector" in name or "clip" in name:
+            return str(candidate)
+    return None
+
+
+def detect_vision_handler(model_id: str) -> Optional[str]:
+    """Return llama_cpp chat handler class name for vision models, or None."""
+    name = model_id.lower()
+    for pattern, handler in _VISION_HANDLERS:
+        if pattern in name:
+            return handler
+    return None
 
 
 def detect_mtp(gguf_path: str) -> bool:

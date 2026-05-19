@@ -105,6 +105,8 @@ def load_model(
     n_gpu_layers_override: int | None = None,
     cpu_overflow: bool = False,
     is_moe: bool = False,
+    mmproj_path: Optional[str] = None,
+    vision_handler: Optional[str] = None,
 ) -> None:
     """Charge le modèle GGUF. Bloquant — appelé depuis un thread."""
     global _llm, _current_model, _load_error, _eject_requested
@@ -125,7 +127,7 @@ def load_model(
 
     _log(f"[llama] Loading {model_id}")
     _log(f"[llama] File: {gguf_path}")
-    _log(f"[llama] n_gpu_layers={n_gpu} | n_ctx={n_ctx} | n_batch=512 | flash_attn={_flash_attn_enabled()} | n_threads={n_threads} | cpu_overflow={cpu_overflow} | is_moe={is_moe}")
+    _log(f"[llama] n_gpu_layers={n_gpu} | n_ctx={n_ctx} | n_batch=512 | flash_attn={_flash_attn_enabled()} | n_threads={n_threads} | cpu_overflow={cpu_overflow} | is_moe={is_moe} | vision={mmproj_path is not None}")
 
     if _eject_requested:
         raise RuntimeError("Ejected by user")
@@ -162,6 +164,16 @@ def load_model(
             pass  # param not supported — n_batch=128 is the fallback mitigation
         _log("[llama] MoE + cpu_overflow: n_batch=128, no_perf=True to avoid CUDA graph OOM")
 
+    # Vision: load multimodal projector if present
+    if mmproj_path and vision_handler:
+        try:
+            import llama_cpp.llama_chat_format as _fmt
+            handler_cls = getattr(_fmt, vision_handler)
+            llama_kwargs["chat_handler"] = handler_cls(clip_model_path=mmproj_path, verbose=False)
+            _log(f"[llama] Vision handler: {vision_handler} + {mmproj_path}")
+        except Exception as e:
+            _log(f"[llama] Vision handler load failed ({e}) — falling back to text-only")
+
     _llm = Llama(**llama_kwargs)
 
     elapsed = time.time() - start
@@ -186,6 +198,8 @@ def load_model_async(
     n_gpu_layers_override: int | None = None,
     cpu_overflow: bool = False,
     is_moe: bool = False,
+    mmproj_path: Optional[str] = None,
+    vision_handler: Optional[str] = None,
 ) -> None:
     """Lance le chargement dans un thread background — retourne immédiatement."""
     global _loading_model_id, _load_error, _eject_requested
@@ -196,7 +210,7 @@ def load_model_async(
     def _run() -> None:
         global _loading_model_id, _load_error
         try:
-            load_model(gguf_path, model_id, n_ctx, gpu_type, n_gpu_layers_override, cpu_overflow, is_moe)
+            load_model(gguf_path, model_id, n_ctx, gpu_type, n_gpu_layers_override, cpu_overflow, is_moe, mmproj_path, vision_handler)
         except Exception as e:
             if not _eject_requested:
                 _load_error = str(e)

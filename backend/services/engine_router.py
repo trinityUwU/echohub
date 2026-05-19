@@ -201,8 +201,12 @@ def load_model_async(
         gguf_path = find_gguf_file(model_path)
         if not gguf_path:
             raise FileNotFoundError(f"No .gguf file found in {model_path}")
+        from backend.services.gguf_utils import find_mmproj, detect_vision_handler
+        mmproj = find_mmproj(model_path)
+        vision_handler = detect_vision_handler(model_id) if mmproj else None
         set_active_engine("llama")
-        logger.info(f"Routing {model_id} → llama-cpp-python (GGUF: {Path(gguf_path).name})")
+        logger.info(f"Routing {model_id} → llama-cpp-python (GGUF: {Path(gguf_path).name})"
+                    + (f" + mmproj ({vision_handler})" if mmproj else ""))
         llama_service.load_model_async(
             gguf_path=gguf_path,
             model_id=model_id,
@@ -211,6 +215,8 @@ def load_model_async(
             n_gpu_layers_override=n_gpu_layers,
             cpu_overflow=cpu_overflow,
             is_moe=is_moe,
+            mmproj_path=mmproj,
+            vision_handler=vision_handler,
         )
         return
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Modal } from '@/components/shared/Modal'
 import { Slider } from '@/components/shared/Slider'
 import { Btn } from '@/components/shared/Btn'
+import { Badge } from '@/components/shared/Badge'
 import { getInferenceSettings, getMoeLoadConfig } from '@/api/client'
 import type { MoeLoadConfig } from '@/api/client'
 import type { GpuStats, ModelInfo } from '@/types'
@@ -144,11 +145,24 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
           </div>
         </div>
       )}
-      {/* Model + engine */}
-      <div className="bg-elevated border border-border rounded-sm px-3 py-2.5 flex items-center justify-between">
-        <span className="text-sm font-semibold text-text-primary">{model.name}</span>
-        <span className={`text-2xs px-1.5 py-0.5 rounded ${engine === 'llama' ? 'bg-green/15 text-green' : 'bg-blue/15 text-blue'}`}>
-          {engine === 'llama' ? 'llama.cpp' : 'vLLM'} · {check?.format?.toUpperCase() ?? model.quantization ?? '?'}
+      {/* Model + engine + capability badges */}
+      <div className="bg-elevated border border-border rounded-sm px-3 py-2.5 flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-1.5 min-w-0">
+          <span className="text-sm font-semibold text-text-primary truncate">{model.name}</span>
+          <div className="flex flex-wrap gap-1">
+            {model.quantization && <Badge variant="quant">{model.quantization.split('/')[0]}</Badge>}
+            {model.is_moe && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium">
+                MoE{model.active_params_billion ? ` A${model.active_params_billion}B` : ''}
+              </span>
+            )}
+            {model.has_mtp && <Badge variant="mtp">MTP</Badge>}
+            {model.capabilities?.thinking && <Badge variant="think">thinking</Badge>}
+            {model.capabilities?.vision && <Badge variant="vision">vision</Badge>}
+          </div>
+        </div>
+        <span className={`text-2xs px-1.5 py-0.5 rounded flex-shrink-0 mt-0.5 ${engine === 'llama' ? 'bg-green/15 text-green' : 'bg-blue/15 text-blue'}`}>
+          {engine === 'llama' ? 'llama.cpp' : 'vLLM'}
         </span>
       </div>
 
