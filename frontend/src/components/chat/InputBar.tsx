@@ -1,4 +1,5 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import type { Attachment, ChatParams } from '@/types'
 
 interface InputBarProps {
@@ -71,23 +72,18 @@ export function InputBar({ modelLoaded, visionEnabled, streaming, params, usedTo
       return
     }
 
-    // Fallback for WebKitGTK/Linux: clipboardData.items may be empty for images
-    // Use navigator.clipboard.read() which WebKit exposes correctly
-    if (typeof navigator?.clipboard?.read === 'function') {
-      e.preventDefault()
-      navigator.clipboard.read().then(clipItems => {
-        for (const item of clipItems) {
-          const imageType = item.types.find(t => t.startsWith('image/'))
-          if (imageType) {
-            item.getType(imageType).then(blob => {
-              const file = new File([blob], `paste.${imageType.split('/')[1]}`, { type: imageType })
-              handleFiles([file] as unknown as FileList)
-            }).catch(() => {})
-            break
-          }
-        }
-      }).catch(() => {})
-    }
+    // Fallback for WebKitGTK/Linux via Tauri Rust command (arboard)
+    // clipboardData.items is empty for images on WebKitGTK — read directly from clipboard
+    e.preventDefault()
+    invoke<string | null>('read_clipboard_image').then(dataUrl => {
+      if (!dataUrl) return
+      const byteStr = atob(dataUrl.split(',')[1])
+      const arr = new Uint8Array(byteStr.length)
+      for (let i = 0; i < byteStr.length; i++) arr[i] = byteStr.charCodeAt(i)
+      const blob = new Blob([arr], { type: 'image/png' })
+      const file = new File([blob], 'clipboard.png', { type: 'image/png' })
+      handleFiles([file] as unknown as FileList)
+    }).catch(() => {})
   }
 
   return (

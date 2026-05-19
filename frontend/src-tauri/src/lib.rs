@@ -1,6 +1,7 @@
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager, State};
+use base64::Engine;
 
 pub struct BackendState {
     pub port: u16,
@@ -20,6 +21,29 @@ fn find_free_port() -> u16 {
 #[tauri::command]
 fn get_backend_port(state: State<BackendState>) -> u16 {
     state.port
+}
+
+/// Read an image from the system clipboard. Returns a data URL (data:image/png;base64,...) or null.
+#[tauri::command]
+fn read_clipboard_image() -> Option<String> {
+    let mut ctx = arboard::Clipboard::new().ok()?;
+    let img = ctx.get_image().ok()?;
+
+    // Convert RGBA raw bytes to PNG via the `image` crate
+    let rgba = image::RgbaImage::from_raw(
+        img.width as u32,
+        img.height as u32,
+        img.bytes.into_owned(),
+    )?;
+
+    let mut png_bytes: Vec<u8> = Vec::new();
+    let mut cursor = std::io::Cursor::new(&mut png_bytes);
+    image::DynamicImage::ImageRgba8(rgba)
+        .write_to(&mut cursor, image::ImageFormat::Png)
+        .ok()?;
+
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+    Some(format!("data:image/png;base64,{}", b64))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -42,7 +66,7 @@ pub fn run() {
                 kill_backend(window.app_handle());
             }
         })
-        .invoke_handler(tauri::generate_handler![get_backend_port])
+        .invoke_handler(tauri::generate_handler![get_backend_port, read_clipboard_image])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
