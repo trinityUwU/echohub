@@ -504,11 +504,23 @@ async def generate(
     except Exception:
         actual_model_id = _current_model.id
 
+    # Clip max_tokens to avoid vLLM 400 when prompt + max_tokens > max_model_len
+    safe_max_tokens = max_tokens
+    if _current_model and _current_model.max_context_window:
+        # Estimate prompt token count conservatively (4 chars ~ 1 token)
+        prompt_chars = sum(len(str(m.get("content", ""))) for m in messages)
+        estimated_prompt_tokens = prompt_chars // 4 + 64  # 64 = overhead for roles/special tokens
+        budget = _current_model.max_context_window - estimated_prompt_tokens
+        if budget > 0:
+            safe_max_tokens = min(max_tokens, budget)
+        else:
+            safe_max_tokens = 128  # context full — allow short reply
+
     payload: dict = {
         "model": actual_model_id,
         "messages": messages,
         "temperature": temperature,
-        "max_tokens": max_tokens,
+        "max_tokens": safe_max_tokens,
         "top_p": top_p,
         "repetition_penalty": repetition_penalty,
         "presence_penalty": presence_penalty,

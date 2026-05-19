@@ -161,7 +161,7 @@ async def chat(req: ChatRequest):
                     yield f"{chunk}\n\n"
             except Exception as e:
                 logger.error(f"chat stream error: {e}")
-                yield f"data: {{\"error\": \"{str(e)}\"}}\n\n"
+                yield f"data: {_j.dumps({'error': str(e), 'error_type': 'error'})}\n\n"
                 return
 
             end = _t.perf_counter()
