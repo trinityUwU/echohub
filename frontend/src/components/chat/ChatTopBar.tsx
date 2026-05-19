@@ -35,6 +35,14 @@ function NormalBar({ loadedModel, onOpenPicker, onClear, onEject, onExport }: Pi
             {loadedModel.engine === 'vllm' ? 'vLLM' : 'llama.cpp'}
           </span>
         )}
+        {loadedModel?.quantization && (
+          <span className="text-2xs bg-blue/15 text-blue rounded px-1.5 py-px">
+            {loadedModel.quantization.split('/')[0]}
+          </span>
+        )}
+        {loadedModel?.has_mtp && (
+          <span className="text-2xs bg-cyan-500/15 text-cyan-400 rounded px-1.5 py-px">MTP</span>
+        )}
         <svg className="w-3.5 h-3.5 stroke-text-muted" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="6 9 12 15 18 9"/>
         </svg>
