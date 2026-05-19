@@ -36,6 +36,11 @@ export function ModelCard({ model, job, onClick, isFavorite, onToggleFavorite }:
             </button>
           )}
           {model.quantization && <Badge variant="quant">{model.quantization.split('/')[0]}</Badge>}
+          {model.is_moe && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium flex-shrink-0">
+              MoE{model.active_params_billion ? ` A${model.active_params_billion}B` : ''}
+            </span>
+          )}
           {model.capabilities.thinking && <Badge variant="think">thinking</Badge>}
           {model.capabilities.vision && <Badge variant="vision">vision</Badge>}
           {model.gated && <Badge variant="gated">gated</Badge>}

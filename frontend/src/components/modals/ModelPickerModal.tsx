@@ -184,6 +184,11 @@ function PickerItem({ model, isLoaded, isSelected, onClick }: {
       <div className="flex flex-col items-end gap-1 flex-shrink-0 text-xs text-text-muted">
         {isLoaded && <Badge variant="loaded">loaded</Badge>}
         {!isLoaded && <Badge variant="dl">downloaded</Badge>}
+        {model.is_moe && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium">
+            MoE{model.active_params_billion ? ` A${model.active_params_billion}B` : ''}
+          </span>
+        )}
         {model.vram_estimate_gb && <span>{model.vram_estimate_gb} GB VRAM</span>}
       </div>
     </button>
