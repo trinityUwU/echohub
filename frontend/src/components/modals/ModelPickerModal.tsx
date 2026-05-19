@@ -178,18 +178,23 @@ function PickerItem({ model, isLoaded, isSelected, onClick }: {
       <div className="flex-1 min-w-0">
         <div className="text-sm font-semibold text-text-primary truncate">{model.name}</div>
         <div className="text-xs text-text-muted mt-0.5">
-          {model.author} · {model.quantization ?? 'AWQ'} · {model.params_billion}B
+          {model.author}{model.params_billion ? ` · ${model.params_billion}B` : ''}
+        </div>
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {model.quantization && <Badge variant="quant">{model.quantization.split('/')[0]}</Badge>}
+          {model.is_moe && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium">
+              MoE{model.active_params_billion ? ` A${model.active_params_billion}B` : ''}
+            </span>
+          )}
+          {model.has_mtp && <Badge variant="mtp">MTP</Badge>}
+          {model.capabilities?.thinking && <Badge variant="think">thinking</Badge>}
+          {model.capabilities?.vision && <Badge variant="vision">vision</Badge>}
         </div>
       </div>
       <div className="flex flex-col items-end gap-1 flex-shrink-0 text-xs text-text-muted">
         {isLoaded && <Badge variant="loaded">loaded</Badge>}
         {!isLoaded && <Badge variant="dl">downloaded</Badge>}
-        {model.is_moe && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium">
-            MoE{model.active_params_billion ? ` A${model.active_params_billion}B` : ''}
-          </span>
-        )}
-        {model.has_mtp && <Badge variant="mtp">MTP</Badge>}
         {model.vram_estimate_gb && <span>{model.vram_estimate_gb} GB VRAM</span>}
       </div>
     </button>
