@@ -111,7 +111,11 @@ async def chat(req: ChatRequest):
     if engine_router.get_status() is None:
         raise HTTPException(status_code=404, detail="No model loaded.")
 
-    # Build messages — filter out empty content that causes vLLM 400
+    # Detect vision support for the active engine
+    _active_model = engine_router.get_status()
+    _has_vision = bool(_active_model and getattr(_active_model, "capabilities", None) and _active_model.capabilities.vision)
+
+    # Build messages — filter empty content, strip images if model has no vision
     messages = []
     for m in req.messages:
         content = m.content
@@ -121,6 +125,12 @@ async def chat(req: ChatRequest):
         # Skip empty list content
         if isinstance(content, list) and not content:
             continue
+        # If model has no vision and content is multimodal, extract text only
+        if isinstance(content, list) and not _has_vision:
+            text_parts = [p.get("text", "") for p in content if p.get("type") == "text"]
+            content = " ".join(text_parts).strip()
+            if not content:
+                continue
         messages.append({"role": m.role, "content": content})
 
     if not messages:
