@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useModels } from '@/hooks/useModels'
 import { useGpu } from '@/hooks/useGpu'
 import { useConversations } from '@/hooks/useConversations'
-import { subscribeDownloads, cancelDownload, deleteModel } from '@/api/client'
-import type { DownloadJob, ModelInfo } from '@/types'
+import { subscribeDownloads, cancelDownload, deleteModel, listFinetunedModels } from '@/api/client'
+import type { DownloadJob, FinetunedModel, ModelInfo } from '@/types'
 import { NavRail } from '@/components/nav/NavRail'
 import { ChatPage } from '@/components/chat/ChatPage'
 import { LibraryPage } from '@/components/library/LibraryPage'
@@ -28,11 +28,12 @@ export default function App(): React.ReactElement {
   const [pendingLoad, setPendingLoad] = useState<ModelInfo | null>(null)
   const [showPicker, setShowPicker] = useState(false)
   const [downloadJobs, setDownloadJobs] = useState<DownloadJob[]>([])
+  const [finetunedModels, setFinetunedModels] = useState<FinetunedModel[]>([])
   const [loadingPct, setLoadingPct] = useState(0)
   const notifiedComplete = useRef<Set<string>>(new Set())
   const loadPctTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const { downloaded, loadedModel, loadingModelId, loadError, unloading, refresh, loadModel, unloadModel } = useModels()
+  const { downloaded, loadedModel, loadingModelId, loadError, unloading, refresh, loadModel, loadModelFromPath, unloadModel } = useModels()
   const gpu = useGpu()
   const { conversations, archivedConversations, activeId, activeMessages, newConversation, selectConversation, deleteConversation, archiveConversation, unarchiveConversation, renameConversation, setActiveMessages } = useConversations()
 
@@ -69,10 +70,24 @@ export default function App(): React.ReactElement {
       .catch(() => {})
   }, [])
 
+  const refreshFinetuned = useCallback(() => {
+    listFinetunedModels().then(setFinetunedModels).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refreshFinetuned()
+    const t = setInterval(refreshFinetuned, 15_000)
+    return () => clearInterval(t)
+  }, [refreshFinetuned])
+
   const requestLoad = (modelId: string): void => {
     const model = downloaded.find(m => m.id === modelId)
     if (!model) return
     setPendingLoad(model)
+  }
+
+  const handleLoadFinetuned = (model: FinetunedModel): void => {
+    loadModelFromPath(model.id, model.path).catch(console.error)
   }
 
   const confirmLoad = (cfg: {
@@ -138,12 +153,15 @@ export default function App(): React.ReactElement {
         <div className={`flex flex-1 overflow-hidden ${page === 'library' ? 'animate-fade-in' : 'hidden'}`}>
           <LibraryPage
             models={downloaded}
+            finetunedModels={finetunedModels}
             onDelete={async (id) => {
               const ok = await confirm('Delete model?', 'This will permanently remove the model files from disk. This cannot be undone.', 'Delete')
               if (!ok) return
               try { await deleteModel(id); refresh() } catch { /* TODO error toast */ }
             }}
             onAddModel={() => setPage('discover')}
+            onLoad={requestLoad}
+            onLoadFinetuned={handleLoadFinetuned}
             totalDiskGb={downloaded.reduce((s, m) => s + (m.size_gb ?? 0), 0)}
           />
         </div>
@@ -192,8 +210,10 @@ export default function App(): React.ReactElement {
       {showPicker && (
         <ModelPickerModal
           models={downloaded}
+          finetunedModels={finetunedModels}
           loadedModelId={loadedModel?.id ?? null}
           onConfirm={handlePickerConfirm}
+          onConfirmFinetuned={(m) => { setShowPicker(false); handleLoadFinetuned(m) }}
           onCancel={() => setShowPicker(false)}
         />
       )}

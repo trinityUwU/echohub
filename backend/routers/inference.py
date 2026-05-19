@@ -35,7 +35,13 @@ def load_model(req: LoadRequest) -> dict:
     if state.get("loading_model_id") is not None:
         raise HTTPException(status_code=409, detail="A model is already loading.")
     try:
-        model_path = _resolve_model_path(req.model_id)
+        if req.gguf_path:
+            from pathlib import Path as _Path
+            if not _Path(req.gguf_path).exists():
+                raise FileNotFoundError(f"GGUF file not found: {req.gguf_path}")
+            model_path = req.gguf_path
+        else:
+            model_path = _resolve_model_path(req.model_id)
         engine_router.load_model_async(
             model_path=model_path,
             model_id=req.model_id,

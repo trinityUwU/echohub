@@ -63,45 +63,51 @@ export function useModels() {
     }, 2000)
   }, [refresh, stopPolling])
 
-  const loadModel = useCallback(async (
-    modelId: string,
-    config?: { maxModelLen?: number; gpuMemoryUtilization?: number; enforceEager?: boolean; maxCudagraphCaptureSize?: number | null; n_gpu_layers?: number | null; cpu_overflow?: boolean }
-  ) => {
-    setLoadError(null)
+  type LoadConfig = {
+    maxModelLen?: number; gpuMemoryUtilization?: number; enforceEager?: boolean
+    maxCudagraphCaptureSize?: number | null; n_gpu_layers?: number | null; cpu_overflow?: boolean
+    gguf_path?: string | null
+  }
 
-    // Auto-unload si un modèle est déjà chargé
+  const _doLoad = useCallback(async (modelId: string, req: import('@/types').LoadRequest) => {
+    setLoadError(null)
     const currentStatus = await api.getInferenceStatus()
     if (currentStatus !== null) {
       setUnloading(true)
       stopPolling()
       setLoadingModelId(null)
-      try {
-        await api.unloadModel()
-        await refresh()
-      } catch {
-        // continuer quand même
-      } finally {
-        setUnloading(false)
-      }
+      try { await api.unloadModel(); await refresh() } catch { /* continue */ } finally { setUnloading(false) }
     }
-
     setLoadingModelId(modelId)
     try {
-      await api.loadModel({
-        model_id: modelId,
-        max_model_len: config?.maxModelLen ?? null,
-        gpu_memory_utilization: config?.gpuMemoryUtilization ?? 0.75,
-        enforce_eager: config?.enforceEager ?? false,
-        max_cudagraph_capture_size: config?.maxCudagraphCaptureSize ?? null,
-        n_gpu_layers: config?.n_gpu_layers ?? null,
-        cpu_overflow: config?.cpu_overflow ?? false,
-      })
+      await api.loadModel(req)
       startPolling()
     } catch (e) {
       setLoadingModelId(null)
       setLoadError(String(e))
     }
   }, [startPolling, stopPolling, refresh])
+
+  const loadModel = useCallback(async (modelId: string, config?: LoadConfig) => {
+    await _doLoad(modelId, {
+      model_id: modelId,
+      max_model_len: config?.maxModelLen ?? null,
+      gpu_memory_utilization: config?.gpuMemoryUtilization ?? 0.75,
+      enforce_eager: config?.enforceEager ?? false,
+      max_cudagraph_capture_size: config?.maxCudagraphCaptureSize ?? null,
+      n_gpu_layers: config?.n_gpu_layers ?? null,
+      cpu_overflow: config?.cpu_overflow ?? false,
+    })
+  }, [_doLoad])
+
+  const loadModelFromPath = useCallback(async (modelId: string, ggufPath: string) => {
+    await _doLoad(modelId, {
+      model_id: modelId,
+      gguf_path: ggufPath,
+      gpu_memory_utilization: 0.75,
+      enforce_eager: false,
+    })
+  }, [_doLoad])
 
   const unloadModel = useCallback(async () => {
     setUnloading(true)
@@ -131,6 +137,7 @@ export function useModels() {
     unloading,
     refresh,
     loadModel,
+    loadModelFromPath,
     unloadModel,
   }
 }

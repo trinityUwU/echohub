@@ -51,6 +51,7 @@ class LoadRequest(BaseModel):
     vllm_version: Optional[str] = None
     n_gpu_layers: Optional[int] = None  # llama.cpp only: -1=full GPU, 0=CPU, N=N layers on GPU
     cpu_overflow: bool = False          # llama.cpp only: allow overflow to CPU RAM if VRAM exceeded
+    gguf_path: Optional[str] = None    # absolute path for finetuned GGUFs — bypasses HF resolution
 
 
 class ChatMessage(BaseModel):

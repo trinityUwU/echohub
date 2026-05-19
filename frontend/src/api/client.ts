@@ -571,6 +571,16 @@ export const getFinetuneJobLogs = (id: string): Promise<{ lines: string[]; exist
 export const findGguf = (modelId: string): Promise<import('@/types').GgufSearchResult> =>
   apiRequest(`/finetune/find-gguf?model_id=${encodeURIComponent(modelId)}`)
 
+export const listFinetunedModels = (): Promise<import('@/types').FinetunedModel[]> =>
+  apiRequest('/models/finetuned')
+
+export const checkLlamaCompat = (ggufPath: string): Promise<import('@/types').LlamaCompatResult> =>
+  apiRequest(`/models/llama-compat-check?gguf_path=${encodeURIComponent(ggufPath)}`)
+
+export async function llamaUpgradeStreamUrl(): Promise<string> {
+  return apiUrl('/models/llama-upgrade/stream')
+}
+
 export async function evalRunStreamUrl(): Promise<string> {
   return apiUrl('/finetune/eval-run/stream')
 }

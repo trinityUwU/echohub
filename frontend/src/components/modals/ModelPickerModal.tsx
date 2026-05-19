@@ -2,34 +2,120 @@ import { useState } from 'react'
 import { Modal } from '@/components/shared/Modal'
 import { Btn } from '@/components/shared/Btn'
 import { Badge } from '@/components/shared/Badge'
-import type { ModelInfo } from '@/types'
+import type { ModelInfo, FinetunedModel, LlamaCompatResult } from '@/types'
+import { checkLlamaCompat, llamaUpgradeStreamUrl } from '@/api/client'
+
+type SourceFilter = 'all' | 'downloaded' | 'finetuned'
 
 interface ModelPickerModalProps {
   models: ModelInfo[]
+  finetunedModels: FinetunedModel[]
   loadedModelId: string | null
   onConfirm: (modelId: string) => void
+  onConfirmFinetuned: (model: FinetunedModel) => void
   onCancel: () => void
 }
 
-export function ModelPickerModal({ models, loadedModelId, onConfirm, onCancel }: ModelPickerModalProps): React.ReactElement {
+export function ModelPickerModal({
+  models,
+  finetunedModels,
+  loadedModelId,
+  onConfirm,
+  onConfirmFinetuned,
+  onCancel,
+}: ModelPickerModalProps): React.ReactElement {
   const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState(loadedModelId)
+  const [source, setSource] = useState<SourceFilter>('all')
+  const [selectedId, setSelectedId] = useState<string | null>(loadedModelId)
+  const [selectedFt, setSelectedFt] = useState<FinetunedModel | null>(null)
+  const [compatCheck, setCompatCheck] = useState<LlamaCompatResult | null>(null)
+  const [upgradeLog, setUpgradeLog] = useState<string[]>([])
+  const [upgrading, setUpgrading] = useState(false)
 
-  const filtered = models.filter(m =>
-    m.name.toLowerCase().includes(query.toLowerCase()) ||
-    m.author?.toLowerCase().includes(query.toLowerCase())
-  )
+  const filteredModels = (source === 'all' || source === 'downloaded')
+    ? models.filter(m =>
+        m.name.toLowerCase().includes(query.toLowerCase()) ||
+        m.author?.toLowerCase().includes(query.toLowerCase()))
+    : []
+
+  const filteredFt = (source === 'all' || source === 'finetuned')
+    ? finetunedModels.filter(m =>
+        m.name.toLowerCase().includes(query.toLowerCase()))
+    : []
+
+  const hasSelection = selectedId !== null || selectedFt !== null
+  const isCurrentLoaded = selectedId === loadedModelId && selectedFt === null
+
+  const handleSelectFt = (m: FinetunedModel): void => {
+    setSelectedId(null)
+    setSelectedFt(m)
+    setCompatCheck(null)
+  }
+
+  const handleSelectModel = (id: string): void => {
+    setSelectedFt(null)
+    setSelectedId(id)
+    setCompatCheck(null)
+  }
+
+  const handleLoad = async (): Promise<void> => {
+    if (selectedFt) {
+      const result = await checkLlamaCompat(selectedFt.path).catch(() => null)
+      if (result && !result.compatible && result.needs_upgrade) {
+        setCompatCheck(result)
+        return
+      }
+      onConfirmFinetuned(selectedFt)
+      return
+    }
+    if (selectedId) onConfirm(selectedId)
+  }
+
+  const handleUpgrade = async (): Promise<void> => {
+    setUpgrading(true)
+    setUpgradeLog([])
+    try {
+      const url = await llamaUpgradeStreamUrl()
+      const es = new EventSource(url)
+      es.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data) as { done?: boolean; msg?: string; success?: boolean }
+          if (data.done) {
+            es.close()
+            setUpgrading(false)
+            if (data.success && selectedFt) onConfirmFinetuned(selectedFt)
+          } else if (data.msg) {
+            setUpgradeLog(l => [...l, data.msg as string])
+          }
+        } catch { /* ignore */ }
+      }
+      es.onerror = () => { es.close(); setUpgrading(false) }
+    } catch {
+      setUpgrading(false)
+    }
+  }
+
+  if (compatCheck) {
+    return (
+      <CompatBanner
+        result={compatCheck}
+        upgradeLog={upgradeLog}
+        upgrading={upgrading}
+        onUpgrade={handleUpgrade}
+        onCancel={() => setCompatCheck(null)}
+      />
+    )
+  }
 
   return (
     <Modal
       title="Switch model"
       onClose={onCancel}
-      width="w-[440px]"
+      width="w-[480px]"
       footer={
         <>
           <Btn onClick={onCancel}>Cancel</Btn>
-          <Btn variant="primary" disabled={!selected || selected === loadedModelId}
-            onClick={() => selected && onConfirm(selected)}>
+          <Btn variant="primary" disabled={!hasSelection || isCurrentLoaded} onClick={handleLoad}>
             Load selected
           </Btn>
         </>
@@ -49,14 +135,18 @@ export function ModelPickerModal({ models, loadedModelId, onConfirm, onCancel }:
         />
       </div>
 
-      <div className="text-xs font-semibold uppercase tracking-widest text-text-muted">Local models</div>
+      <SourceToggle value={source} onChange={setSource} />
 
       <div className="flex flex-col gap-1 max-h-[320px] overflow-y-auto">
-        {filtered.map(m => (
-          <PickerItem key={m.id} model={m} isLoaded={m.id === loadedModelId} isSelected={m.id === selected}
-            onClick={() => setSelected(m.id)} />
+        {filteredModels.map(m => (
+          <PickerItem key={m.id} model={m} isLoaded={m.id === loadedModelId}
+            isSelected={m.id === selectedId} onClick={() => handleSelectModel(m.id)} />
         ))}
-        {filtered.length === 0 && (
+        {filteredFt.map(m => (
+          <PickerFtItem key={m.id} model={m} isSelected={m.id === selectedFt?.id}
+            onClick={() => handleSelectFt(m)} />
+        ))}
+        {filteredModels.length === 0 && filteredFt.length === 0 && (
           <div className="text-center text-text-muted py-6 text-sm">No models match "{query}"</div>
         )}
       </div>
@@ -71,6 +161,29 @@ export function ModelPickerModal({ models, loadedModelId, onConfirm, onCancel }:
   )
 }
 
+function SourceToggle({ value, onChange }: { value: SourceFilter; onChange: (v: SourceFilter) => void }): React.ReactElement {
+  const opts: { v: SourceFilter; label: string }[] = [
+    { v: 'all', label: 'All' },
+    { v: 'downloaded', label: 'Downloaded' },
+    { v: 'finetuned', label: 'Fine-tuned' },
+  ]
+  return (
+    <div className="flex bg-elevated border border-border rounded-sm overflow-hidden text-xs self-start">
+      {opts.map(o => (
+        <button
+          key={o.v}
+          onClick={() => onChange(o.v)}
+          className={`px-2.5 py-1 cursor-pointer transition-colors ${
+            value === o.v ? 'bg-accent/20 text-accent' : 'text-text-muted hover:text-text-primary'
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function PickerItem({ model, isLoaded, isSelected, onClick }: {
   model: ModelInfo; isLoaded: boolean; isSelected: boolean; onClick: () => void
 }): React.ReactElement {
@@ -80,10 +193,8 @@ function PickerItem({ model, isLoaded, isSelected, onClick }: {
     <button
       onClick={onClick}
       className={`flex items-center gap-2.5 px-3 py-2.5 rounded-sm border cursor-pointer transition-colors text-left w-full ${
-        isSelected
-          ? 'bg-accent-dim border-accent/40'
-          : isLoaded
-          ? 'bg-elevated border-green/25 hover:border-green/40'
+        isSelected ? 'bg-accent-dim border-accent/40'
+          : isLoaded ? 'bg-elevated border-green/25 hover:border-green/40'
           : 'bg-elevated border-border hover:border-border-hover'
       }`}
     >
@@ -102,5 +213,69 @@ function PickerItem({ model, isLoaded, isSelected, onClick }: {
         {model.vram_estimate_gb && <span>{model.vram_estimate_gb} GB VRAM</span>}
       </div>
     </button>
+  )
+}
+
+function PickerFtItem({ model, isSelected, onClick }: {
+  model: FinetunedModel; isSelected: boolean; onClick: () => void
+}): React.ReactElement {
+  const initials = model.name.replace(/[^A-Z0-9]/g, '').slice(0, 4) || 'FT'
+
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-2.5 px-3 py-2.5 rounded-sm border cursor-pointer transition-colors text-left w-full ${
+        isSelected ? 'bg-accent-dim border-accent/40' : 'bg-elevated border-border hover:border-border-hover'
+      }`}
+    >
+      <div className="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-xs font-bold text-purple-400 flex-shrink-0">
+        {initials}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-semibold text-text-primary truncate">{model.name}</div>
+        <div className="text-xs text-text-muted mt-0.5">
+          {model.base_model_id ? model.base_model_id.split('/').pop() : 'finetuned'} · {model.quantization} · {model.size_gb.toFixed(1)} GB
+        </div>
+      </div>
+      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+        <Badge variant="ft">ft</Badge>
+        {model.loaded && <Badge variant="loaded">loaded</Badge>}
+      </div>
+    </button>
+  )
+}
+
+function CompatBanner({ result, upgradeLog, upgrading, onUpgrade, onCancel }: {
+  result: LlamaCompatResult
+  upgradeLog: string[]
+  upgrading: boolean
+  onUpgrade: () => void
+  onCancel: () => void
+}): React.ReactElement {
+  return (
+    <Modal title="Incompatible llama-cpp-python" onClose={onCancel} width="w-[480px]"
+      footer={
+        <>
+          <Btn onClick={onCancel} disabled={upgrading}>Cancel</Btn>
+          <Btn variant="primary" onClick={onUpgrade} disabled={upgrading}>
+            {upgrading ? 'Upgrading…' : 'Upgrade llama-cpp-python'}
+          </Btn>
+        </>
+      }
+    >
+      <div className="flex items-start gap-3 p-3 bg-yellow/8 border border-yellow/20 rounded-sm text-sm">
+        <span className="text-yellow text-base flex-shrink-0">⚠</span>
+        <div className="flex-1">
+          <p className="text-text-primary font-medium mb-1">This GGUF requires a newer version of llama-cpp-python.</p>
+          {result.version && <p className="text-text-muted text-xs">Current: {result.version}</p>}
+          {result.error && <p className="text-text-muted text-xs mt-1">{result.error}</p>}
+        </div>
+      </div>
+      {upgradeLog.length > 0 && (
+        <div className="bg-base border border-border rounded-sm p-2 max-h-40 overflow-y-auto font-mono text-xs text-text-muted">
+          {upgradeLog.map((line, i) => <div key={i}>{line}</div>)}
+        </div>
+      )}
+    </Modal>
   )
 }

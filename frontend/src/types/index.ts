@@ -56,6 +56,28 @@ export interface LoadRequest {
   max_cudagraph_capture_size?: number | null
   n_gpu_layers?: number | null
   cpu_overflow?: boolean
+  gguf_path?: string | null
+}
+
+export interface FinetunedModel {
+  id: string
+  name: string
+  path: string
+  size_gb: number
+  job_id: string
+  base_model_id: string
+  quantization: string
+  downloaded: boolean
+  loaded: boolean
+  source: 'finetuned'
+  created_at: number
+}
+
+export interface LlamaCompatResult {
+  compatible: boolean
+  needs_upgrade?: boolean
+  error?: string
+  version?: string
 }
 
 // OpenAI multimodal content part

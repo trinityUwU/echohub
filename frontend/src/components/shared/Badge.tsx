@@ -1,5 +1,5 @@
 interface BadgeProps {
-  variant: 'quant' | 'cap' | 'think' | 'vision' | 'gated' | 'loaded' | 'dl'
+  variant: 'quant' | 'cap' | 'think' | 'vision' | 'gated' | 'loaded' | 'dl' | 'ft'
   children: React.ReactNode
 }
 
@@ -11,6 +11,7 @@ const STYLES: Record<BadgeProps['variant'], string> = {
   gated:  'bg-red/12 text-red',
   loaded: 'bg-accent/18 text-accent',
   dl:     'bg-green/12 text-green',
+  ft:     'bg-purple-500/15 text-purple-400',
 }
 
 export function Badge({ variant, children }: BadgeProps): React.ReactElement {
