@@ -2,7 +2,7 @@
 
 **Run AI models on your own machine. No cloud. No subscription. No data leaving your computer.**
 
-EchoHub is a local AI interface — think ChatGPT, but everything runs on your GPU, completely offline. Search and download models from Hugging Face, load them in one click, and chat.
+EchoHub is a local AI interface, like ChatGPT but everything runs on your GPU, completely offline. Search and download models from Hugging Face, load them in one click, and chat.
 
 ---
 
@@ -14,7 +14,7 @@ cd echohub
 ./start.sh
 ```
 
-`start.sh` detects your system, installs everything it needs, and opens the app. No manual configuration. No terminal commands after that.
+`start.sh` detects your system, installs what it needs, and opens the app. No manual configuration. After that, the terminal stays closed.
 
 ```bash
 ./stop.sh   # stop everything
@@ -24,62 +24,58 @@ cd echohub
 
 ## What it does
 
-- **Search** — browse thousands of open-source AI models from Hugging Face
-- **Download** — pick the version that fits your GPU memory, download in the background
-- **Load** — one click to load a model into memory, with a live VRAM preview so you know it'll fit
-- **Chat** — streaming responses, conversation history, image attachments for vision models
-- **Fine-tune** — collect training pairs from real conversations, fine-tune locally with QLoRA, evaluate before and after, export as GGUF
-- **Export** — export any conversation as Markdown
-- **Works offline** — once a model is downloaded, no internet needed
+- Search thousands of open source AI models from Hugging Face
+- Pick the variant that fits your GPU memory and download it in the background
+- Load a model with one click — there's a live VRAM preview before you commit
+- Chat with streaming responses, conversation history, and image attachments for vision models
+- Collect training pairs from real conversations, fine-tune locally with QLoRA, evaluate before and after, and export as GGUF
+- Export any conversation as Markdown
+- Once a model is downloaded, everything works offline
 
 ---
 
 ## What you need
 
-- A computer with a GPU (NVIDIA recommended, AMD and Apple Silicon work too)
+- A GPU (NVIDIA recommended, AMD and Apple Silicon work too)
 - 8 GB+ of GPU memory for most models
 - 20–50 GB of disk space (models are large)
 - Linux, macOS, or Windows (WSL2)
 
-No Python knowledge. No configuration files. No command line after the first install.
+You don't need Python knowledge or configuration files. No terminal access after the first install.
 
 ---
 
 ## Multiple vLLM versions
 
-Different AI models require different versions of the inference engine. EchoHub handles this automatically — each version lives in an isolated environment, the right one is selected per model. You can install new versions from Settings → Engines if a model needs one you don't have yet.
+Different models require different versions of the inference engine. EchoHub manages this automatically: each version lives in an isolated environment and the right one is selected per model. If a model needs a version you don't have yet, you can install it from Settings → Engines.
 
 ---
 
 ## Fine-tuning
 
-EchoHub includes a complete fine-tuning workflow — no Python knowledge required.
+EchoHub has a complete fine-tuning workflow, and it doesn't require Python knowledge.
 
-**Collect** — use any conversation in Chat to collect training pairs. Click the bookmark on any assistant response to open the pair editor, correct the response, and save it to a profile (Dev, Reasoning, General, Analysis, Debug).
+In Chat, every assistant message has a bookmark button. Click it to open the pair editor, correct the response, and save the pair to a training profile (Dev, Reasoning, General, Analysis, or Debug). That's the data collection step — it happens during conversations you're already having.
 
-**Configure** — click Configure & Start, choose your parameters (defaults auto-tuned to your GPU), optionally enable before/after eval.
+When you have enough pairs, click Configure & Start. Defaults are auto-tuned to your GPU. You can optionally enable before/after eval. Unsloth QLoRA runs locally in an isolated environment, logs stream in real time, and the app auto-downloads the GGUF version of your base model for evaluation.
 
-**Train** — Unsloth QLoRA runs locally in an isolated environment. Live logs stream in real time. The app auto-downloads the GGUF version of your base model for evaluation.
-
-**Evaluate** — automatic before/after comparison using the prompts from your training profile. Same prompts, same profile, reproducible scores.
-
-**Export** — merge LoRA + quantize to GGUF Q4_K_M, ready to load back into EchoHub.
+After training, you get a before/after score comparison using the exact prompts from your training profile. Then merge LoRA and quantize to GGUF Q4_K_M, ready to load back into EchoHub.
 
 ---
 
-## Under the hood (for the curious)
+## Under the hood
 
-EchoHub handles a lot of complexity so you don't have to:
+A few things that aren't obvious from the UI:
 
-- **Two inference engines** — llama-cpp for GGUF models (works everywhere), vLLM for AWQ/GPTQ (NVIDIA, higher performance)
-- **Automatic engine selection** — the app picks the right engine for each model
-- **Multiple vLLM versions** — isolated environments per version, automatic routing, one-click install
-- **VRAM management** — real-time preview before loading, automatic retry if allocation fails
-- **Model compatibility checking** — warns you before downloading if a model needs a newer engine version
-- **Configurable paths** — move model storage anywhere, migration handled automatically
-- **Fine-tuning pipeline** — Unsloth QLoRA in an isolated venv, hardware-aware defaults, eval before/after, GGUF export
+- Two inference engines: llama-cpp for GGUF models (works on any hardware), vLLM for AWQ/GPTQ (NVIDIA, higher throughput)
+- The app picks the engine based on model format — you don't choose
+- Multiple vLLM versions in isolated environments, automatic routing, one-click install from Settings
+- VRAM preview before loading (model weights + KV cache + CUDA overhead), with automatic retry if allocation fails by a small margin
+- Compatibility check before download: fetches config.json from HF and warns if the model needs a different engine version
+- Storage paths are configurable, and changing them triggers an automatic file migration
+- Fine-tuning runs in its own isolated venv, separate from the backend
 
-See the full technical breakdown:
+Full technical breakdown:
 - [v0.1 — Foundation](docs/v0.1-foundation.md)
 - [v0.2 — Multi-engine vLLM](docs/v0.2-multi-vllm.md)
 - [v0.3 — UX & automation](docs/v0.3-ux-automation.md)
