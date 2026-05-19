@@ -18,8 +18,12 @@ const NAV: { id: Section; label: string; icon: string }[] = [
   { id: 'about',    label: 'About',    icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 7v4m0 4h.01' },
 ]
 
-export function SettingsPage(): React.ReactElement {
-  const [section, setSection] = useState<Section>('setup')
+interface SettingsPageProps {
+  initialTab?: Section
+}
+
+export function SettingsPage({ initialTab }: SettingsPageProps): React.ReactElement {
+  const [section, setSection] = useState<Section>(initialTab ?? 'setup')
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">

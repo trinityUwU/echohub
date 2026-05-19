@@ -25,6 +25,7 @@ export default function App(): React.ReactElement {
   const { confirm, element: dialogEl } = useDialog()
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [page, setPage] = useState<Page>('chat')
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'engines' | undefined>(undefined)
   const [pendingLoad, setPendingLoad] = useState<ModelInfo | null>(null)
   const [showPicker, setShowPicker] = useState(false)
   const [downloadJobs, setDownloadJobs] = useState<DownloadJob[]>([])
@@ -198,7 +199,7 @@ export default function App(): React.ReactElement {
           />
         </div>
         <div className={`flex flex-1 overflow-hidden ${page === 'settings' ? 'animate-fade-in' : 'hidden'}`}>
-          <SettingsPage />
+          <SettingsPage initialTab={settingsInitialTab} />
         </div>
       </div>
 
@@ -220,6 +221,7 @@ export default function App(): React.ReactElement {
           onConfirm={handlePickerConfirm}
           onConfirmFinetuned={(m) => { setShowPicker(false); handleLoadFinetuned(m) }}
           onCancel={() => setShowPicker(false)}
+          onGoToEngines={() => { setShowPicker(false); setSettingsInitialTab('engines'); setPage('settings') }}
         />
       )}
       {loadError && <LoadErrorToast message={loadError} />}

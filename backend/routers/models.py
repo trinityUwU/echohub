@@ -353,6 +353,55 @@ def delete_finetuned_model(job_id: str) -> dict:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/llama-cpp/status")
+def get_llama_cpp_status() -> dict:
+    """Return llama-cpp-python installation status."""
+    import sys
+    import os
+
+    try:
+        import llama_cpp
+        version = llama_cpp.__version__
+        installed = True
+    except ImportError:
+        version = None
+        installed = False
+
+    cuda_enabled = False
+    if installed:
+        try:
+            import llama_cpp as _lc
+            lib_dir = os.path.join(os.path.dirname(_lc.__file__), "lib")
+            cuda_enabled = any(
+                "cuda" in f.lower()
+                for f in os.listdir(lib_dir)
+                if os.path.isfile(os.path.join(lib_dir, f))
+            )
+        except Exception:
+            pass
+
+    size_gb = 0.0
+    if installed:
+        try:
+            import llama_cpp as _lc2
+            from pathlib import Path as _P
+            pkg_path = _P(_lc2.__file__).parent
+            size_gb = round(
+                sum(f.stat().st_size for f in pkg_path.rglob("*") if f.is_file()) / 1024 ** 3,
+                2,
+            )
+        except Exception:
+            pass
+
+    return {
+        "installed": installed,
+        "version": version,
+        "cuda_enabled": cuda_enabled,
+        "size_gb": size_gb,
+        "path": str(sys.executable),
+    }
+
+
 @router.get("/llama-compat-check")
 def check_llama_compat(gguf_path: str) -> dict:
     """Try loading a GGUF to detect llama-cpp-python version incompatibility."""

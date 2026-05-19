@@ -2,7 +2,6 @@ import { useState } from 'react'
 import type { ModelInfo, FinetunedModel } from '@/types'
 import { Badge } from '@/components/shared/Badge'
 import { Btn } from '@/components/shared/Btn'
-import { deleteFinetunedModel } from '@/api/client'
 
 type SourceFilter = 'all' | 'downloaded' | 'finetuned'
 

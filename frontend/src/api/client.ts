@@ -581,6 +581,10 @@ export async function llamaUpgradeStreamUrl(): Promise<string> {
   return apiUrl('/models/llama-upgrade/stream')
 }
 
+export const getLlamaCppStatus = (): Promise<{
+  installed: boolean; version: string | null; cuda_enabled: boolean; size_gb: number; path: string
+}> => apiRequest('/models/llama-cpp/status')
+
 export async function evalRunStreamUrl(): Promise<string> {
   return apiUrl('/finetune/eval-run/stream')
 }

@@ -3,7 +3,7 @@ import { Modal } from '@/components/shared/Modal'
 import { Btn } from '@/components/shared/Btn'
 import { Badge } from '@/components/shared/Badge'
 import type { ModelInfo, FinetunedModel, LlamaCompatResult } from '@/types'
-import { checkLlamaCompat, llamaUpgradeStreamUrl } from '@/api/client'
+import { checkLlamaCompat } from '@/api/client'
 
 type SourceFilter = 'all' | 'downloaded' | 'finetuned'
 
@@ -14,6 +14,7 @@ interface ModelPickerModalProps {
   onConfirm: (modelId: string) => void
   onConfirmFinetuned: (model: FinetunedModel) => void
   onCancel: () => void
+  onGoToEngines?: () => void
 }
 
 export function ModelPickerModal({
@@ -23,14 +24,13 @@ export function ModelPickerModal({
   onConfirm,
   onConfirmFinetuned,
   onCancel,
+  onGoToEngines,
 }: ModelPickerModalProps): React.ReactElement {
   const [query, setQuery] = useState('')
   const [source, setSource] = useState<SourceFilter>('all')
   const [selectedId, setSelectedId] = useState<string | null>(loadedModelId)
   const [selectedFt, setSelectedFt] = useState<FinetunedModel | null>(null)
   const [compatCheck, setCompatCheck] = useState<LlamaCompatResult | null>(null)
-  const [upgradeLog, setUpgradeLog] = useState<string[]>([])
-  const [upgrading, setUpgrading] = useState(false)
 
   const filteredModels = (source === 'all' || source === 'downloaded')
     ? models.filter(m =>
@@ -71,37 +71,11 @@ export function ModelPickerModal({
     if (selectedId) onConfirm(selectedId)
   }
 
-  const handleUpgrade = async (): Promise<void> => {
-    setUpgrading(true)
-    setUpgradeLog([])
-    try {
-      const url = await llamaUpgradeStreamUrl()
-      const es = new EventSource(url)
-      es.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data) as { done?: boolean; msg?: string; success?: boolean }
-          if (data.done) {
-            es.close()
-            setUpgrading(false)
-            if (data.success && selectedFt) onConfirmFinetuned(selectedFt)
-          } else if (data.msg) {
-            setUpgradeLog(l => [...l, data.msg as string])
-          }
-        } catch { /* ignore */ }
-      }
-      es.onerror = () => { es.close(); setUpgrading(false) }
-    } catch {
-      setUpgrading(false)
-    }
-  }
-
   if (compatCheck) {
     return (
       <CompatBanner
         result={compatCheck}
-        upgradeLog={upgradeLog}
-        upgrading={upgrading}
-        onUpgrade={handleUpgrade}
+        onGoToEngines={onGoToEngines ?? (() => setCompatCheck(null))}
         onCancel={() => setCompatCheck(null)}
       />
     )
@@ -245,20 +219,18 @@ function PickerFtItem({ model, isSelected, onClick }: {
   )
 }
 
-function CompatBanner({ result, upgradeLog, upgrading, onUpgrade, onCancel }: {
+function CompatBanner({ result, onGoToEngines, onCancel }: {
   result: LlamaCompatResult
-  upgradeLog: string[]
-  upgrading: boolean
-  onUpgrade: () => void
+  onGoToEngines: () => void
   onCancel: () => void
 }): React.ReactElement {
   return (
     <Modal title="Incompatible llama-cpp-python" onClose={onCancel} width="w-[480px]"
       footer={
         <>
-          <Btn onClick={onCancel} disabled={upgrading}>Cancel</Btn>
-          <Btn variant="primary" onClick={onUpgrade} disabled={upgrading}>
-            {upgrading ? 'Upgrading…' : 'Upgrade llama-cpp-python'}
+          <Btn onClick={onCancel}>Cancel</Btn>
+          <Btn variant="primary" onClick={onGoToEngines}>
+            Go to Settings → Engines
           </Btn>
         </>
       }
@@ -269,13 +241,9 @@ function CompatBanner({ result, upgradeLog, upgrading, onUpgrade, onCancel }: {
           <p className="text-text-primary font-medium mb-1">This GGUF requires a newer version of llama-cpp-python.</p>
           {result.version && <p className="text-text-muted text-xs">Current: {result.version}</p>}
           {result.error && <p className="text-text-muted text-xs mt-1">{result.error}</p>}
+          <p className="text-text-muted text-xs mt-2">Use the Upgrade button in Settings → Engines to update.</p>
         </div>
       </div>
-      {upgradeLog.length > 0 && (
-        <div className="bg-base border border-border rounded-sm p-2 max-h-40 overflow-y-auto font-mono text-xs text-text-muted">
-          {upgradeLog.map((line, i) => <div key={i}>{line}</div>)}
-        </div>
-      )}
     </Modal>
   )
 }

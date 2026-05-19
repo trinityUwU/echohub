@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { listEngines, deleteEngine, installEngineStream } from '@/api/client'
+import { listEngines, deleteEngine, installEngineStream, getLlamaCppStatus } from '@/api/client'
 import { useDialog } from '@/components/shared/Dialog'
+import { apiUrl } from '@/api/base'
+
+interface LlamaCppStatus {
+  installed: boolean; version: string | null; cuda_enabled: boolean; size_gb: number; path: string
+}
 
 interface EngineVersion {
   version: string; path: string; installed: boolean; operational: boolean
@@ -25,6 +30,12 @@ export function EnginesTab(): React.ReactElement {
   const [customVersion, setCustomVersion] = useState('')
   const logsRef = useRef<HTMLDivElement>(null)
 
+  const [llamaStatus, setLlamaStatus] = useState<LlamaCppStatus | null>(null)
+  const [llamaLoading, setLlamaLoading] = useState(true)
+  const [llamaUpgrading, setLlamaUpgrading] = useState(false)
+  const [llamaLogs, setLlamaLogs] = useState<Array<{ level: string; msg: string }>>([])
+  const llamaLogsRef = useRef<HTMLDivElement>(null)
+
   const refresh = useCallback(async (): Promise<void> => {
     try {
       const d = await listEngines()
@@ -33,10 +44,44 @@ export function EnginesTab(): React.ReactElement {
     finally { setLoading(false) }
   }, [])
 
+  const refreshLlama = useCallback(async (): Promise<void> => {
+    try {
+      const s = await getLlamaCppStatus()
+      setLlamaStatus(s)
+    } catch { /* keep previous */ }
+    finally { setLlamaLoading(false) }
+  }, [])
+
   useEffect(() => { refresh() }, [refresh])
+  useEffect(() => { refreshLlama() }, [refreshLlama])
   useEffect(() => {
     logsRef.current?.scrollTo({ top: logsRef.current.scrollHeight, behavior: 'smooth' })
   }, [installLogs])
+  useEffect(() => {
+    llamaLogsRef.current?.scrollTo({ top: llamaLogsRef.current.scrollHeight, behavior: 'smooth' })
+  }, [llamaLogs])
+
+  const handleLlamaUpgrade = async (): Promise<void> => {
+    setLlamaUpgrading(true)
+    setLlamaLogs([])
+    const url = await apiUrl('/models/llama-upgrade/stream')
+    const es = new EventSource(url)
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        if (data.done || data.type === 'done' || data.type === 'error') {
+          es.close()
+          setLlamaUpgrading(false)
+          refreshLlama()
+        } else {
+          const msg = data.text ?? data.msg ?? ''
+          const level = data.type === 'error' ? 'error' : data.type === 'step' ? 'ok' : 'info'
+          if (msg) setLlamaLogs(prev => [...prev, { level, msg }])
+        }
+      } catch { /* ignore */ }
+    }
+    es.onerror = () => { es.close(); setLlamaUpgrading(false) }
+  }
 
   const handleInstall = (version: string): void => {
     setInstalling(version)
@@ -66,12 +111,85 @@ export function EnginesTab(): React.ReactElement {
   const suggested = SUGGESTED_VERSIONS.filter(v => !installedVersions.has(v))
   const operationalCount = data?.versions.filter(v => v.operational).length ?? 0
 
+  const llamaBadge = llamaStatus?.installed && llamaStatus.cuda_enabled
+    ? { label: 'operational', cls: 'bg-green/12 text-green' }
+    : llamaStatus?.installed
+    ? { label: 'cpu only', cls: 'bg-yellow/12 text-yellow' }
+    : { label: 'not installed', cls: 'bg-red/12 text-red' }
+
   return (
     <div className="flex flex-col gap-6">
 
+      {/* llama-cpp-python section */}
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-3">
+          Inference engines — llama.cpp
+        </div>
+        <div className={`flex items-center gap-3 px-4 py-3 rounded-md border transition-colors ${
+          llamaStatus?.installed ? 'bg-surface border-border' : 'bg-surface border-red/20'
+        }`}>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="text-sm font-semibold text-text-primary font-mono">llama-cpp-python</span>
+              {llamaStatus?.version && (
+                <span className="text-2xs text-text-muted font-mono">{llamaStatus.version}</span>
+              )}
+              <span className={`text-2xs px-1.5 py-px rounded ${llamaBadge.cls}`}>{llamaBadge.label}</span>
+            </div>
+            <div className="flex gap-4 text-xs text-text-muted">
+              {llamaStatus?.size_gb ? <span>{llamaStatus.size_gb} GB</span> : null}
+              {llamaStatus?.path && (
+                <span className="truncate text-text-muted/60">{llamaStatus.path}</span>
+              )}
+              {!llamaStatus?.installed && !llamaLoading && (
+                <span className="text-red">Not installed</span>
+              )}
+              {llamaLoading && <span className="animate-pulse">Checking…</span>}
+            </div>
+          </div>
+          <button
+            onClick={handleLlamaUpgrade}
+            disabled={llamaUpgrading}
+            className="px-3 py-1.5 rounded-sm bg-accent hover:bg-accent-hover disabled:opacity-40 text-white text-xs font-medium cursor-pointer transition-colors flex-shrink-0">
+            {llamaUpgrading ? 'Upgrading…' : 'Upgrade'}
+          </button>
+        </div>
+
+        {(llamaUpgrading || llamaLogs.length > 0) && (
+          <div className="mt-3">
+            <div className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-2 flex items-center gap-2">
+              {llamaUpgrading
+                ? <><span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />Upgrading llama-cpp-python…</>
+                : 'Upgrade log'
+              }
+            </div>
+            <div ref={llamaLogsRef}
+              className="bg-[#0a0a0d] border border-border rounded-sm p-3 font-mono text-xs leading-relaxed h-[180px] overflow-y-auto">
+              {llamaLogs.map((line, i) => (
+                <div key={i} className={
+                  line.level === 'error' ? 'text-red' :
+                  line.level === 'ok' ? 'text-green' :
+                  line.level === 'warn' ? 'text-yellow' :
+                  'text-[#6b7280]'
+                }>
+                  {line.msg}
+                </div>
+              ))}
+              {llamaUpgrading && <span className="text-accent animate-blink">█</span>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* vLLM section title */}
+      <div>
+        <div className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-3">
+          Inference engines — vLLM
+        </div>
+
       {/* Coverage warning */}
       {data?.coverage_warning && (
-        <div className="flex items-start gap-2 bg-yellow/7 border border-yellow/20 rounded-sm px-4 py-3 text-sm text-yellow">
+        <div className="flex items-start gap-2 bg-yellow/7 border border-yellow/20 rounded-sm px-4 py-3 text-sm text-yellow mb-3">
           <svg className="w-4 h-4 flex-shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
             <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
@@ -171,6 +289,8 @@ export function EnginesTab(): React.ReactElement {
           </div>
         </div>
       )}
+
+      </div>{/* end vLLM outer div */}
 
       {dialogEl}
     </div>
