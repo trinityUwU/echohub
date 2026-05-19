@@ -443,24 +443,28 @@ print(f"=== Export complete. File: {{files[0]}} | RAM: {{used:.1f}} GB ===", flu
     try:
         assert proc.stdout is not None
         # Stream with timeout — heartbeat every 30s even if no output
+        import time as _time
+        start_time = _time.monotonic()
+        last_log_time = start_time
+
         async def _read_with_heartbeat() -> AsyncIterator[str]:
-            last_heartbeat = asyncio.get_event_loop().time()
+            nonlocal last_log_time
             while True:
                 try:
                     line_b = await asyncio.wait_for(proc.stdout.readline(), timeout=30.0)  # type: ignore[union-attr]
                 except asyncio.TimeoutError:
-                    now = asyncio.get_event_loop().time()
-                    elapsed = int(now - last_heartbeat)
-                    yield f"data: {json.dumps({'type': 'log', 'text': f'  … still exporting ({elapsed}s elapsed, no output — normal for large models)'})}\n\n"
+                    elapsed = int(_time.monotonic() - start_time)
+                    last_log_time = _time.monotonic()
+                    yield f"data: {json.dumps({'type': 'log', 'text': f'  … still exporting ({elapsed}s elapsed — normal for large models)'})}\n\n"
                     continue
                 if not line_b:
                     break
-                last_heartbeat = asyncio.get_event_loop().time()
+                last_log_time = _time.monotonic()
                 yield line_b.decode(errors="replace").rstrip()
 
-        deadline = asyncio.get_event_loop().time() + _EXPORT_TIMEOUT_S
+        deadline = start_time + _EXPORT_TIMEOUT_S
         async for item in _read_with_heartbeat():
-            if asyncio.get_event_loop().time() > deadline:
+            if _time.monotonic() > deadline:
                 proc.terminate()
                 yield f"data: {json.dumps({'type': 'error', 'text': f'Export timed out after {_EXPORT_TIMEOUT_S//60} min'})}\n\n"
                 return
