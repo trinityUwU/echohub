@@ -1,37 +1,39 @@
 # TODO — EchoHub
-*Dernière mise à jour : 2026-05-18 (session 12)*
+*Dernière mise à jour : 2026-05-19 (session 13-15)*
 
 ## En cours
 - [ ] Construction karma Reddit (r/LocalLLaMA) — 1-2 commentaires/jour, sujets perfs/vLLM/GGUF/CUDA
-- [ ] Rédiger post Reddit/HN avec Chris (matériel prêt — démo 7868 tokens 20K ctx)
+- [ ] Rédiger post Reddit/HN avec Chris (matériel prêt — démo 100K ctx validée)
 
 ## À faire (priorité)
 
-### Fine-tuning (P1 — prochaine grosse feature)
-- [ ] UI fine-tuning dans EchoHub : sélection modèle base, import dataset JSONL/ShareGPT/Alpaca
-- [ ] Intégration Unsloth (LoRA/QLoRA), logs SSE temps réel
-- [ ] Export GGUF Q4_K_M post-train + requantisation
-- [ ] Gestion datasets : génération IA, import HF, création manuelle
+### Fine-tuning — stabilisation (P1)
+- [ ] Vérifier que eval after persiste bien en DB après restart backend (pipeline_stage=eval_after → score_avg stocké)
+- [ ] Upgrader llama-cpp-python → Settings/Engines → Upgrade → tester chargement GGUFs fine-tunés dans Chat
+- [ ] Fix : si eval_after seul (sans before), s'assurer que gguf_model_id n'est pas None dans le pipeline
+- [ ] Test complet end-to-end : before eval → finetune → export → after eval → comparaison côte à côte
 
 ### Lancement (P1)
 - [ ] Finaliser posts avec Chris (docs/private/posts-drafts.md)
 - [ ] Préparer Show HN (mardi-jeudi 14h-16h Paris)
 - [ ] Objectif karma avant lancement : 200 commentaires (~28 juin 2026)
 
+### Fine-tuning — roadmap (P2)
+- [ ] Automatisation fine-tuning (boucle finetune→test→finetune) — après modèle juge validé
+- [ ] Support import dataset JSONL/ShareGPT/Alpaca dans Profiles
+
 ### Bugs (P2)
 - [ ] Fix indicateur `~` qui reste affiché après fin de stream (race condition liveTokens/streaming)
 - [ ] OOM kernel SIGKILL non détectable — envisager watchdog process
 
 ### Nettoyage (P2)
-- [ ] Supprimer vieux composants héritage : `src/components/ChatPanel.tsx`, `LoadConfigModal.tsx`, `MarkdownContent.tsx`, `ModelCard.tsx`, `ModelPickerModal.tsx`, `ThinkingBlock.tsx`, `SettingsPage.tsx`, `ui/`
+- [ ] Supprimer vieux composants héritage : `src/components/ChatPanel.tsx`, `LoadConfigModal.tsx`, etc.
 
 ### Benchmark qualité (P2)
-- [ ] Retirer quality score sur Throughput/Latency (pas de critère objectif)
+- [ ] Retirer quality score sur Throughput/Latency
 - [ ] Profil "Tool call" : tester compatibilité tool calling natif
-- [ ] Profil "Repo generation" : créer un script complet, vérifier exécution
 
 ### Backend (P2)
-- [ ] Installer psutil dans les clones existants (`pip install psutil` dans backend/.venv)
 - [ ] GPU service : tester AMD ROCm et Apple Silicon sur vrai hardware
 
 ### Packaging (P2)
@@ -41,35 +43,39 @@
 ## Backlog
 - [ ] MCP server EchoHub → Claude Code pilote modèles locaux (Phase 2)
 - [ ] EchoForge ↔ EchoHub API locale (Phase 3)
-- [ ] Automatisation fine-tuning (boucle finetune→test→finetune)
-- [ ] Modèle juge fiable (après fine-tuning + évaluation)
+- [ ] Modèle juge fiable (après fine-tuning + évaluation itérative)
 - [ ] Multi-GPU support vLLM (tensor_parallel_size)
+- [ ] Chat avec GGUFs fine-tunés via llama-cli si llama-cpp-python incompatible
+
+## Terminé ✅ (sessions 13-15 — 2026-05-19)
+- [x] Section Fine-tune complète : Models / Profiles / Train
+- [x] Profils RLHF avec 5 builtin (Dev/Reasoning/General/Analysis/Debug)
+- [x] Training Unsloth QLoRA avec hardware-aware defaults RTX 3060
+- [x] Export GGUF Q4_K_M via binaires Unsloth (bypass cmake check)
+- [x] Eval before/after : GGUF finder HF + llama-cli pour after eval
+- [x] Pipeline asyncio.Task indépendant (résistant SSE disconnects)
+- [x] Resume logic : pipeline_stage en DB, skip étapes déjà faites
+- [x] GGUFs fine-tunés dans Library (toggle ft/downloaded/all) + ModelPicker
+- [x] DELETE /models/finetuned/{job_id} — supprime gguf_export/
+- [x] llama-cpp-python dans Settings → Engines (badge + upgrade SSE)
+- [x] CompatBanner redirige vers Settings → Engines
+- [x] Download history persistée en SQLite
+- [x] FTLoadModal : VramBar live, CPU RAM offload slider
+- [x] Configure & Start intègre eval before/after toggles
+- [x] 9 paires de test créées et assignées aux profils
+- [x] Fix : UNSLOTH_COMPILE_LOCATION hors src-tauri (évite Tauri hot-reload)
+- [x] Fix : device_map={"": 0} (bitsandbytes 4bit incompatible avec dispatch CPU)
+- [x] Fix : on_status("done") retardé si eval_after pending
+- [x] Fix : pipeline_done event pour fermer SSE proprement
 
 ## Terminé ✅ (session 12 — 2026-05-18)
-- [x] Stats par message persistantes : TTFT, engine, model_name — plus de perte au reload
-- [x] Fix ThinkingBlock parsing — `<think>` n'importe où, `</think>` orphelin géré
-- [x] Barre de contexte temps réel — tokenizer backend, live update toutes les 10 tokens
-- [x] Estimation contexte inclut system prompt
-- [x] Fix régénération — messages en double au reload (DELETE /messages/:id)
-- [x] Fix handleEditUser — supprime messages suivants en DB
-- [x] Détection OOM — banner rouge live + persisté en DB (visible au reload)
-- [x] Log finish_reason dans llama.log (debug coupures prématurées)
-- [x] Reddit — 1er commentaire posté, réponse OsmanthusBloom (top comment 31up)
-- [x] Démo Qwen3.5-9B @ 20K ctx : 7868 tokens, 27.8 tok/s, 420ms TTFT, 8.8GB VRAM
-
-## Terminé ✅ (session 11 — 2026-05-17)
-- [x] Throttle streaming 150ms — fix freeze sur longues générations
-- [x] memo() MessageRow — messages précédents ne re-rendent plus pendant stream
-- [x] Code blocks overflow-x-auto
-- [x] Démo Qwen3.5-9B 15K tokens 20K ctx RTX 3060 — matériel lancement
+- [x] Stats par message persistantes (TTFT, engine, model_name)
+- [x] Barre de contexte temps réel
+- [x] Détection OOM persistée en DB
+- [x] Fix régénération messages en double
 
 ## Terminé ✅ (sessions précédentes)
-- [x] quality_scorer.py — 6 scorers algorithmiques
-- [x] 10 profils benchmark builtins + leaderboard par profil
-- [x] Multi-venv vLLM + routing automatique
-- [x] InstallerApp natif + système MAJ
-- [x] Fresh install E2E — tous paths relatifs
-- [x] Actions chat footer (copy/edit/regenerate), sendFromHistory
-- [x] Context menu global, conversations rename/archive/delete
-- [x] App Tauri native + sidecar Python, dual-engine, SQLite, profils
+- [x] quality_scorer.py, benchmarks, multi-venv vLLM
+- [x] InstallerApp natif, système MAJ, fresh install E2E
+- [x] App Tauri native, dual-engine, SQLite, profils
 - [x] GitHub public MIT : https://github.com/trinityUwU/echohub

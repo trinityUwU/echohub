@@ -1,111 +1,130 @@
 # STATE — EchoHub
-*Dernière mise à jour : 2026-05-18 (session 12)*
+*Dernière mise à jour : 2026-05-19 (sessions 13-15)*
 
 ## Résumé de l'état actuel
 
-Application Tauri v2 native pleinement fonctionnelle. Dual-engine llama-cpp (GGUF) + vLLM (AWQ/GPTQ). Chat stable, stats par message persistées en DB (TTFT, tok/s, engine, model_name, oom). Barre de contexte temps réel avec tokenizer backend. Démo validée session 12 : Qwen3.5-9B GGUF → 7868 tokens à 20K ctx sur RTX 3060, 8.8GB VRAM, 27.8 tok/s. Stratégie Reddit en cours (karma building r/LocalLLaMA). Prochaine grosse feature : fine-tuning UI.
+Application Tauri v2 native avec pipeline fine-tuning complet : collecte RLHF, entraînement Unsloth QLoRA, export GGUF, évaluation before/after. Les GGUFs fine-tunés sont visibles dans Library et ModelPicker. llama-cpp-python est gérable depuis Settings → Engines. Pipeline résistant aux disconnexions SSE (asyncio.Task indépendant + resume logic par stages). Premier run end-to-end validé sur RTX 3060 12GB : fine-tune 9B, GGUF 5.4GB exporté, eval before score 100.
 
-## Ce qui a été fait — session du 2026-05-18 (session 12)
+Matériel Reddit prêt — validation technique : Qwen3.5-9B GGUF @ 100K ctx, 10.5GB VRAM, génération fluide.
 
-### Stats par message — persistance complète
-- `MessageStats` backend + frontend : ajout `ttft_ms`, `engine`, `model_name`, `oom`
-- `GenerationStats` frontend : ajout `ttftMs`, `engine`, `modelName`, `oom`
-- `inference.py` : event `echohub_stats` envoyé en fin de stream avec TTFT backend + engine + model_name
-- `client.ts` : parse `echohub_stats`, préfère TTFT backend sinon fallback JS
-- `useChat.ts` : persist tous les nouveaux champs en DB à chaque message
-- `MessageRow.tsx` : footer affiche `tok/s · Xms TTFT · Xs · engine · model_name` — lu depuis `message.stats` au reload (plus de perte au changement de conv ou restart)
+## Ce qui a été fait — sessions 13-15 (2026-05-19)
 
-### Fix parsing ThinkingBlock
-- Regex `^<think>` → match n'importe où dans le texte (modèle émet parfois du texte avant `<think>`)
-- Cas `</think>` sans `<think>` (balise ouvrante mangée par throttle) → contenu avant `</think>` traité comme thinking
-- `thinkContent` + `hasThink` extraits proprement, `visibleText` correct dans tous les cas
+### Fine-tune — feature complète (section nav dédiée)
 
-### Barre de contexte temps réel
-- `InputBar` : nouveau composant `ContextBar` entre textarea et ligne temp/top-p
-- Couleur : accent (< 75%) → jaune (75-90%) → rouge (> 90%)
-- Label `~X / YK ctx` : `~` présent pendant le stream (estimation), disparaît une fois le stream terminé
-- `useChat.ts` : `liveTokens` state mis à jour toutes les 10 tokens générés via `onTokensUpdate`
-- `llama_service.py` : usage intermédiaire envoyé toutes les `USAGE_INTERVAL=10` tokens + usage final depuis chunk `finish_reason` natif llama-cpp (vrais `prompt_tokens` + `completion_tokens`)
-- `estimateTokens()` : inclut maintenant `params.systemPrompt` dans le calcul d'estimation
+**Profiles tab** (3 colonnes : profils / paires / détail)
+- 5 profils builtin : Dev / Reasoning / General / Analysis / Debug
+- Création custom, barre progression pair_count/target_pairs
+- Paires RLHF avec prompt + chosen + rejected
 
-### Fix régénération — messages en double au reload
-- `DELETE /conversations/:id/messages/:msgId` : nouvel endpoint backend + `db.delete_message()`
-- `handleRegenerate` : supprime l'ancien message assistant en DB avant de lancer `sendFromHistory`
-- `handleEditUser` : supprime tous les messages depuis l'index édité en DB
+**Models tab**
+- Toggle Installed / Hugging Face
+- VRAM QLoRA estimée live, badge fits/exceeds GPU
+- Download progress bar depuis SSE partagé
 
-### Détection OOM
-- `llama_service.py` : catch exception dans stream → détecte "out of memory", "cuda error", "failed to allocate" → `error_type: "oom"` dans le payload SSE
-- `client.ts` : parse `error_type` → appelle `onOom()` si OOM, sinon `onError()`
-- `useChat.ts` : `oomError` state + `onOom` callback → `setOomError(true)`
-- `ChatPage.tsx` : banner rouge "Out of memory" si `oomError` OU si dernier message assistant a `stats.oom === true`
-- `MessageStats` : champ `oom: bool` persisté en DB → banner visible au reload, disparaît à la régénération
-- `llama_service.py` : log `finish_reason` + token counts en fin de génération (debug coupures)
+**Train tab**
+- Configure & Start modal : hardware-aware (RTX 3060 → seq=512, rank=16, batch=1)
+- VramBar live qui se met à jour quand on change rank/seq_length
+- CPU RAM offload slider (0→N GB, passe en 8bit si activé)
+- Toggles before/after eval avec GGUF finder HF intégré
+- JobRow : expand/collapse logs, cancel, recover, heartbeat 30s
 
-### Reddit — routine quotidienne
-- Script `scripts/reddit_hunt.py` utilisé — scan `/new` + `/hot` r/LocalLLaMA, score par pertinence/fraîcheur
-- Commentaire posté : fil "Quantizing MTP KV Cache = free lunch?" — réponse sur 20K ctx GGUF 9B RTX 3060
-- OsmanthusBloom (top comment 31up) a répondu directement → visibilité confirmée
+### Pipeline fine-tune — architecture résistante
 
-### Benchmarks démo
-- Qwen3.5-9B GGUF (Claude Opus fine-tune) @ 20K ctx : 7868 tokens, 27.8 tok/s, 420ms TTFT, 283s, 8.8/12GB VRAM
-- Précédent record : 15K tokens @ 20K ctx, 18.5 tok/s (session 11)
-- LM Studio ne peut pas loader ce contexte sur même hardware → argument de lancement toujours valide
+**Root cause final résolu :** generator SSE = pipeline → si SSE déconnecte, pipeline suspend
+- **Fix** : pipeline = `asyncio.Task` indépendant, SSE = reader sur `asyncio.Queue` par job
+- Pipeline persist son stage en DB : `start → eval_before → finetune → finetune_done → export_gguf → eval_after`
+- À chaque reconnexion : check stage + check fichiers sur disque → skip étapes déjà faites
 
-### Bug mineur connu
-- Indicateur `~` reste affiché après fin de génération (liveTokens/streaming race condition) — noté, non bloquant
+**Export GGUF :**
+- Bypass build check Unsloth (cmake fail sur warning C++ Arch Linux)
+- Utilise binaires déjà compilés : `~/.unsloth/llama.cpp/build/bin/llama-quantize`
+- `convert_hf_to_gguf.py` depuis `~/.unsloth/llama.cpp/`
+- 3 étapes : merge LoRA→BF16 safetensors → GGUF BF16 → Q4_K_M (~6 min total)
+
+**Eval before/after :**
+- Before : download GGUF base depuis HF → llama-cpp-python → prompts → score → unload → delete
+- After : llama-cli Unsloth direct (llama-cpp-python v0.3.23 incompatible avec GGUFs Unsloth)
+- GGUF finder : même auteur prioritaire, Q4_K_M recommandé
+
+### GGUFs fine-tunés dans Library + Chat
+
+- `GET /models/finetuned` : scan `~/.local/share/echohub/finetune/*/gguf_export/*.gguf`
+- `DELETE /models/finetuned/{job_id}` : supprime gguf_export/ (LoRA préservé)
+- LibraryPage : toggle All / Downloaded / Fine-tuned, badge violet "ft"
+- ModelPickerModal : idem avec filtre source
+- Bouton delete sur chaque fine-tuné (confirmation avant)
+
+### llama-cpp-python dans Settings → Engines
+
+- `GET /models/llama-cpp/status` : version, cuda_enabled, size_gb
+- `GET /models/llama-upgrade/stream` : SSE upgrade avec détection CUDA auto
+- EnginesTab : section llama-cpp au-dessus de vLLM, badge operational/cpu only/not installed
+- CompatBanner redirige vers Settings → Engines (pas upgrade inline)
+- `SettingsPage` : prop `initialTab` pour ouvrir Engines directement
+
+### Download history persistée
+
+- Table `download_history` en SQLite — survit aux restarts
+- DownloadsPage : section History avec VRAM live, badge "files deleted" rouge, delete log
+
+### Paires de test créées
+
+9 paires ML/LLM créées via script pour valider le pipeline (assignées aux profils)
 
 ## Décisions prises
 
 | Décision | Raison | Date |
 |---|---|---|
-| usage natif llama-cpp (finish_reason chunk) | Plus fiable que tokenization manuelle — chat template appliqué | 2026-05-18 |
-| Suppression probe max_tokens=1 | Overhead inutile, usage natif suffit | 2026-05-18 |
-| OOM persisté en DB (stats.oom) | Banner doit survivre au reload — régénération le supprime naturellement | 2026-05-18 |
-| USAGE_INTERVAL=10 pour live tokens | Compromis fréquence/overhead — assez fréquent pour animation fluide | 2026-05-18 |
-| estimateTokens inclut systemPrompt | Sans ça l'estimation était trop basse si profil avec system prompt long | 2026-05-18 |
+| Pipeline = asyncio.Task indépendant | Generator SSE suspendu si déconnexion → pipeline jamais terminé | 2026-05-19 |
+| Export GGUF : binaires directs Unsloth | cmake fail sur warning C++ Arch → llama-quantize déjà compilé dans ~/.unsloth/ | 2026-05-19 |
+| Eval after : llama-cli, pas llama-cpp-python | v0.3.23 incompatible GGUFs Unsloth ('sampler' manquant) | 2026-05-19 |
+| pipeline_stage persisté en DB | Resume logic : skip étapes déjà faites à la reconnexion | 2026-05-19 |
+| GGUF finder : cherche même auteur + GGUF suffix | Jackrong/BF16 → Jackrong/GGUF retrouvé en 1er résultat | 2026-05-19 |
+| on_status("done") retardé si eval_after | Sans ça, DB=done → frontend ferme SSE → export+eval never run | 2026-05-19 |
 
 ## Contexte non-évident
 
-- `prompt_tokens` dans `llama_service.py` vient du chunk `finish_reason` natif — c'est la seule source fiable (chat template appliqué). Le compteur manuel `completion_tokens += 1` est une approximation (un delta ≠ un token).
-- `liveTokens` dans `useChat` ne se reset qu'au changement de conversation (pas au début d'un send) — intentionnel pour éviter le flash `~` entre deux messages consécutifs.
-- `finish_reason` maintenant loggé dans `llama.log` à chaque fin de génération — utile pour diagnostiquer coupures prématurées (`length` vs `stop`).
-- `error_type: "oom"` côté backend : détection string-based sur le message d'exception — couvre les cas CUDA OOM, mais pas les SIGKILL kernel (process tué silencieusement).
-- Les logs `llama.log` se reset au restart de l'app (via `start.sh`). Le `finish_reason` d'une session précédente est perdu.
-- Reddit : compte créé 2026-05-16, objectif 200 karma commentaires avant lancement (~28 juin 2026). Ne jamais mentionner EchoHub avant S4 (soft reveal organique).
+- **Unsloth compile llama.cpp** dans `~/.unsloth/llama.cpp/` au premier export GGUF. Build ~5-10 min. Échoue sur Arch Linux à cause du warning `-Wdeprecated-enum-enum-conversion` mais les binaires sont quand même compilés. On bypass le check et utilise les binaires directement.
+- **llama-cpp-python v0.3.23** : incompatible avec les GGUFs générés par Unsloth (version récente). Erreur : `'LlamaModel' object has no attribute 'sampler'`. Pour le chat avec les fine-tunés, il faut upgrader via Settings → Engines.
+- **Cache Unsloth dans src-tauri/** : Unsloth écrit son JIT cache dans le répertoire courant → `src-tauri/` → Tauri hot-reload infini. Fix : `UNSLOTH_COMPILE_LOCATION=~/.cache/unsloth` dans le script train + `.tauriignore`.
+- **device_map={"": 0}** obligatoire pour Unsloth 4bit : `device_map="auto"` dispatche certains layers sur CPU → incompatible avec bitsandbytes 4bit.
+- **eval_gguf_model_id peut être None** si eval_after activé sans eval_before. Fix : pour les paths locaux, model_id = basename du .gguf.
+- **_full_pipeline_inner est resume-safe** : vérifie lora_done() et gguf_exported() à chaque step. Un job bloqué en `running` avec stage `export_gguf` reprend à `eval_after` si le GGUF est présent sur disque.
+- **Reddit** : compte créé 2026-05-16, karma building r/LocalLLaMA. Ne jamais mentionner EchoHub avant S4. Matériel lancement prêt (démo 100K ctx validée ce soir).
 
 ## Prochaines étapes
 
-1. **Fine-tuning UI** (P1) — prochaine grosse feature : Unsloth/LoRA, import dataset, export GGUF
-2. **Reddit karma building** (P1) — 1-2 commentaires/jour r/LocalLLaMA, sujets perfs/vLLM/GGUF/CUDA
-3. **Fix ~ indicateur** (P3) — `liveTokens` ne se reset pas correctement après stream → `~` reste
-4. **Nettoyage composants héritage** (P2) — `src/components/ChatPanel.tsx`, `LoadConfigModal.tsx`, etc.
-5. **Quality scoring** (P2) — retirer score Throughput/Latency, ajouter profil Tool call
-6. **Packaging** (P2) — valider AppImage + .deb
+1. **Stabiliser le pipeline eval** (P1) — le flow before/after fonctionne mais l'eval after ne persiste pas encore systématiquement en DB, à vérifier et fixer
+2. **Upgrader llama-cpp-python** (P1) — permettre de chatter avec les GGUFs fine-tunés dans le Chat
+3. **Post Reddit lancement** (P1) — matériel prêt, rédiger avec Chris, angle "limites perçues artificiellement basses"
+4. **Bug ~ indicateur** (P3) — race condition liveTokens/streaming
+5. **Nettoyage composants héritage** (P2)
+6. **Packaging AppImage + .deb** (P2)
 
 ## Points en suspens
 
-- `~` indicateur reste affiché après stream — race condition `liveTokens`/`streaming` state
-- OOM kernel SIGKILL non détectable (process tué sans exception Python)
-- `psutil` pas auto-installé sur clones existants → `pip install psutil` dans backend/.venv
-- AMD ROCm + Apple Silicon non testés sur vrai hardware
-- Vieux composants héritage `src/components/*.tsx` toujours présents
+- Eval after ne persiste pas toujours (à investiguer après restart backend)
+- llama-cpp-python v0.3.23 bloque le chargement des GGUFs fine-tunés dans le Chat
+- `~` indicateur reste après stream (race condition)
+- OOM kernel SIGKILL non détectable
+- Vieux composants héritage présents
 
 ## Historique
 
+### Session 13-15 (2026-05-18-19) — Fine-tune pipeline complet
+Section Fine-tune : profils RLHF, training Unsloth QLoRA, export GGUF, eval before/after. Architecture pipeline task indépendant (SSE-resistant). GGUFs fine-tunés dans Library+Chat. llama-cpp-python dans Settings Engines. Nombreux bugs pipeline résolus (asyncio, Unsloth build, llama-cpp compat).
+
+### Session 12 (2026-05-18) — Stats persistantes + context bar + OOM
+Stats TTFT/engine/model_name persistées en DB, barre contexte temps réel, détection OOM, fix régénération. Reddit : 1er commentaire posté, réponse OsmanthusBloom.
+
 ### Session 11 (2026-05-17) — Perf streaming + démo lancement
-Throttle 150ms, memo() MessageRow, fix code blocks overflow, démo Qwen3.5-9B 15K tokens 20K ctx RTX 3060, matériel lancement Reddit/HN prêt.
+Throttle 150ms, memo() MessageRow, démo 15K tokens 20K ctx.
 
 ### Session 10 (2026-05-17) — Benchmark qualité + Discover
-quality_scorer.py (6 scorers), 10 profils benchmark, leaderboard par profil, multi-filtres Discover, modal hardware live, vLLM 400 fixes, model_name persisté.
+quality_scorer.py (6 scorers), 10 profils benchmark, multi-filtres Discover, modal hardware live.
 
 ### Session 9 (2026-05-17) — Fresh install E2E + UX actions
-locate_project_root, start.sh cargo tauri dev, InstallerApp, archive conversations, CORS 500, footer stats, copy/edit/regenerate, context menu global, HMR fix.
+locate_project_root, start.sh cargo tauri dev, InstallerApp, CORS 500, footer stats, context menu.
 
-### Session 8 (2026-05-17) — UX polish, installeur natif, système MAJ
-Conversations archivables, GPU sidebar, ThinkingBlock, InstallerApp, UpdateBanner, benchmark, resource limits, HF token, export markdown.
-
-### Session 7 (2026-05-17) — Multi-venv vLLM, paths, migration, docs
-vllm_manager.py, Settings/Engines, config_service, migration_service, PathsTab, MigrationBanner, engine_router routing par version.
-
-### Sessions 1-6 (2026-05-15/16)
-Design, dual-engine GGUF/AWQ, SQLite, MSW, scaffold frontend, llama-cpp CUDA, Tauri init, sidecar Python.
+### Sessions 1-8 (2026-05-15/16/17)
+Design, dual-engine, SQLite, UX polish, vLLM multi-venv, InstallerApp, système MAJ.
