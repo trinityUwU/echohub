@@ -8,7 +8,7 @@ from loguru import logger
 
 from backend.models.schemas import DownloadRequest, ModelInfo
 from backend.services import hf_service
-from backend.services.gguf_utils import detect_mtp
+from backend.services.gguf_utils import detect_mtp, find_mmproj
 from backend.services.hf_service import _get_hf_token
 from huggingface_hub import model_info as hf_model_info
 from backend.services import download_manager
@@ -44,6 +44,9 @@ def list_downloaded() -> list[ModelInfo]:
             gguf_files = list(model_dir.glob("*.gguf")) if model_dir.exists() else []
             if gguf_files:
                 model.has_mtp = detect_mtp(str(gguf_files[0])) or model.has_mtp
+                # Vision requires a mmproj file — override heuristic with ground truth
+                if model.capabilities.vision:
+                    model.capabilities.vision = find_mmproj(str(model_dir)) is not None
         return models
     except Exception as e:
         logger.error(f"list_downloaded failed: {e}")
