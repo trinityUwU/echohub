@@ -374,66 +374,114 @@ def unregister_pipeline(job_id: str) -> None:
     _active_pipelines.discard(job_id)
 
 
+_EXPORT_TIMEOUT_S = 1800  # 30 min max for merge+quantize on large models
+
+
 async def export_gguf_sse(
     job_id: str,
     lora_path: str,
     on_done: Callable[[str], None],
 ) -> AsyncIterator[str]:
-    """Export LoRA → GGUF Q4_K_M using Unsloth's native save_pretrained_gguf (no llama.cpp needed)."""
+    """Export LoRA → GGUF Q4_K_M via Unsloth native. Subprocess tracked in _active_jobs."""
     output_dir = str(get_user_data_dir() / "finetune" / job_id)
     gguf_dir = os.path.join(output_dir, "gguf_export")
-    gguf_path = os.path.join(gguf_dir, "model-Q4_K_M.gguf")
-
-    py = get_unsloth_python()
     cache_dir = str(Path.home() / ".cache" / "unsloth")
+    py = get_unsloth_python()
 
     export_script = f"""
-import os
+import os, sys, glob, psutil, time
 os.environ["UNSLOTH_COMPILE_LOCATION"] = "{cache_dir}"
 os.makedirs("{cache_dir}", exist_ok=True)
 os.makedirs("{gguf_dir}", exist_ok=True)
 
+def _ram_gb():
+    v = psutil.virtual_memory()
+    return v.used / 1024**3, v.total / 1024**3
+
+print("=== GGUF Export starting ===", flush=True)
+used, total = _ram_gb()
+print(f"RAM before load: {{used:.1f}} / {{total:.1f}} GB", flush=True)
+
 from unsloth import FastLanguageModel
-print("Loading LoRA model...", flush=True)
+print("Step 1/3: Loading LoRA model into memory...", flush=True)
 model, tokenizer = FastLanguageModel.from_pretrained("{lora_path}", load_in_4bit=True)
-print("Exporting to GGUF Q4_K_M...", flush=True)
+used, _ = _ram_gb()
+print(f"Step 1/3 done. RAM after load: {{used:.1f}} GB", flush=True)
+
+print("Step 2/3: Merging LoRA weights + quantizing to Q4_K_M...", flush=True)
+print("  (This takes 5-15 min on a 9B model — no intermediate progress available)", flush=True)
+t0 = time.time()
 model.save_pretrained_gguf("{gguf_dir}", tokenizer, quantization_method="q4_k_m")
-print("GGUF export complete", flush=True)
-# Find the exported gguf file
-import glob
-files = glob.glob("{gguf_dir}/*.gguf")
-if files:
-    print(f"GGUF_PATH:{{files[0]}}", flush=True)
+elapsed = time.time() - t0
+print(f"Step 2/3 done in {{elapsed:.0f}}s", flush=True)
+
+print("Step 3/3: Locating exported file...", flush=True)
+files = sorted(glob.glob("{gguf_dir}/*.gguf"))
+if not files:
+    print("ERROR: No .gguf file found after export!", flush=True)
+    sys.exit(1)
+print(f"GGUF_PATH:{{files[0]}}", flush=True)
+used, _ = _ram_gb()
+print(f"=== Export complete. File: {{files[0]}} | RAM: {{used:.1f}} GB ===", flush=True)
 """
     export_script_path = os.path.join(output_dir, "export_gguf.py")
     with open(export_script_path, "w") as f:
         f.write(export_script)
 
-    yield f"data: {json.dumps({'type': 'step', 'label': 'Exporting LoRA to GGUF Q4_K_M (Unsloth native)…'})}\n\n"
+    yield f"data: {json.dumps({'type': 'step', 'label': 'Exporting LoRA → GGUF Q4_K_M (5-15 min)…'})}\n\n"
+
     proc = await asyncio.create_subprocess_exec(
         str(py), export_script_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
-    assert proc.stdout is not None
+    # Track in _active_jobs so cancel works
+    _active_jobs[f"{job_id}_export"] = proc
+
     detected_path: str | None = None
-    async for line_b in proc.stdout:
-        line = line_b.decode(errors="replace").rstrip()
-        if line:
-            if line.startswith("GGUF_PATH:"):
-                detected_path = line[10:].strip()
-            else:
-                yield f"data: {json.dumps({'type': 'log', 'text': line})}\n\n"
+    try:
+        assert proc.stdout is not None
+        # Stream with timeout — heartbeat every 30s even if no output
+        async def _read_with_heartbeat() -> AsyncIterator[str]:
+            last_heartbeat = asyncio.get_event_loop().time()
+            while True:
+                try:
+                    line_b = await asyncio.wait_for(proc.stdout.readline(), timeout=30.0)  # type: ignore[union-attr]
+                except asyncio.TimeoutError:
+                    now = asyncio.get_event_loop().time()
+                    elapsed = int(now - last_heartbeat)
+                    yield f"data: {json.dumps({'type': 'log', 'text': f'  … still exporting ({elapsed}s elapsed, no output — normal for large models)'})}\n\n"
+                    continue
+                if not line_b:
+                    break
+                last_heartbeat = asyncio.get_event_loop().time()
+                yield line_b.decode(errors="replace").rstrip()
+
+        deadline = asyncio.get_event_loop().time() + _EXPORT_TIMEOUT_S
+        async for item in _read_with_heartbeat():
+            if asyncio.get_event_loop().time() > deadline:
+                proc.terminate()
+                yield f"data: {json.dumps({'type': 'error', 'text': f'Export timed out after {_EXPORT_TIMEOUT_S//60} min'})}\n\n"
+                return
+            if item.startswith("data: "):
+                yield item  # heartbeat already formatted
+            elif item.startswith("GGUF_PATH:"):
+                detected_path = item[10:].strip()
+            elif item:
+                yield f"data: {json.dumps({'type': 'log', 'text': item})}\n\n"
+
+    finally:
+        _active_jobs.pop(f"{job_id}_export", None)
+
     await proc.wait()
     if proc.returncode != 0:
-        yield f"data: {json.dumps({'type': 'error', 'text': 'GGUF export failed'})}\n\n"
+        yield f"data: {json.dumps({'type': 'error', 'text': f'GGUF export failed (code {proc.returncode})'})}\n\n"
         return
 
-    final_path = detected_path or gguf_path
+    final_path = detected_path or os.path.join(gguf_dir, "model-Q4_K_M.gguf")
     yield f"data: {json.dumps({'type': 'done', 'gguf_path': final_path})}\n\n"
     on_done(final_path)
-    return
 
 
 
