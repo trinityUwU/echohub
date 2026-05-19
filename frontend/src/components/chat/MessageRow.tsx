@@ -26,6 +26,7 @@ function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRe
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState('')
   const [savingPair, setSavingPair] = useState(false)
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const text = typeof message.content === 'string'
@@ -97,10 +98,36 @@ function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRe
         {images.length > 0 && (
           <div className="flex gap-2 flex-wrap mb-1">
             {images.map((url, i) => (
-              <img key={i} src={url} alt="" className="max-h-48 max-w-xs rounded-sm border border-border object-contain" />
+              <img key={i} src={url} alt="" onClick={() => setLightboxUrl(url)}
+                className="max-h-48 max-w-xs rounded-sm border border-border object-contain cursor-zoom-in hover:border-accent/50 transition-colors" />
             ))}
           </div>
         )}
+
+        <AnimatePresence>
+          {lightboxUrl && (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              onClick={() => setLightboxUrl(null)}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm cursor-zoom-out"
+            >
+              <motion.img
+                src={lightboxUrl} alt=""
+                initial={{ scale: 0.92, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.92, opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                onClick={e => e.stopPropagation()}
+                className="max-w-[90vw] max-h-[90vh] rounded-md border border-border/40 object-contain shadow-2xl cursor-default"
+              />
+              <button onClick={() => setLightboxUrl(null)}
+                className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer">
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
         {hasThink && !isUser && (
           <ThinkingBlock content={thinkContent} streaming={thinkOpen} />
         )}
