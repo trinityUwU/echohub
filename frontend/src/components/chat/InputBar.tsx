@@ -60,11 +60,34 @@ export function InputBar({ modelLoaded, visionEnabled, streaming, params, usedTo
   }
 
   const handlePaste = (e: React.ClipboardEvent): void => {
+    if (!visionEnabled) return
+
+    // Try standard clipboardData.items first (works in Chrome/Electron)
     const items = Array.from(e.clipboardData.items)
     const imageItem = items.find(i => i.type.startsWith('image/'))
-    if (!imageItem || !visionEnabled) return
-    const file = imageItem.getAsFile()
-    if (file) handleFiles([file] as unknown as FileList)
+    if (imageItem) {
+      const file = imageItem.getAsFile()
+      if (file) handleFiles([file] as unknown as FileList)
+      return
+    }
+
+    // Fallback for WebKitGTK/Linux: clipboardData.items may be empty for images
+    // Use navigator.clipboard.read() which WebKit exposes correctly
+    if (typeof navigator?.clipboard?.read === 'function') {
+      e.preventDefault()
+      navigator.clipboard.read().then(clipItems => {
+        for (const item of clipItems) {
+          const imageType = item.types.find(t => t.startsWith('image/'))
+          if (imageType) {
+            item.getType(imageType).then(blob => {
+              const file = new File([blob], `paste.${imageType.split('/')[1]}`, { type: imageType })
+              handleFiles([file] as unknown as FileList)
+            }).catch(() => {})
+            break
+          }
+        }
+      }).catch(() => {})
+    }
   }
 
   return (
