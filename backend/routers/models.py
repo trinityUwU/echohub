@@ -239,28 +239,43 @@ def check_compatibility(model_id: str) -> dict:
     quant_bits = quant_config.get("bits")
     model_type = config.get("model_type", "")
 
-    # Check vLLM support
+    # Check vLLM support — run via vLLM venv Python (not backend .venv)
     compatible_vllm = False
     vllm_issues = []
     try:
-        from vllm.model_executor.models import ModelRegistry
-        supported = ModelRegistry.get_supported_archs()
-        arch_ok = any(a in supported for a in architectures)
-        if not arch_ok:
-            vllm_issues.append(f"Architecture {architectures} not supported by vLLM 0.21")
-        else:
-            compatible_vllm = True
+        import subprocess as _sp
+        from backend.services.vllm_manager import get_default_python, list_versions
+        import json as _json
 
-        # Check AWQ + multimodal compatibility
-        # vLLM 0.21 has issues with AWQ on multimodal architectures (vision+text)
-        has_vision = "vision_config" in config or "ForConditionalGeneration" in str(architectures)
-        if quant_method == "awq" and has_vision:
-            vllm_issues.append(
-                "AWQ quantization on multimodal (vision+text) model — "
-                "vLLM 0.21 may fail with alignment errors on vision layers. "
-                "This is a known vLLM limitation for this architecture."
+        _versions = list_versions()
+        if not _versions:
+            vllm_issues.append("No vLLM version installed")
+        else:
+            _py = get_default_python()
+            _result = _sp.run(
+                [str(_py), "-c",
+                 "from vllm.model_executor.models import ModelRegistry; "
+                 "import json; print(json.dumps(list(ModelRegistry.get_supported_archs())))"],
+                capture_output=True, text=True, timeout=30,
             )
-            compatible_vllm = False
+            if _result.returncode != 0:
+                vllm_issues.append(f"vLLM check failed: {_result.stderr.strip()[:120]}")
+            else:
+                supported = set(_json.loads(_result.stdout.strip()))
+                arch_ok = any(a in supported for a in architectures)
+                if not arch_ok:
+                    vllm_issues.append(f"Architecture {architectures} not supported by installed vLLM")
+                else:
+                    compatible_vllm = True
+
+                # vLLM 0.21 has issues with AWQ on multimodal architectures
+                has_vision = "vision_config" in config or "ForConditionalGeneration" in str(architectures)
+                if quant_method == "awq" and has_vision:
+                    vllm_issues.append(
+                        "AWQ quantization on multimodal (vision+text) model — "
+                        "vLLM 0.21 may fail with alignment errors on vision layers."
+                    )
+                    compatible_vllm = False
     except Exception as e:
         vllm_issues.append(f"vLLM check failed: {e}")
 
