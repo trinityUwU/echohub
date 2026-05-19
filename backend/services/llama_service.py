@@ -104,6 +104,7 @@ def load_model(
     gpu_type: str = "nvidia",
     n_gpu_layers_override: int | None = None,
     cpu_overflow: bool = False,
+    is_moe: bool = False,
 ) -> None:
     """Charge le modèle GGUF. Bloquant — appelé depuis un thread."""
     global _llm, _current_model, _load_error, _eject_requested
@@ -124,7 +125,7 @@ def load_model(
 
     _log(f"[llama] Loading {model_id}")
     _log(f"[llama] File: {gguf_path}")
-    _log(f"[llama] n_gpu_layers={n_gpu} | n_ctx={n_ctx} | n_batch=512 | flash_attn={_flash_attn_enabled()} | n_threads={n_threads} | cpu_overflow={cpu_overflow}")
+    _log(f"[llama] n_gpu_layers={n_gpu} | n_ctx={n_ctx} | n_batch=512 | flash_attn={_flash_attn_enabled()} | n_threads={n_threads} | cpu_overflow={cpu_overflow} | is_moe={is_moe}")
 
     if _eject_requested:
         raise RuntimeError("Ejected by user")
@@ -150,6 +151,17 @@ def load_model(
         except ImportError:
             _log("[llama] cpu_overflow requested but split_mode not available in this llama-cpp version", "warn")
 
+    # MoE with CPU overflow: reduce n_batch and skip CUDA graph profiling to prevent OOM at 88%
+    if is_moe and cpu_overflow:
+        llama_kwargs["n_batch"] = 128
+        llama_kwargs["use_mmap"] = True
+        # no_perf disables CUDA graph warmup in llama-cpp-python >= 0.3.x
+        try:
+            llama_kwargs["no_perf"] = True
+        except Exception:
+            pass  # param not supported — n_batch=128 is the fallback mitigation
+        _log("[llama] MoE + cpu_overflow: n_batch=128, no_perf=True to avoid CUDA graph OOM")
+
     _llm = Llama(**llama_kwargs)
 
     elapsed = time.time() - start
@@ -173,6 +185,7 @@ def load_model_async(
     gpu_type: str = "nvidia",
     n_gpu_layers_override: int | None = None,
     cpu_overflow: bool = False,
+    is_moe: bool = False,
 ) -> None:
     """Lance le chargement dans un thread background — retourne immédiatement."""
     global _loading_model_id, _load_error, _eject_requested
@@ -183,7 +196,7 @@ def load_model_async(
     def _run() -> None:
         global _loading_model_id, _load_error
         try:
-            load_model(gguf_path, model_id, n_ctx, gpu_type, n_gpu_layers_override, cpu_overflow)
+            load_model(gguf_path, model_id, n_ctx, gpu_type, n_gpu_layers_override, cpu_overflow, is_moe)
         except Exception as e:
             if not _eject_requested:
                 _load_error = str(e)

@@ -66,7 +66,7 @@ export function useModels() {
   type LoadConfig = {
     maxModelLen?: number; gpuMemoryUtilization?: number; enforceEager?: boolean
     maxCudagraphCaptureSize?: number | null; n_gpu_layers?: number | null; cpu_overflow?: boolean
-    gguf_path?: string | null
+    gguf_path?: string | null; is_moe?: boolean
   }
 
   const _doLoad = useCallback(async (modelId: string, req: import('@/types').LoadRequest) => {
@@ -97,6 +97,7 @@ export function useModels() {
       max_cudagraph_capture_size: config?.maxCudagraphCaptureSize ?? null,
       n_gpu_layers: config?.n_gpu_layers ?? null,
       cpu_overflow: config?.cpu_overflow ?? false,
+      is_moe: config?.is_moe ?? false,
     })
   }, [_doLoad])
 

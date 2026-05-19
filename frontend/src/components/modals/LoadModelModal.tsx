@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Modal } from '@/components/shared/Modal'
 import { Slider } from '@/components/shared/Slider'
 import { Btn } from '@/components/shared/Btn'
-import { getInferenceSettings } from '@/api/client'
+import { getInferenceSettings, getMoeLoadConfig } from '@/api/client'
+import type { MoeLoadConfig } from '@/api/client'
 import type { GpuStats, ModelInfo } from '@/types'
 
 interface CanLoadResult {
@@ -18,7 +19,7 @@ interface LoadModelModalProps {
   onConfirm: (cfg: {
     gpuMemoryUtilization: number; maxModelLen: number | null
     enforceEager: boolean; maxCudagraphCaptureSize: number | null
-    nGpuLayers?: number | null; cpuOverflow?: boolean
+    nGpuLayers?: number | null; cpuOverflow?: boolean; isMoe?: boolean
   }) => void
   onCancel: () => void
 }
@@ -40,6 +41,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
   // llama.cpp only
   const [gpuLayersPct, setGpuLayersPct] = useState(100) // 0=CPU, 100=full GPU
   const [cpuOverflow, setCpuOverflow] = useState(false)
+  const [moeConfig, setMoeConfig] = useState<MoeLoadConfig | null>(null)
 
   useEffect(() => {
     getInferenceSettings().then(s => {
@@ -48,6 +50,20 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
       if (ext.gpu_vram_limit_gb) setVramLimitGb(ext.gpu_vram_limit_gb)
     }).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (!model.is_moe) return
+    getMoeLoadConfig(model.id, vramTotalGb).then(cfg => {
+      if (!cfg.is_moe) return
+      setMoeConfig(cfg)
+      if (cfg.recommended_n_gpu_layers != null) {
+        const totalLayers = 64 // conservative estimate matching backend
+        setGpuLayersPct(Math.round((cfg.recommended_n_gpu_layers / totalLayers) * 100))
+      }
+      setCpuOverflow(cfg.recommended_cpu_overflow ?? true)
+      if (cfg.recommended_ctx) setCtxLen(cfg.recommended_ctx)
+    }).catch(() => {})
+  }, [model.id, model.is_moe, vramTotalGb])
 
   useEffect(() => {
     const isGguf = model.quantization?.toLowerCase().includes('gguf') || model.arch_tag?.toLowerCase().includes('gguf')
@@ -95,11 +111,39 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
             maxCudagraphCaptureSize: cudaGraphs === 'limited' ? maxCaptureSize : null,
             nGpuLayers: resolvedNGpuLayers,
             cpuOverflow: engine === 'llama' ? cpuOverflow : false,
+            isMoe: model.is_moe ?? false,
           })}>
           Load model
         </Btn>
       </>
     }>
+      {/* MoE banner */}
+      {model.is_moe && (
+        <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/30 rounded-sm px-3 py-2.5 text-sm text-amber-400">
+          <svg className="w-4 h-4 flex-shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <div>
+            <div className="font-medium">
+              MoE model: {model.params_billion ?? '?'}B total
+              {model.active_params_billion != null && ` / ${model.active_params_billion}B active per token`}
+            </div>
+            <div className="text-xs text-amber-400/70 mt-0.5">
+              Requires CPU overflow on 12 GB GPU — RAM will be used for remaining layers
+            </div>
+            {moeConfig?.is_moe && (
+              <div className="flex gap-3 mt-1.5 text-xs font-mono">
+                <span className={moeConfig.estimated_gpu_vram_gb != null && moeConfig.estimated_gpu_vram_gb <= vramTotalGb ? 'text-green-400' : 'text-amber-400'}>
+                  GPU ~{moeConfig.estimated_gpu_vram_gb ?? '?'} GB
+                </span>
+                <span className="text-text-muted">
+                  RAM ~{moeConfig.estimated_ram_gb ?? '?'} GB
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {/* Model + engine */}
       <div className="bg-elevated border border-border rounded-sm px-3 py-2.5 flex items-center justify-between">
         <span className="text-sm font-semibold text-text-primary">{model.name}</span>

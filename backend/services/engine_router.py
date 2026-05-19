@@ -189,6 +189,7 @@ def load_model_async(
     vllm_version: Optional[str] = None,
     n_gpu_layers: Optional[int] = None,
     cpu_overflow: bool = False,
+    is_moe: bool = False,
 ) -> None:
     from backend.services import llama_service, vllm_service
 
@@ -209,6 +210,7 @@ def load_model_async(
             gpu_type=gpu["type"],
             n_gpu_layers_override=n_gpu_layers,
             cpu_overflow=cpu_overflow,
+            is_moe=is_moe,
         )
         return
 

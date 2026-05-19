@@ -139,6 +139,29 @@ def _extract_params_billion(model_id: str, tags: list[str]) -> Optional[float]:
     return None
 
 
+def _extract_active_params_billion(model_id: str) -> Optional[float]:
+    """For MoE models, extract the ACTIVE params (e.g. 3B in 30B-A3B)."""
+    import re
+    name = model_id.lower()
+    moe = re.search(r'(\d+(?:\.\d+)?)b[-_]a(\d+(?:\.\d+)?)b', name)
+    if moe:
+        return float(moe.group(2))
+    return None
+
+
+def _is_moe(model_id: str, tags: list[str]) -> bool:
+    """Detect MoE architecture from model name or tags."""
+    import re
+    name = model_id.lower()
+    if re.search(r'\d+b[-_]a\d+(?:\.\d+)?b', name):
+        return True
+    if any(k in name for k in ['mixtral', 'moe', 'mixture', 'deepseek-v', 'deepseek-moe']):
+        return True
+    if any(t.lower() in ('moe', 'mixture-of-experts') for t in tags):
+        return True
+    return False
+
+
 def _estimate_vram_gb(params_b: float, quantization: Optional[str]) -> float:
     """Estimate VRAM needed to load the model weights (sans KV cache)."""
     if quantization is None:
@@ -445,6 +468,8 @@ def search_models(
                     likes=m.likes,
                     last_modified=str(m.lastModified)[:10] if m.lastModified else None,
                     pipeline_tag=m.pipeline_tag,
+                    is_moe=_is_moe(m.modelId, tags),
+                    active_params_billion=_extract_active_params_billion(m.modelId),
                 ))
             # Dedup + paginate
             seen: set[str] = set()
@@ -497,6 +522,8 @@ def search_models(
                     params_billion=params_b,
                     vram_estimate_gb=vram_est,
                     max_context_window=ctx,
+                    is_moe=_is_moe(m.modelId, tags),
+                    active_params_billion=_extract_active_params_billion(m.modelId),
                 )
                 results.append(info)
 
@@ -570,6 +597,8 @@ def get_model_info(model_id: str) -> ModelInfo:
             gguf_files=gguf_files,
             more_from_author=more_from_author,
             gated=bool(getattr(info, "gated", False)),
+            is_moe=_is_moe(model_id, tags),
+            active_params_billion=_extract_active_params_billion(model_id),
         )
     except Exception as e:
         logger.error(f"hf_service.get_model_info error: {e}")
@@ -651,6 +680,8 @@ def list_downloaded() -> list[ModelInfo]:
                 params_billion=params_b,
                 vram_estimate_gb=_estimate_vram_gb(params_b, quant) if params_b else None,
                 max_context_window=ctx,
+                is_moe=_is_moe(model_id, []),
+                active_params_billion=_extract_active_params_billion(model_id),
             )
         )
     return results

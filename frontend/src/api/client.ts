@@ -62,6 +62,22 @@ export const cancelDownload = (modelId: string): Promise<{ status: string }> =>
 export const deleteModel = (modelId: string): Promise<{ status: string }> =>
   apiRequest(`/models/downloaded/${encodeURIComponent(modelId)}`, { method: 'DELETE' })
 
+export interface MoeLoadConfig {
+  is_moe: boolean
+  total_params_b?: number
+  active_params_b?: number | null
+  total_vram_needed_gb?: number
+  recommended_n_gpu_layers?: number
+  estimated_gpu_vram_gb?: number
+  estimated_ram_gb?: number
+  recommended_cpu_overflow?: boolean
+  recommended_ctx?: number
+  note?: string
+}
+
+export const getMoeLoadConfig = (modelId: string, vramGb: number): Promise<MoeLoadConfig> =>
+  apiRequest(`/models/moe-load-config?model_id=${encodeURIComponent(modelId)}&vram_gb=${vramGb}`)
+
 export const listDownloads = (): Promise<DownloadJob[]> =>
   apiRequest('/models/downloads')
 

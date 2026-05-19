@@ -94,7 +94,7 @@ export default function App(): React.ReactElement {
   const confirmLoad = (cfg: {
     gpuMemoryUtilization: number; maxModelLen: number | null
     enforceEager: boolean; maxCudagraphCaptureSize: number | null
-    nGpuLayers?: number | null; cpuOverflow?: boolean
+    nGpuLayers?: number | null; cpuOverflow?: boolean; isMoe?: boolean
   }): void => {
     if (!pendingLoad) return
     loadModel(pendingLoad.id, {
@@ -104,6 +104,7 @@ export default function App(): React.ReactElement {
       maxCudagraphCaptureSize: cfg.maxCudagraphCaptureSize,
       n_gpu_layers: cfg.nGpuLayers ?? undefined,
       cpu_overflow: cfg.cpuOverflow ?? false,
+      is_moe: cfg.isMoe ?? false,
     })
     setPendingLoad(null)
   }

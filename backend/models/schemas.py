@@ -34,6 +34,8 @@ class ModelInfo(BaseModel):
     more_from_author: Optional[list[dict]] = None  # [{"id": "...", "downloads": 123, "likes": 5}]
     gated: bool = False  # modèle nécessitant acceptation de licence sur HF
     engine: Optional[str] = None  # "llama" | "vllm" | None
+    is_moe: bool = False
+    active_params_billion: Optional[float] = None  # MoE only: active params per token
 
 
 class DownloadRequest(BaseModel):
@@ -52,6 +54,7 @@ class LoadRequest(BaseModel):
     n_gpu_layers: Optional[int] = None  # llama.cpp only: -1=full GPU, 0=CPU, N=N layers on GPU
     cpu_overflow: bool = False          # llama.cpp only: allow overflow to CPU RAM if VRAM exceeded
     gguf_path: Optional[str] = None    # absolute path for finetuned GGUFs — bypasses HF resolution
+    is_moe: bool = False               # llama.cpp only: MoE model — reduces n_batch + disables CUDA graph profiling
 
 
 class ChatMessage(BaseModel):

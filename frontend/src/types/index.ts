@@ -40,6 +40,8 @@ export interface ModelInfo {
   more_from_author: ModelStub[] | null
   gated: boolean
   engine?: string | null
+  is_moe?: boolean
+  active_params_billion?: number | null
 }
 
 export interface DownloadRequest {
@@ -57,6 +59,7 @@ export interface LoadRequest {
   n_gpu_layers?: number | null
   cpu_overflow?: boolean
   gguf_path?: string | null
+  is_moe?: boolean
 }
 
 export interface FinetunedModel {

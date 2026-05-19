@@ -353,6 +353,54 @@ def delete_finetuned_model(job_id: str) -> dict:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/moe-load-config")
+def get_moe_load_config(model_id: str, vram_gb: float = 12.0) -> dict:
+    """Return recommended load config for a MoE model given available VRAM."""
+    from backend.services.hf_service import (
+        _extract_params_billion, _extract_active_params_billion,
+        _is_moe, _estimate_vram_gb_gguf,
+    )
+
+    if not _is_moe(model_id, []):
+        return {"is_moe": False}
+
+    total_params = _extract_params_billion(model_id, []) or 0
+    active_params = _extract_active_params_billion(model_id)
+
+    if not total_params:
+        return {"is_moe": True, "total_params_b": 0}
+
+    total_vram_needed = _estimate_vram_gb_gguf(total_params, "Q4_K_M")
+    usable_vram = max(vram_gb - 1.5, 0)
+    fraction = min(usable_vram / total_vram_needed, 1.0)
+
+    if total_params >= 20:
+        estimated_layers = 64
+    elif total_params >= 10:
+        estimated_layers = 48
+    else:
+        estimated_layers = 32
+
+    recommended_n_gpu_layers = max(1, int(fraction * estimated_layers))
+    vram_with_config = total_vram_needed * fraction
+
+    return {
+        "is_moe": True,
+        "total_params_b": total_params,
+        "active_params_b": active_params,
+        "total_vram_needed_gb": round(total_vram_needed, 1),
+        "recommended_n_gpu_layers": recommended_n_gpu_layers,
+        "estimated_gpu_vram_gb": round(vram_with_config, 1),
+        "estimated_ram_gb": round(total_vram_needed - vram_with_config, 1),
+        "recommended_cpu_overflow": True,
+        "recommended_ctx": 32768,
+        "note": (
+            f"MoE: {total_params}B total / {active_params}B active"
+            " — CPU overflow required on 12GB GPU"
+        ),
+    }
+
+
 @router.get("/llama-cpp/status")
 def get_llama_cpp_status() -> dict:
     """Return llama-cpp-python installation status."""
