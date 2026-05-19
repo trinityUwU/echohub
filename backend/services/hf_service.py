@@ -212,7 +212,7 @@ def _detect_capabilities(tags: list[str], model_id: str) -> ModelCapabilities:
         or "qwq" in name_lower
         or "s1" in tags_lower
     )
-    vision = any(t in tags_lower for t in ("vision", "multimodal", "vl")) or any(
+    vision = any(t in tags_lower for t in ("vision", "multimodal", "vl", "image-text-to-text", "image-to-text")) or any(
         k in name_lower for k in ("vision", "-vl", "vl-")
     )
     code = "code" in tags_lower or any(k in name_lower for k in ("coder", "code", "-code"))
@@ -596,7 +596,7 @@ def get_model_info(model_id: str) -> ModelInfo:
             name=model_id.split("/")[-1],
             author=author,
             size_gb=_size_gb(model_id) if _is_downloaded(model_id) else None,
-            capabilities=_detect_capabilities(tags, model_id),
+            capabilities=_detect_capabilities(tags + ([getattr(info, "pipeline_tag")] if getattr(info, "pipeline_tag", None) else []), model_id),
             downloaded=_is_downloaded(model_id),
             loaded=False,
             quantization=quant,
