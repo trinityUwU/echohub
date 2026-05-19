@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useModels } from '@/hooks/useModels'
 import { useGpu } from '@/hooks/useGpu'
 import { useConversations } from '@/hooks/useConversations'
-import { subscribeDownloads, cancelDownload, deleteModel, listFinetunedModels } from '@/api/client'
+import { subscribeDownloads, cancelDownload, deleteModel, listFinetunedModels, deleteFinetunedModel } from '@/api/client'
 import type { DownloadJob, FinetunedModel, ModelInfo } from '@/types'
 import { NavRail } from '@/components/nav/NavRail'
 import { ChatPage } from '@/components/chat/ChatPage'
@@ -162,6 +162,11 @@ export default function App(): React.ReactElement {
             onAddModel={() => setPage('discover')}
             onLoad={requestLoad}
             onLoadFinetuned={handleLoadFinetuned}
+            onDeleteFinetuned={async (jobId) => {
+              const ok = await confirm('Delete fine-tuned model?', 'This will delete the GGUF export. The LoRA and training data are preserved.', 'Delete')
+              if (!ok) return
+              try { await deleteFinetunedModel(jobId); refreshFinetuned() } catch { /* ignore */ }
+            }}
             totalDiskGb={downloaded.reduce((s, m) => s + (m.size_gb ?? 0), 0)}
           />
         </div>

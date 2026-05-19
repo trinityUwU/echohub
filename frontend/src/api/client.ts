@@ -584,3 +584,6 @@ export async function llamaUpgradeStreamUrl(): Promise<string> {
 export async function evalRunStreamUrl(): Promise<string> {
   return apiUrl('/finetune/eval-run/stream')
 }
+
+export const deleteFinetunedModel = (jobId: string): Promise<{ status: string }> =>
+  apiRequest(`/models/finetuned/${jobId}`, { method: 'DELETE' })

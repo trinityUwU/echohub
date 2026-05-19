@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ModelInfo, FinetunedModel } from '@/types'
 import { Badge } from '@/components/shared/Badge'
 import { Btn } from '@/components/shared/Btn'
+import { deleteFinetunedModel } from '@/api/client'
 
 type SourceFilter = 'all' | 'downloaded' | 'finetuned'
 
@@ -9,6 +10,7 @@ interface LibraryPageProps {
   models: ModelInfo[]
   finetunedModels: FinetunedModel[]
   onDelete: (id: string) => void
+  onDeleteFinetuned?: (jobId: string) => void
   onAddModel: () => void
   onLoad: (id: string) => void
   onLoadFinetuned: (model: FinetunedModel) => void
@@ -19,6 +21,7 @@ export function LibraryPage({
   models,
   finetunedModels,
   onDelete,
+  onDeleteFinetuned,
   onAddModel,
   onLoad,
   onLoadFinetuned,
@@ -58,7 +61,12 @@ export function LibraryPage({
           <LibraryRow key={m.id} model={m} onDelete={() => onDelete(m.id)} onLoad={() => onLoad(m.id)} />
         ))}
         {(source === 'all' || source === 'finetuned') && finetunedModels.map(m => (
-          <FinetunedRow key={m.id} model={m} onLoad={() => onLoadFinetuned(m)} />
+          <FinetunedRow
+            key={m.id}
+            model={m}
+            onLoad={() => onLoadFinetuned(m)}
+            onDelete={onDeleteFinetuned ? () => onDeleteFinetuned(m.job_id) : undefined}
+          />
         ))}
         {totalCount === 0 && (
           <div className="text-center text-text-muted py-16">
@@ -150,9 +158,10 @@ function LibraryRow({ model, onDelete, onLoad }: {
   )
 }
 
-function FinetunedRow({ model, onLoad }: {
+function FinetunedRow({ model, onLoad, onDelete }: {
   model: FinetunedModel
   onLoad: () => void
+  onDelete?: () => void
 }): React.ReactElement {
   const initials = model.name.replace(/[^A-Z0-9]/g, '').slice(0, 4) || 'FT'
 
@@ -175,6 +184,19 @@ function FinetunedRow({ model, onLoad }: {
       <div className="flex gap-1.5 items-center flex-shrink-0">
         <Badge variant="ft">ft</Badge>
         {model.quantization && <Badge variant="quant">{model.quantization}</Badge>}
+        {onDelete && (
+          <button
+            onClick={onDelete}
+            className="w-7 h-7 flex items-center justify-center rounded-sm text-text-muted hover:text-red-400 hover:bg-red-400/10 cursor-pointer transition-colors"
+            title="Delete fine-tuned GGUF"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              <path d="M10 11v6"/><path d="M14 11v6"/>
+            </svg>
+          </button>
+        )}
         {!model.loaded && (
           <button
             onClick={onLoad}

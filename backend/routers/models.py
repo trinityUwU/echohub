@@ -336,6 +336,23 @@ def list_finetuned_models() -> list[dict]:
     return results
 
 
+@router.delete("/finetuned/{job_id}")
+def delete_finetuned_model(job_id: str) -> dict:
+    """Delete the gguf_export directory for a fine-tuned job."""
+    import shutil
+    from backend.services.user_data import get_user_data_dir
+    gguf_dir = get_user_data_dir() / "finetune" / job_id / "gguf_export"
+    if not gguf_dir.exists():
+        raise HTTPException(status_code=404, detail="Fine-tuned model not found")
+    try:
+        shutil.rmtree(gguf_dir)
+        logger.info(f"Deleted finetuned model gguf_export for job {job_id}")
+        return {"status": "deleted", "job_id": job_id}
+    except Exception as e:
+        logger.error(f"delete_finetuned_model failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/llama-compat-check")
 def check_llama_compat(gguf_path: str) -> dict:
     """Try loading a GGUF to detect llama-cpp-python version incompatibility."""
