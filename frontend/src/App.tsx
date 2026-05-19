@@ -3,7 +3,7 @@ import { useModels } from '@/hooks/useModels'
 import { useGpu } from '@/hooks/useGpu'
 import { useConversations } from '@/hooks/useConversations'
 import { subscribeDownloads, cancelDownload, deleteModel, listFinetunedModels, deleteFinetunedModel } from '@/api/client'
-import type { DownloadJob, FinetunedModel, ModelInfo } from '@/types'
+import type { DownloadJob, FinetunedModel, ModelInfo, LoadConfig } from '@/types'
 import { NavRail } from '@/components/nav/NavRail'
 import { ChatPage } from '@/components/chat/ChatPage'
 import { LibraryPage } from '@/components/library/LibraryPage'
@@ -91,6 +91,16 @@ export default function App(): React.ReactElement {
     loadModelFromPath(model.id, model.path).catch(console.error)
   }
 
+  const handleReloadFromConfig = (config: LoadConfig): void => {
+    loadModel(config.model_id, {
+      gpuMemoryUtilization: config.gpu_memory_utilization ?? 0.75,
+      n_gpu_layers: config.n_gpu_layers ?? null,
+      cpu_overflow: config.cpu_overflow ?? false,
+      is_moe: config.is_moe ?? false,
+      gguf_path: config.gguf_path ?? null,
+    }).catch(() => {})
+  }
+
   const confirmLoad = (cfg: {
     gpuMemoryUtilization: number; maxModelLen: number | null
     enforceEager: boolean; maxCudagraphCaptureSize: number | null
@@ -150,6 +160,7 @@ export default function App(): React.ReactElement {
             onEject={unloadModel}
             onGoToSettings={() => setPage('settings')}
             setActiveMessages={setActiveMessages}
+            onLoadModel={handleReloadFromConfig}
           />
         </div>
         <div className={`flex flex-1 overflow-hidden ${page === 'library' ? 'animate-fade-in' : 'hidden'}`}>

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, memo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import type { ChatMessage, GenerationStats } from '@/types'
+import type { ChatMessage, GenerationStats, LoadConfig } from '@/types'
 import { MarkdownContent } from './MarkdownContent'
 import { ThinkingBlock } from './ThinkingBlock'
 import { PairEditor } from '@/components/finetune/PairEditor'
@@ -17,9 +17,10 @@ interface MessageRowProps {
   sourceConvId?: string
   sourceMsgId?: string
   loadedModelId?: string | null
+  onReload?: (config: LoadConfig) => void
 }
 
-function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRegenerate, onEditUser, promptForPair, sourceConvId, sourceMsgId, loadedModelId }: MessageRowProps): React.ReactElement {
+function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRegenerate, onEditUser, promptForPair, sourceConvId, sourceMsgId, loadedModelId, onReload }: MessageRowProps): React.ReactElement {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -199,6 +200,16 @@ function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRe
                 </svg>
               </ActionBtn>
             )}
+
+            {!isUser && message.loadConfig && onReload && (
+              (!loadedModelId || loadedModelId !== message.loadConfig.model_id)
+            ) && (
+              <ActionBtn onClick={() => onReload(message.loadConfig!)} title={`Reload model: ${message.loadConfig.model_id.split('/').pop()}`}>
+                <svg className="w-3.5 h-3.5 text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.01"/>
+                </svg>
+              </ActionBtn>
+            )}
           </div>
         )}
 
@@ -240,6 +251,7 @@ export const MessageRow = memo(MessageRowInner, (prev, next) => {
   if (prev.isLast !== next.isLast) return false
   if (prev.message.content !== next.message.content) return false
   if (prev.genStats !== next.genStats) return false
+  if (prev.loadedModelId !== next.loadedModelId) return false
   return true
 })
 

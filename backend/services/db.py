@@ -265,6 +265,11 @@ def init_db() -> None:
                 results TEXT NOT NULL, score_avg REAL, created_at TEXT NOT NULL
             )""")
             conn.commit()
+        # Add load_config to messages if missing
+        msg_cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+        if "load_config" not in msg_cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN load_config TEXT")
+            conn.commit()
         # Add profile_id to training_pairs if missing
         pair_cols = {row[1] for row in conn.execute("PRAGMA table_info(training_pairs)")}
         if "profile_id" not in pair_cols:
@@ -388,6 +393,7 @@ def get_messages(conv_id: str) -> list[dict]:
         d = _row_to_dict(row)
         d["content"] = _decode_content(d["content"])
         d["stats"] = _decode_stats(d.get("stats"))
+        d["load_config"] = _decode_stats(d.get("load_config"))  # same JSON→dict pattern
         result.append(d)
     return result
 
@@ -398,16 +404,19 @@ def add_message(
     role: str,
     content: Any,
     stats: dict | None,
+    load_config: dict | None = None,
 ) -> dict:
     now = _now()
     raw_content = json.dumps(content) if isinstance(content, list) else str(content)
     raw_stats = json.dumps(stats) if stats is not None else None
+    raw_load_config = json.dumps(load_config) if load_config is not None else None
 
     with _lock:
         conn = _get_conn()
         conn.execute(
-            "INSERT INTO messages (id, conversation_id, role, content, stats, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (id, conv_id, role, raw_content, raw_stats, now),
+            "INSERT INTO messages (id, conversation_id, role, content, stats, load_config, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (id, conv_id, role, raw_content, raw_stats, raw_load_config, now),
         )
         conn.execute(
             "UPDATE conversations SET updated_at = ? WHERE id = ?",
@@ -421,6 +430,7 @@ def add_message(
         "role": role,
         "content": content,
         "stats": stats,
+        "load_config": load_config,
         "created_at": now,
     }
 

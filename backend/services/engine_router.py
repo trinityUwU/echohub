@@ -168,15 +168,23 @@ def get_status() -> Optional[ModelInfo]:
 
 def get_load_state() -> dict:
     from backend.services import llama_service, vllm_service
+
     if _active_engine == "llama":
-        return llama_service.get_load_state()
+        state = llama_service.get_load_state()
+        state["load_config"] = llama_service.get_load_config()
+        return state
     if _active_engine == "vllm":
-        return vllm_service.get_load_state()
-    # Check both if no active engine (loading in progress)
+        state = vllm_service.get_load_state()
+        state["load_config"] = vllm_service.get_load_config()
+        return state
+    # No active engine — check if a load is in progress
     vllm_state = vllm_service.get_load_state()
     if vllm_state["loading_model_id"]:
+        vllm_state["load_config"] = vllm_service.get_load_config()
         return vllm_state
-    return llama_service.get_load_state()
+    llama_state = llama_service.get_load_state()
+    llama_state["load_config"] = llama_service.get_load_config()
+    return llama_state
 
 
 def load_model_async(

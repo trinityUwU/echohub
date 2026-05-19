@@ -38,6 +38,7 @@ _loading_model_id: Optional[str] = None
 _load_error: Optional[str] = None
 _eject_requested: bool = False
 _lock = threading.Lock()
+_load_config: Optional[dict] = None           # params used at last successful load
 
 LOG_PATH = Path(__file__).resolve().parents[3] / "logs" / "llama.log"
 
@@ -109,7 +110,7 @@ def load_model(
     vision_handler: Optional[str] = None,
 ) -> None:
     """Charge le modèle GGUF. Bloquant — appelé depuis un thread."""
-    global _llm, _current_model, _load_error, _eject_requested
+    global _llm, _current_model, _load_error, _eject_requested, _load_config
 
     try:
         from llama_cpp import Llama
@@ -187,6 +188,14 @@ def load_model(
         max_context_window=n_ctx,
         quantization=_detect_quant_from_path(gguf_path),
     )
+    _load_config = {
+        "engine": "llama",
+        "n_ctx": n_ctx,
+        "n_gpu_layers": n_gpu,
+        "cpu_overflow": cpu_overflow,
+        "is_moe": is_moe,
+        "gguf_path": gguf_path,
+    }
     logger.info(f"llama model loaded: {model_id} ({elapsed:.1f}s)")
 
 
@@ -222,9 +231,14 @@ def load_model_async(
     threading.Thread(target=_run, daemon=True, name=f"llama-load-{model_id}").start()
 
 
+def get_load_config() -> Optional[dict]:
+    """Return the params used at last successful model load, or None."""
+    return _load_config
+
+
 def unload_model() -> None:
     """Décharge le modèle et libère la VRAM."""
-    global _llm, _current_model, _loading_model_id, _eject_requested
+    global _llm, _current_model, _loading_model_id, _eject_requested, _load_config
 
     _eject_requested = True
     _loading_model_id = None
@@ -240,6 +254,7 @@ def unload_model() -> None:
                 _llm = None
 
     _current_model = None
+    _load_config = None
     _log("[llama] Model unloaded")
     logger.info("llama model unloaded")
 

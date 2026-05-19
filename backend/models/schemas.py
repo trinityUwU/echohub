@@ -49,6 +49,7 @@ class LoadRequest(BaseModel):
     model_id: str
     gpu_memory_utilization: float = 0.75
     max_model_len: Optional[int] = None
+    n_ctx: Optional[int] = None         # alias for max_model_len — used by llama engine
     enforce_eager: bool = False
     max_cudagraph_capture_size: Optional[int] = None
     vllm_version: Optional[str] = None
@@ -62,6 +63,7 @@ class ChatMessage(BaseModel):
     role: str
     # str for text-only, list for multimodal (OpenAI content array format)
     content: Union[str, list[dict[str, Any]]]
+    load_config: Optional[dict] = None  # load params snapshot attached to this message
 
 
 class ChatRequest(BaseModel):
@@ -95,6 +97,7 @@ class MessageOut(BaseModel):
     role: str
     content: Any  # str ou list
     stats: Optional[MessageStats] = None
+    load_config: Optional[dict] = None
     created_at: str
 
 

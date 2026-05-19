@@ -42,6 +42,7 @@ class AddMessageBody(BaseModel):
     role: str
     content: Any
     stats: MessageStats | None = None
+    load_config: dict | None = None
 
 
 def _to_conversation_out(row: dict) -> ConversationOut:
@@ -64,6 +65,7 @@ def _to_message_out(row: dict) -> MessageOut:
         role=row["role"],
         content=row["content"],
         stats=stats,
+        load_config=row.get("load_config"),
         created_at=row["created_at"],
     )
 
@@ -117,7 +119,7 @@ def add_message(conv_id: str, body: AddMessageBody) -> MessageOut:
     if db.get_conversation(conv_id) is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     stats_dict = body.stats.model_dump() if body.stats else None
-    row = db.add_message(conv_id, body.id, body.role, body.content, stats_dict)
+    row = db.add_message(conv_id, body.id, body.role, body.content, stats_dict, body.load_config)
     return _to_message_out(row)
 
 

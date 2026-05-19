@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { chatStream, summarizeMessages, addMessage, updateConversation } from '@/api/client'
-import type { Attachment, ChatMessage, ChatParams, ContentPart, GenerationStats } from '@/types'
+import type { Attachment, ChatMessage, ChatParams, ContentPart, GenerationStats, LoadConfig } from '@/types'
 
 export const DEFAULT_CHAT_PARAMS: ChatParams = {
   systemPrompt: '',
@@ -131,11 +131,14 @@ export function useChat(
     }
   }, [])
 
-  const send = useCallback(async (text: string, modelLoaded: boolean, attachments: Attachment[] = []) => {
+  const send = useCallback(async (text: string, modelLoaded: boolean, attachments: Attachment[] = [], currentLoadConfig?: LoadConfig | null) => {
     if (!modelLoaded) return
     setError(null)
     setStats(null)
     setOomError(false)
+
+    // Capture load config at send time — before any async work
+    const loadConfigSnapshot: LoadConfig | null = currentLoadConfig ?? null
 
     const content = buildUserContent(text, attachments)
     const userMsgId = crypto.randomUUID()
@@ -215,18 +218,20 @@ export function useChat(
         const assistantFinal: ChatMessage = {
           role: 'assistant', content: accumulated, id: assistantMsgId,
           stats: msgStats,
+          loadConfig: loadConfigSnapshot,
         }
         const final = [...currentMessages, assistantFinal]
         setMessages(prev => { const u = [...prev]; u[u.length - 1] = assistantFinal; return u })
         onMessagesChange?.(final)
 
-        // Persist assistant message with stats
+        // Persist assistant message with stats and load config snapshot
         if (convId) {
           addMessage(convId, {
             id: assistantMsgId,
             role: 'assistant',
             content: accumulated,
             stats: msgStats,
+            load_config: loadConfigSnapshot,
           }).catch(() => {/* best-effort */})
         }
       },

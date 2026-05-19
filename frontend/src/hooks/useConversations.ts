@@ -19,6 +19,7 @@ function chatMessageFromStored(stored: import('@/types').StoredMessage): ChatMes
     role: stored.role,
     content: stored.content,
     stats: stored.stats,
+    loadConfig: stored.load_config ?? undefined,
   }
 }
 

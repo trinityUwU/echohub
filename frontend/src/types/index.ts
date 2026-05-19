@@ -109,12 +109,25 @@ export interface ConversationSummary {
   message_count: number
 }
 
+export interface LoadConfig {
+  model_id: string
+  engine?: string
+  n_ctx?: number | null
+  n_gpu_layers?: number | null
+  cpu_overflow?: boolean
+  is_moe?: boolean
+  gpu_memory_utilization?: number
+  vllm_version?: string | null
+  gguf_path?: string | null
+}
+
 export interface StoredMessage {
   id: string
   conversation_id: string
   role: 'user' | 'assistant' | 'system'
   content: string | ContentPart[]
   stats: MessageStats | null
+  load_config: LoadConfig | null
   created_at: string
 }
 
@@ -123,6 +136,7 @@ export interface ChatMessage {
   content: string | ContentPart[]
   id?: string
   stats?: MessageStats | null
+  loadConfig?: LoadConfig | null
 }
 
 // Attachment held in UI state before being serialized into a ChatMessage

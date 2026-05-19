@@ -45,6 +45,7 @@ _vram_samples: list[int] = []  # used MB samples
 _loading_model_id: Optional[str] = None  # set during async load
 _load_error: Optional[str] = None        # last load error message
 _eject_requested: bool = False           # set by unload_model() to abort in-progress load
+_load_config: Optional[dict] = None      # params used at last successful load
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +216,11 @@ def get_load_state() -> dict:
     }
 
 
+def get_load_config() -> Optional[dict]:
+    """Return the params used at last successful model load, or None."""
+    return _load_config
+
+
 def load_model_async(model_path: str, model_id: str,
                      gpu_memory_utilization: Optional[float] = None,
                      max_model_len: Optional[int] = None,
@@ -249,7 +255,7 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
                max_cudagraph_capture_size: Optional[int] = None,
                python_override: Optional[str] = None) -> None:
     """Launch vLLM subprocess serving model_path on VLLM_PORT."""
-    global _current_model, _vllm_proc, _eject_requested
+    global _current_model, _vllm_proc, _eject_requested, _load_config
 
     _eject_requested = False  # reset from any previous eject
 
@@ -434,6 +440,13 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
         max_context_window=max_model_len,
         engine="vllm",
     )
+    _load_config = {
+        "engine": "vllm",
+        "gpu_memory_utilization": gpu_memory_utilization,
+        "max_model_len": max_model_len,
+        "vllm_version": _active_version,
+        "gguf_path": model_path if model_path.endswith(".gguf") else None,
+    }
 
     # Persist to DB
     try:
@@ -447,7 +460,7 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
 
 def unload_model() -> None:
     """Kill vLLM subprocess, free VRAM. Safe to call during loading (eject)."""
-    global _current_model, _vllm_proc, _loading_model_id, _eject_requested
+    global _current_model, _vllm_proc, _loading_model_id, _eject_requested, _load_config
 
     # Signal the load thread to abort
     _eject_requested = True
@@ -466,6 +479,7 @@ def unload_model() -> None:
         _vllm_proc = None
 
     _current_model = None
+    _load_config = None
     time.sleep(1)
     _log_vram_freed()
     logger.info("Model unloaded / ejected")

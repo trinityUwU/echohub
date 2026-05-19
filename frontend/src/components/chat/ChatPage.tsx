@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useChat } from '@/hooks/useChat'
 import { useProfiles } from '@/hooks/useProfiles'
-import type { ConversationSummary, ModelInfo, GpuStats, ChatMessage } from '@/types'
+import type { ConversationSummary, ModelInfo, GpuStats, ChatMessage, LoadConfig } from '@/types'
 import { ConvSidebar } from '@/components/nav/ConvSidebar'
 import { ChatTopBar } from './ChatTopBar'
 import { CpuBanner } from './CpuBanner'
@@ -31,6 +31,7 @@ interface ChatPageProps {
   onEject: () => void
   onGoToSettings: () => void
   setActiveMessages: (msgs: ChatMessage[]) => void
+  onLoadModel?: (config: LoadConfig) => void
 }
 
 export function ChatPage({
@@ -39,7 +40,7 @@ export function ChatPage({
   onNewConversation, onSelectConversation,
   onDeleteConversation, onArchiveConversation, onUnarchiveConversation, onRenameConversation,
   onOpenPicker, onEject, onGoToSettings,
-  setActiveMessages,
+  setActiveMessages, onLoadModel,
 }: ChatPageProps): React.ReactElement {
   const profilesHook = useProfiles()
   // Local params state — syncs from profile on profile switch, edited freely by sliders
@@ -173,6 +174,8 @@ export function ChatPage({
               streaming={streaming}
               onRegenerate={msg.role === 'assistant' && i === messages.length - 1 ? handleRegenerate : undefined}
               onEditUser={msg.role === 'user' ? (text: string) => handleEditUser(i, text) : undefined}
+              loadedModelId={loadedModel?.id ?? null}
+              onReload={onLoadModel}
             />
           ))}
           <div ref={bottomRef} />

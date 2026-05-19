@@ -42,11 +42,13 @@ def load_model(req: LoadRequest) -> dict:
             model_path = req.gguf_path
         else:
             model_path = _resolve_model_path(req.model_id)
+        # n_ctx is an alias for max_model_len — prefer n_ctx when explicitly provided
+        resolved_ctx = req.n_ctx or req.max_model_len
         engine_router.load_model_async(
             model_path=model_path,
             model_id=req.model_id,
             gpu_memory_utilization=req.gpu_memory_utilization if req.gpu_memory_utilization != 0.75 else None,
-            max_model_len=req.max_model_len,
+            max_model_len=resolved_ctx,
             enforce_eager=req.enforce_eager,
             max_cudagraph_capture_size=req.max_cudagraph_capture_size,
             vllm_version=req.vllm_version,

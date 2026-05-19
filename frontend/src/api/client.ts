@@ -24,6 +24,7 @@ export const getMessages = (convId: string): Promise<StoredMessage[]> =>
 
 export const addMessage = (convId: string, msg: {
   id: string; role: string; content: ChatMessage['content']; stats?: MessageStats | null
+  load_config?: import('@/types').LoadConfig | null
 }): Promise<StoredMessage> =>
   apiRequest(`/conversations/${convId}/messages`, { method: 'POST', body: JSON.stringify(msg) })
 
