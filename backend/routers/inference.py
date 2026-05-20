@@ -406,8 +406,8 @@ async def tool_chat(req: ToolChatRequest):
                         content = event.get("content", "")
                         if content:
                             accumulated_text_buf += content
-                            # Suppress streaming if it looks like a tool call response forming
-                            if not accumulated_text_buf.lstrip().startswith("<tool_call>"):
+                            # Only stream if no tool_call tag anywhere in buffer yet
+                            if "<tool_call>" not in accumulated_text_buf:
                                 streamed_text = True
                                 yield f"data: {_json.dumps({'type': 'text_chunk', 'content': content})}\n\n"
                     elif event_type == "response":
@@ -422,7 +422,7 @@ async def tool_chat(req: ToolChatRequest):
                 yield f"data: {_json.dumps({'type': 'error', 'error': str(e)})}\n\n"
                 return
 
-            if response_dict is None and not accumulated_text_buf.lstrip().startswith("<tool_call>"):
+            if response_dict is None and "<tool_call>" not in accumulated_text_buf:
                 # Plain text streamed, no tool calls — done
                 break
 
@@ -431,7 +431,7 @@ async def tool_chat(req: ToolChatRequest):
             tool_calls = message.get("tool_calls")
 
             # Fallback: model emitted tool call as text (e.g. <tool_call>{...}</tool_call>)
-            if not tool_calls and accumulated_text_buf.lstrip().startswith("<tool_call>"):
+            if not tool_calls and "<tool_call>" in accumulated_text_buf:
                 import re as _re
                 # Parse one or more <tool_call>JSON</tool_call> blocks
                 tc_matches = _re.findall(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", accumulated_text_buf, _re.DOTALL)
