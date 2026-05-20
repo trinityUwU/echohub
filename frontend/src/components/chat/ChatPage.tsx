@@ -231,8 +231,12 @@ export function ChatPage({
         </div>
       )}
       <div className="flex flex-1 overflow-hidden relative">
-        {/* Eye/Logs toggle — always visible, centered at top of content area */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 z-20">
+        {/* Eye/Logs toggle — centered, slides down with the logs panel */}
+        <motion.div
+          className="absolute left-1/2 -translate-x-1/2 z-20"
+          animate={{ top: showLogs ? 220 : 0 }}
+          transition={{ duration: 0.2, ease: 'easeInOut' }}
+        >
           <button
             onClick={toggleLogs}
             title={showLogs ? 'Hide logs' : 'Show engine logs'}
@@ -250,7 +254,7 @@ export function ChatPage({
             </svg>
             Logs
           </button>
-        </div>
+        </motion.div>
         <PanelWrapper side="left" collapsed={leftCollapsed} onToggle={toggleLeft}>
           <ConvSidebar
             conversations={conversations}
