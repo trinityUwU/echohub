@@ -178,8 +178,8 @@ function SendBtn({ onClick, disabled }: { onClick: () => void; disabled: boolean
   return (
     <button onClick={onClick} disabled={disabled}
       className="w-8 h-8 flex items-center justify-center rounded-sm bg-accent hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex-shrink-0">
-      <svg className="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+      <svg className="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>
       </svg>
     </button>
   )
