@@ -58,6 +58,7 @@ export function ProjectsHub({
   onRenameProject,
 }: ProjectsHubProps): React.ReactElement {
   const [filter, setFilter] = useState<FilterTab>('all')
+  const [search, setSearch] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [createName, setCreateName] = useState('')
   const [createMode, setCreateMode] = useState<ProjectMode>('dev')
@@ -66,9 +67,9 @@ export function ProjectsHub({
   const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null)
 
   const filtered = projects.filter(p => {
-    if (filter === 'archived') return p.archived
-    if (filter === 'all') return !p.archived
-    return !p.archived && p.mode === filter
+    const matchesTab = filter === 'archived' ? p.archived : filter === 'all' ? !p.archived : !p.archived && p.mode === filter
+    const matchesSearch = !search.trim() || p.name.toLowerCase().includes(search.trim().toLowerCase())
+    return matchesTab && matchesSearch
   })
 
   const handleCreate = (): void => {
@@ -115,15 +116,29 @@ export function ProjectsHub({
           <h1 className="text-lg font-semibold text-text-primary tracking-tight">Projects</h1>
           <p className="text-xs text-text-muted mt-0.5">{projects.filter(p => !p.archived).length} active project{projects.filter(p => !p.archived).length !== 1 ? 's' : ''}</p>
         </div>
-        <button
-          onClick={e => { e.stopPropagation(); setShowCreate(true) }}
-          className="flex items-center gap-2 px-3 py-1.5 bg-accent/15 hover:bg-accent/25 border border-accent/30 text-accent text-xs font-medium rounded-md transition-colors cursor-pointer"
-        >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-          </svg>
-          New project
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              onClick={e => e.stopPropagation()}
+              placeholder="Search projects…"
+              className="bg-elevated border border-border rounded-md pl-8 pr-3 py-1.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent/50 transition-colors w-48"
+            />
+          </div>
+          <button
+            onClick={e => { e.stopPropagation(); setShowCreate(true) }}
+            className="flex items-center gap-2 px-3 py-1.5 bg-accent/15 hover:bg-accent/25 border border-accent/30 text-accent text-xs font-medium rounded-md transition-colors cursor-pointer"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            New project
+          </button>
+        </div>
       </div>
 
       {/* Filter tabs */}
