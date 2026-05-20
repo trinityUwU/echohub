@@ -73,10 +73,14 @@ export function InputBar({ modelLoaded, visionEnabled, streaming, params, usedTo
 
     // Fallback for WebKitGTK/Linux via Tauri Rust command (arboard)
     // clipboardData.items is empty for images on WebKitGTK — read directly from clipboard
+    // Only intercept if vision is enabled — otherwise let the browser handle text paste normally
+    if (!visionEnabled) return
     e.preventDefault()
     invoke<string | null>('read_clipboard_image').then(dataUrl => {
       if (!dataUrl) {
-        console.warn('[paste] read_clipboard_image returned null — no image in clipboard?')
+        // No image — restore text paste manually
+        const text = e.clipboardData.getData('text')
+        if (text) document.execCommand('insertText', false, text)
         return
       }
       const byteStr = atob(dataUrl.split(',')[1])

@@ -483,16 +483,29 @@ function ProjectWorkspace({
   }, [messages])
 
   const handleRegenerate = (): void => {
-    if (isDevMode) return
+    if (!loadedModel) return
+    // Find last assistant message, re-send everything before it
     const lastIdx = [...messages].reverse().findIndex(m => m.role === 'assistant')
-    if (lastIdx === -1 || !loadedModel) return
-    chatHook.sendFromHistory(messages.slice(0, messages.length - 1 - lastIdx))
+    if (lastIdx === -1) return
+    const history = messages.slice(0, messages.length - 1 - lastIdx)
+    if (isDevMode) {
+      // Re-send from last user message text
+      const lastUser = [...history].reverse().find(m => m.role === 'user')
+      if (lastUser) toolChatHook.send(typeof lastUser.content === 'string' ? lastUser.content : '', params.systemPrompt || undefined)
+    } else {
+      chatHook.sendFromHistory(history)
+    }
   }
 
   const handleEditUser = (index: number, newText: string): void => {
-    if (isDevMode || !loadedModel) return
+    if (!loadedModel) return
     const updated = { ...messages[index], content: newText }
-    chatHook.sendFromHistory([...messages.slice(0, index), updated])
+    const history = [...messages.slice(0, index), updated]
+    if (isDevMode) {
+      toolChatHook.send(newText, params.systemPrompt || undefined)
+    } else {
+      chatHook.sendFromHistory(history)
+    }
   }
 
   const handleClear = (): void => {

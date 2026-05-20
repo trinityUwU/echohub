@@ -91,10 +91,16 @@ export function useToolChat(projectId: string): UseToolChatReturn {
     let accumulated = ''
 
     const req = {
-      messages: [...currentMessages].map(m => ({
-        role: m.role,
-        content: typeof m.content === 'string' ? m.content : '',
-      })),
+      // Only send non-empty messages — exclude assistant placeholders (content: '')
+      messages: [...currentMessages]
+        .filter(m => {
+          const c = typeof m.content === 'string' ? m.content : ''
+          return c.trim().length > 0
+        })
+        .map(m => ({
+          role: m.role,
+          content: typeof m.content === 'string' ? m.content : '',
+        })),
       project_id: projectId,
       system_prompt: systemPrompt,
     }
