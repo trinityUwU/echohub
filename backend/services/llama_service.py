@@ -218,6 +218,8 @@ def load_model(
     elapsed = time.time() - start
     _log(f"[llama] Model loaded in {elapsed:.1f}s")
 
+    from backend.services.hf_service import _detect_capabilities
+    _caps = _detect_capabilities([], model_id)
     _current_model = ModelInfo(
         id=model_id,
         name=model_id.split("/")[-1],
@@ -225,6 +227,7 @@ def load_model(
         loaded=True,
         max_context_window=n_ctx,
         quantization=_detect_quant_from_path(gguf_path),
+        capabilities=_caps,
     )
     _load_config = {
         "engine": "llama",
