@@ -5,6 +5,8 @@ loguru
 pydantic
 httpx
 python-dotenv
+gitpython>=3.1.0
+pyyaml>=6.0
 
 # Inference — llama-cpp-python (backend principal, cross-platform)
 # Install selon le hardware :

@@ -94,9 +94,9 @@ if [[ ! -d ".venv" ]]; then
     python3 -m venv .venv
 fi
 
-# Install/update deps
+# Install/update deps from requirements.txt (source of truth)
 .venv/bin/pip install --quiet --upgrade pip
-.venv/bin/pip install --quiet fastapi "uvicorn[standard]" huggingface_hub loguru pydantic httpx python-dotenv
+.venv/bin/pip install --quiet fastapi "uvicorn[standard]" huggingface_hub loguru pydantic httpx python-dotenv gitpython pyyaml
 
 # Inference engine compilation is handled by the InstallerApp on first launch
 
