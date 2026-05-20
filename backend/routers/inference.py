@@ -540,10 +540,9 @@ async def tool_chat(req: ToolChatRequest):
                 messages.append({
                     "role": "system",
                     "content": (
-                        f"[System] You have used {total_tool_calls} tool calls. "
-                        f"You have {remaining} tool call(s) left before the session limit. "
-                        "If you need more, wrap up the current task cleanly. "
-                        "The user can raise the limit by adjusting MAX_TOOL_CALLS in Settings > Dev mode."
+                        f"[System] You have used {total_tool_calls} tool calls and have {remaining} remaining. "
+                        f"If your task is not complete and you need more tool calls, call set_tool_limit NOW with a higher value and a clear reason before continuing. "
+                        f"If your task is complete or nearly complete, finish it without requesting more calls."
                     ),
                 })
 
