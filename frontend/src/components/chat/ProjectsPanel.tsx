@@ -6,6 +6,7 @@ import { DevPanel } from './DevPanel'
 
 interface ProjectsPanelProps {
   mode: ProjectMode
+  projectId: string
   loadedModelHasTools: boolean
   toolCalls: ToolCall[]
   workspaceFiles: WorkspaceFile[]
@@ -13,7 +14,7 @@ interface ProjectsPanelProps {
   children: React.ReactNode
 }
 
-export function ProjectsPanel({ mode, loadedModelHasTools, toolCalls, workspaceFiles, onRefreshFiles, children }: ProjectsPanelProps): React.ReactElement {
+export function ProjectsPanel({ mode, projectId, loadedModelHasTools, toolCalls, workspaceFiles, onRefreshFiles, children }: ProjectsPanelProps): React.ReactElement {
   const [collapsed, setCollapsed] = useState(false)
 
   return (
@@ -38,7 +39,7 @@ export function ProjectsPanel({ mode, loadedModelHasTools, toolCalls, workspaceF
                   transition={{ duration: 0.18, ease: 'easeOut' }}
                   className="w-[260px] flex-shrink-0 bg-elevated flex flex-col overflow-hidden h-full"
                 >
-                  <LeftPanel mode={mode} loadedModelHasTools={loadedModelHasTools} toolCalls={toolCalls} workspaceFiles={workspaceFiles} onRefreshFiles={onRefreshFiles} />
+                  <LeftPanel mode={mode} projectId={projectId} loadedModelHasTools={loadedModelHasTools} toolCalls={toolCalls} workspaceFiles={workspaceFiles} onRefreshFiles={onRefreshFiles} />
                 </motion.div>
               </AnimatePresence>
             </motion.div>
@@ -76,16 +77,17 @@ export function ProjectsPanel({ mode, loadedModelHasTools, toolCalls, workspaceF
 
 interface LeftPanelProps {
   mode: ProjectMode
+  projectId: string
   loadedModelHasTools: boolean
   toolCalls: ToolCall[]
   workspaceFiles: WorkspaceFile[]
   onRefreshFiles: () => void
 }
 
-function LeftPanel({ mode, loadedModelHasTools, toolCalls, workspaceFiles, onRefreshFiles }: LeftPanelProps): React.ReactElement {
+function LeftPanel({ mode, projectId, loadedModelHasTools, toolCalls, workspaceFiles, onRefreshFiles }: LeftPanelProps): React.ReactElement {
   if (mode === 'dev') return (
     <DevPanel
-      projectId=""
+      projectId={projectId}
       loadedModelHasTools={loadedModelHasTools}
       toolCalls={toolCalls}
       workspaceFiles={workspaceFiles}

@@ -305,6 +305,7 @@ export function ChatPage({
 interface ChatContentProps {
   view: ChatView
   mode: ProjectMode
+  projectId?: string
   loadedModelHasTools: boolean
   messages: ChatMessage[]
   streaming: boolean
@@ -327,7 +328,7 @@ interface ChatContentProps {
 }
 
 function ChatContent({
-  view, mode, loadedModelHasTools,
+  view, mode, projectId, loadedModelHasTools,
   messages, streaming, stats, activeModelName, loadedModel,
   params, usedTokens, isTokensExact, bottomRef,
   toolCalls, workspaceFiles, onRefreshFiles,
@@ -371,6 +372,7 @@ function ChatContent({
     return (
       <ProjectsPanel
         mode={mode}
+        projectId={projectId ?? ''}
         loadedModelHasTools={loadedModelHasTools}
         toolCalls={toolCalls}
         workspaceFiles={workspaceFiles}
@@ -650,6 +652,7 @@ function ProjectWorkspace({
         <ChatContent
           view={view}
           mode={mode}
+          projectId={project.id}
           loadedModelHasTools={!!loadedModel?.capabilities?.tools}
           messages={messages}
           streaming={streaming}
