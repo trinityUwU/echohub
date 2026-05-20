@@ -324,6 +324,20 @@ def init_db() -> None:
                     (p["name"], p["description"], p["prompt"], p["max_tokens"], p["temperature"], now)
                 )
             conn.commit()
+
+        # skills_search_cache — GitHub search results cache (TTL-based)
+        existing_tables3 = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "skills_search_cache" not in existing_tables3:
+            conn.execute("""
+                CREATE TABLE skills_search_cache (
+                    query TEXT PRIMARY KEY,
+                    results TEXT NOT NULL,
+                    total INTEGER NOT NULL DEFAULT 0,
+                    fetched_at REAL NOT NULL
+                )
+            """)
+            conn.commit()
+
     logger.info("DB initialized at {}", get_db_path())
 
 
@@ -1250,3 +1264,49 @@ def delete_benchmark_profile(profile_id: int) -> bool:
         conn.execute("DELETE FROM benchmark_profiles WHERE id=?", (profile_id,))
         conn.commit()
     return True
+
+
+# ── Skills search cache ────────────────────────────────────────────────────────
+
+def get_skills_cache(query: str) -> dict | None:
+    """Return cached search results if fresher than TTL_SECONDS, else None."""
+    import time
+    TTL_SECONDS = 86_400  # 24h
+    with _lock:
+        conn = _get_conn()
+        row = conn.execute(
+            "SELECT results, total, fetched_at FROM skills_search_cache WHERE query=?", (query,)
+        ).fetchone()
+    if not row:
+        return None
+    age = time.time() - row["fetched_at"]
+    if age > TTL_SECONDS:
+        return None
+    try:
+        return {"results": json.loads(row["results"]), "total": row["total"], "from_cache": True}
+    except Exception:
+        return None
+
+
+def set_skills_cache(query: str, results: list, total: int) -> None:
+    import time
+    with _lock:
+        conn = _get_conn()
+        conn.execute(
+            "INSERT OR REPLACE INTO skills_search_cache (query, results, total, fetched_at) VALUES (?, ?, ?, ?)",
+            (query, json.dumps(results), total, time.time()),
+        )
+        conn.commit()
+
+
+def get_skills_cache_age(query: str) -> float | None:
+    """Return age in seconds of the cache entry, or None if missing."""
+    import time
+    with _lock:
+        conn = _get_conn()
+        row = conn.execute(
+            "SELECT fetched_at FROM skills_search_cache WHERE query=?", (query,)
+        ).fetchone()
+    if not row:
+        return None
+    return time.time() - row["fetched_at"]

@@ -698,10 +698,11 @@ export interface GithubSkillResult {
   topics: string[]; updated_at: string; language: string | null; installed: boolean
 }
 
-export const searchSkills = (q: string): Promise<{
+export const searchSkills = (q: string, forceRefresh = false): Promise<{
   results: GithubSkillResult[]; total: number; authenticated: boolean
   rate_limit?: number; rate_limited?: boolean; error?: string
-}> => apiRequest(`/skills/search?q=${encodeURIComponent(q)}`)
+  from_cache?: boolean; cache_age_h?: number
+}> => apiRequest(`/skills/search?q=${encodeURIComponent(q)}${forceRefresh ? '&force_refresh=true' : ''}`)
 
 export const getGithubToken = (): Promise<{ token_set: boolean; token_preview: string }> =>
   apiRequest('/settings/github-token')

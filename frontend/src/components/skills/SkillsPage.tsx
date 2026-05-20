@@ -102,21 +102,26 @@ function DiscoverTab({ community, onInstall }: { community: CommunitySkill[]; on
   const [total, setTotal] = useState(0)
   const [authenticated, setAuthenticated] = useState(false)
   const [rateLimited, setRateLimited] = useState(false)
+  const [fromCache, setFromCache] = useState(false)
+  const [cacheAgeH, setCacheAgeH] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [searched, setSearched] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const installedUrls = new Set(community.map(c => c.repo_url))
 
-  const doSearch = useCallback(async (q: string): Promise<void> => {
+  const doSearch = useCallback(async (q: string, force = false): Promise<void> => {
     setLoading(true)
     setError(null)
     setRateLimited(false)
+    setFromCache(false)
     try {
-      const data = await searchSkills(q)
+      const data = await searchSkills(q, force)
       setResults(data.results)
       setTotal(data.total)
       setAuthenticated(data.authenticated)
+      setFromCache(data.from_cache ?? false)
+      setCacheAgeH(data.cache_age_h ?? null)
       if (data.rate_limited) setRateLimited(true)
       if (data.error) setError(data.error)
       setSearched(true)
@@ -126,7 +131,6 @@ function DiscoverTab({ community, onInstall }: { community: CommunitySkill[]; on
     setLoading(false)
   }, [])
 
-  // Auto-search on mount
   useEffect(() => { doSearch('') }, [doSearch])
 
   const handleInput = (val: string): void => {
@@ -145,33 +149,50 @@ function DiscoverTab({ community, onInstall }: { community: CommunitySkill[]; on
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
             <input
-              type="text"
-              value={query}
-              onChange={e => handleInput(e.target.value)}
+              type="text" value={query} onChange={e => handleInput(e.target.value)}
               placeholder="Search skills…"
               className="w-full bg-elevated border border-border focus:border-accent/60 rounded-md pl-9 pr-3 py-2 text-sm text-text-primary placeholder-text-muted outline-none transition-colors"
             />
           </div>
-          {loading && <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin flex-shrink-0" />}
-          {!authenticated && !rateLimited && (
-            <span className="text-2xs text-text-muted flex-shrink-0">
-              Unauthenticated · 60 req/h
-              <a href="#" className="ml-1 text-accent hover:underline" onClick={e => { e.preventDefault(); /* navigate to settings */ }}>Add token</a>
-            </span>
-          )}
-          {authenticated && <span className="text-2xs text-text-muted flex-shrink-0">5000 req/h</span>}
+          {loading
+            ? <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin flex-shrink-0" />
+            : (
+              <button
+                onClick={() => doSearch(query, true)}
+                title="Refresh from GitHub"
+                className="w-7 h-7 flex items-center justify-center rounded hover:bg-overlay text-text-muted hover:text-text-secondary transition-colors cursor-pointer flex-shrink-0"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="23 4 23 10 17 10"/>
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                </svg>
+              </button>
+            )
+          }
+          <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+            {fromCache && cacheAgeH !== null && (
+              <span className="text-2xs text-text-muted">Cached · {cacheAgeH < 1 ? '<1h' : `${cacheAgeH}h`} ago</span>
+            )}
+            {!authenticated
+              ? <span className="text-2xs text-text-muted">60 req/h · <span className="text-accent">Add token in Settings</span></span>
+              : <span className="text-2xs text-text-muted">5000 req/h</span>
+            }
+          </div>
         </div>
       </div>
 
       {/* Results */}
       <div className="flex-1 overflow-y-auto px-8 py-4">
         {rateLimited && (
-          <div className="mb-4 px-4 py-3 bg-yellow/10 border border-yellow/30 rounded-md text-sm text-yellow">
-            GitHub API rate limit reached. Add a GitHub token in Settings to increase to 5000 req/h.
+          <div className="mb-4 px-4 py-3 bg-yellow/10 border border-yellow/30 rounded-md text-sm text-yellow flex items-start gap-2">
+            <svg className="w-4 h-4 mt-0.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span>GitHub rate limit reached. {results.length > 0 ? 'Showing cached results.' : ''} Add a GitHub token in Settings → Setup to increase to 5000 req/h.</span>
           </div>
         )}
         {error && !rateLimited && (
-          <div className="mb-4 px-4 py-3 bg-red/10 border border-red/30 rounded-md text-sm text-red">{error}</div>
+          <div className="mb-4 px-4 py-3 bg-surface border border-border rounded-md text-sm text-text-muted">{error} {results.length > 0 && '— showing cached results'}</div>
         )}
 
         {searched && !loading && results.length === 0 && !error && !rateLimited && (
@@ -180,23 +201,21 @@ function DiscoverTab({ community, onInstall }: { community: CommunitySkill[]; on
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
             <span className="text-sm">No skills found{query ? ` for "${query}"` : ''}</span>
-            <span className="text-xs">Skills must have the <code className="font-mono bg-elevated px-1 py-0.5 rounded">echohub-skill</code> GitHub topic</span>
+            <span className="text-xs text-center max-w-xs">
+              Publish a skill on GitHub and add the <code className="font-mono bg-elevated px-1 py-0.5 rounded">echohub-skill</code> topic to make it discoverable.
+            </span>
           </div>
         )}
 
         {results.length > 0 && (
           <>
-            {total > results.length && (
-              <p className="text-xs text-text-muted mb-3">Showing {results.length} of {total.toLocaleString()} results</p>
-            )}
+            <p className="text-xs text-text-muted mb-3">
+              {total > results.length ? `${results.length} of ${total.toLocaleString()} results` : `${results.length} result${results.length !== 1 ? 's' : ''}`}
+              {fromCache && ' · cached'}
+            </p>
             <div className="flex flex-col gap-2">
               {results.map(r => (
-                <DiscoverCard
-                  key={r.full_name}
-                  result={r}
-                  installed={installedUrls.has(r.repo_url)}
-                  onInstall={() => onInstall(r.repo_url)}
-                />
+                <DiscoverCard key={r.full_name} result={r} installed={installedUrls.has(r.repo_url)} onInstall={() => onInstall(r.repo_url)} />
               ))}
             </div>
           </>

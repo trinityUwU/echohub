@@ -344,16 +344,44 @@ def delete_skill(skill_id: str) -> dict[str, str]:
 
 
 @router.get("/search")
-def search_skills(q: str = "") -> dict[str, Any]:
+def search_skills(q: str = "", force_refresh: bool = False) -> dict[str, Any]:
     """
-    Search GitHub for repos tagged with topic:echohub-skill.
-    Optionally filtered by query string. Uses GITHUB_TOKEN if set (5000 req/h vs 60).
+    Search GitHub for skill repos.
+    Empty query → broad search (echohub-skill OR mcp-server OR llm-tool topics).
+    Results cached in DB for 24h. Cache is always returned if GitHub is unavailable.
     """
     import httpx
+    from backend.services.db import get_skills_cache, set_skills_cache, get_skills_cache_age
 
-    topic_query = "topic:echohub-skill"
-    if q.strip():
-        topic_query = f"{q.strip()} {topic_query}"
+    q = q.strip()
+    cache_key = q or "__default__"
+    installed_urls = {r["repo_url"] for r in _load_registry()}
+
+    def _mark_installed(results: list[dict]) -> list[dict]:
+        for res in results:
+            res["installed"] = res["repo_url"] in installed_urls
+        return results
+
+    # Check cache first (unless force_refresh)
+    if not force_refresh:
+        cached = get_skills_cache(cache_key)
+        if cached:
+            age_s = get_skills_cache_age(cache_key) or 0
+            return {
+                "results": _mark_installed(cached["results"]),
+                "total": cached["total"],
+                "from_cache": True,
+                "cache_age_h": round(age_s / 3600, 1),
+                "authenticated": bool(os.getenv("GITHUB_TOKEN")),
+            }
+
+    # Build GitHub query
+    # Empty query: broad search covering common skill/tool repo patterns
+    if not q:
+        github_query = "topic:echohub-skill OR topic:mcp-server OR topic:llm-tool"
+    else:
+        # User typed something: search by name/description, bias toward echohub-skill
+        github_query = f"{q} topic:echohub-skill"
 
     headers: dict[str, str] = {"Accept": "application/vnd.github+json"}
     token = os.getenv("GITHUB_TOKEN", "")
@@ -366,12 +394,24 @@ def search_skills(q: str = "") -> dict[str, Any]:
     try:
         r = httpx.get(
             "https://api.github.com/search/repositories",
-            params={"q": topic_query, "sort": "stars", "order": "desc", "per_page": 30},
+            params={"q": github_query, "sort": "stars", "order": "desc", "per_page": 30},
             headers=headers,
             timeout=10,
         )
         if r.status_code == 403:
+            # Rate limited — return cache even if stale
+            stale = get_skills_cache(cache_key) or get_skills_cache.__module__ and None
+            stale_data = get_skills_cache(cache_key)
+            if stale_data:
+                return {
+                    "results": _mark_installed(stale_data["results"]),
+                    "total": stale_data["total"],
+                    "from_cache": True,
+                    "rate_limited": True,
+                    "authenticated": bool(token),
+                }
             return {"results": [], "total": 0, "rate_limited": True, "authenticated": bool(token)}
+
         r.raise_for_status()
         data = r.json()
         results = [
@@ -390,21 +430,44 @@ def search_skills(q: str = "") -> dict[str, Any]:
             }
             for item in data.get("items", [])
         ]
-        # Mark already installed
-        installed_urls = {r["repo_url"] for r in _load_registry()}
-        for res in results:
-            res["installed"] = res["repo_url"] in installed_urls
+        total = data.get("total_count", 0)
+
+        # Persist to cache
+        set_skills_cache(cache_key, results, total)
+
         return {
-            "results": results,
-            "total": data.get("total_count", 0),
+            "results": _mark_installed(results),
+            "total": total,
+            "from_cache": False,
             "authenticated": bool(token),
             "rate_limit": rate_limit,
             "rate_limited": False,
         }
+
     except httpx.TimeoutException:
+        # Network failure — return stale cache if available
+        stale = get_skills_cache(cache_key)
+        if stale:
+            return {
+                "results": _mark_installed(stale["results"]),
+                "total": stale["total"],
+                "from_cache": True,
+                "error": "GitHub timed out — showing cached results",
+                "authenticated": bool(token),
+            }
         return {"results": [], "total": 0, "error": "GitHub API timed out", "authenticated": bool(token)}
+
     except Exception as e:
         logger.error(f"[skills] search error: {e}")
+        stale = get_skills_cache(cache_key)
+        if stale:
+            return {
+                "results": _mark_installed(stale["results"]),
+                "total": stale["total"],
+                "from_cache": True,
+                "error": str(e),
+                "authenticated": bool(token),
+            }
         return {"results": [], "total": 0, "error": str(e), "authenticated": bool(token)}
 
 
