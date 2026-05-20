@@ -94,6 +94,17 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_workspace_info",
+            "description": "Return the absolute path of the current workspace and basic metadata (project id, total files, total size).",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
 ]
 
 _MAX_READ_BYTES = 50 * 1024       # 50 KB
@@ -148,6 +159,8 @@ def execute_tool(name: str, arguments: dict[str, Any], project_id: str) -> str:
             return _delete_file(workspace, arguments)
         elif name == "edit_file":
             return _edit_file(workspace, arguments)
+        elif name == "get_workspace_info":
+            return _get_workspace_info(workspace, project_id)
         else:
             raise ValueError(f"Unknown tool: {name!r}")
     except (ValueError, FileNotFoundError) as e:
@@ -263,3 +276,15 @@ def _edit_file(workspace: Path, args: dict[str, Any]) -> str:
     target.write_text(updated, encoding="utf-8")
     logger.info(f"[tool_service] edit_file {target} (replaced {len(old_string)} chars)")
     return f"Edited: {path_str} (replaced {len(old_string)} chars)"
+
+
+def _get_workspace_info(workspace: Path, project_id: str) -> str:
+    files = list(workspace.rglob("*"))
+    file_list = [f for f in files if f.is_file()]
+    total_size = sum(f.stat().st_size for f in file_list)
+    return (
+        f"Workspace path: {workspace}\n"
+        f"Project ID: {project_id}\n"
+        f"Files: {len(file_list)}\n"
+        f"Total size: {total_size} bytes"
+    )
