@@ -1,78 +1,95 @@
 # TODO — EchoHub
-*Dernière mise à jour : 2026-05-19 (session 17)*
+*Dernière mise à jour : 2026-05-20 (session 18)*
 
 ## En cours
 - [ ] Construction karma Reddit (r/LocalLLaMA) — 1-2 commentaires/jour, sujets perfs/vLLM/GGUF/CUDA
-- [ ] Rédiger post Reddit/HN avec Chris (matériel prêt — démo 100K ctx validée)
+- [ ] Rédiger post Reddit/HN avec Chris (matériel prêt — démo 100K ctx + Projects mode)
 
 ## À faire (priorité)
 
-### Lancement (P1)
-- [ ] Finaliser posts avec Chris (docs/private/posts-drafts.md) — passer par /humanizer obligatoire
-- [ ] Préparer Show HN (mardi-jeudi 14h-16h Paris)
-- [ ] Objectif karma avant lancement : 200 commentaires (~28 juin 2026)
+### Bugs Dev mode (P0)
+- [ ] Fix raw `<tool_call>` visible dans le chat — rendu inline formaté sans suppression
+- [ ] Fix loop list_files → injection "summarize what you did" après tool results
+- [ ] Footer stats Dev mode : tok/s dans messages (useToolChat → stats estimation)
+- [ ] Context bar Dev mode : usedTokens estimation (len/4)
 
-### Fine-tuning — stabilisation (P1)
-- [ ] Upgrader llama-cpp-python → Settings/Engines → tester chargement GGUFs fine-tunés dans Chat
-- [ ] Vérifier eval after persiste bien en DB après restart (pipeline_stage=eval_after → score_avg stocké)
+### Lancement (P1)
+- [ ] Finaliser posts avec Chris (docs/private/posts-drafts.md) — /humanizer obligatoire
+- [ ] Préparer Show HN (mardi-jeudi 14h-16h Paris)
+- [ ] Objectif karma : 200 commentaires (~28 juin 2026)
+
+### Dev mode — améliorations (P1)
+- [ ] Tester Qwen2.5-Coder-14B Q4_K_M pour Dev mode (tool calling natif probable)
+- [ ] run_tsc / run_python_check outils dans tool_service (vérification code généré)
+- [ ] Scoring qualité Dev mode : compilation OK, présence éléments attendus
+
+### Fine-tuning — stabilisation (P2)
+- [ ] Upgrader llama-cpp-python → tester chargement GGUFs fine-tunés dans Chat
+- [ ] Vérifier eval after persiste bien en DB après restart
 
 ### Vision / MTP (P2)
-- [ ] Valider gain MTP mesuré dans EchoHub (baseline vs MTP activé sur Qwen3 GGUF avec nextn tensors)
-- [ ] Tester vision GGUF complet : télécharger bartowski/Qwen2-VL-7B-Instruct-GGUF (inclut mmproj)
-- [ ] Ajouter téléchargement automatique du mmproj dans le download flow si modèle vision détecté
+- [ ] Valider gain MTP mesuré dans EchoHub
+- [ ] Tester vision GGUF complet (bartowski/Qwen2-VL-7B-Instruct-GGUF avec mmproj)
+- [ ] Téléchargement automatique mmproj dans download flow si modèle vision détecté
 
 ### Bugs (P2)
-- [ ] Fix indicateur `~` qui reste affiché après fin de stream (race condition liveTokens/streaming)
-- [ ] OOM kernel SIGKILL non détectable — envisager watchdog process
+- [ ] Fix indicateur `~` après fin de stream (race condition liveTokens/streaming)
+- [ ] OOM kernel SIGKILL non détectable — watchdog process
 
 ### Nettoyage (P2)
-- [ ] Supprimer vieux composants héritage : `src/components/ChatPanel.tsx`, `LoadConfigModal.tsx`, etc.
+- [ ] Supprimer vieux composants héritage (ChatPanel.tsx, LoadConfigModal.tsx, etc.)
 
 ### Packaging (P2)
-- [ ] Valider `.AppImage` (linuxdeploy requis)
-- [ ] Valider `.deb`
+- [ ] Valider .AppImage (linuxdeploy requis)
+- [ ] Valider .deb
 
 ## Backlog
 - [ ] MCP server EchoHub → Claude Code pilote modèles locaux (Phase 2)
 - [ ] EchoForge ↔ EchoHub API locale (Phase 3)
 - [ ] Modèle juge fiable (après fine-tuning + évaluation itérative)
 - [ ] Automatisation fine-tuning (boucle finetune→test→finetune)
-- [ ] Multi-GPU support vLLM (tensor_parallel_size)
+- [ ] Multi-GPU support vLLM
 - [ ] Support import dataset JSONL/ShareGPT/Alpaca dans Profiles
-- [ ] Benchmark qualité : profil Tool call, retirer quality score sur Throughput
+- [ ] Docs mode : drag & drop fichiers pour injection contexte
+- [ ] Research mode : ajout sources URL
+- [ ] Tool calling natif vLLM dans generate_with_tools
+
+## Terminé ✅ (session 18 — 2026-05-20)
+- [x] Projects system complet : hub, workspaces, profils scopés, sidebar conversations
+- [x] Dev mode tool use : create_file, read_file, list_files, delete_file, edit_file
+- [x] generate_with_tools streaming réel (stream=True)
+- [x] Parse tool calls texte format `<tool_call>JSON</tool_call>`
+- [x] Anti-loop tool calls (même tool+args 2x → break)
+- [x] Conversations projets persistées SQLite
+- [x] ProjectConvSidebar identique ConvSidebar (240px, GPU, context menu)
+- [x] File viewer modal DevPanel (eye + delete, copy)
+- [x] Workspace files poll 2s temps réel
+- [x] KV cache sélecteur Q8_0/Q4_0/BF16 dans LoadModal
+- [x] KV Q8_0 par défaut (type_k=8, type_v=8)
+- [x] Qwen3.5-9B 131K ctx 9.4GB VRAM avec Q4_0 ✅
+- [x] MoE VRAM guard : GGML_CUDA_ENABLE_UNIFIED_MEMORY + split_mode=LAYER
+- [x] GGUF detection LoadModal élargie (i1/i2/IQ/Q3/Q6)
+- [x] Tools badge ModelCard + ModelPickerModal
+- [x] Tools detection familles (qwen2/3, llama-3.1+, mistral)
+- [x] Discover filtre Tools 3 passes HF
+- [x] max_tokens slider scale avec context window modèle
+- [x] Logs panel projets (œil toggle)
+- [x] Regen/edit Dev mode fix (clearAndResend)
+- [x] Arrow-up send icon
+- [x] docs/v0.7-projects-workspace.md + README mis à jour
+- [x] GPU section pinned bottom ConvSidebar
 
 ## Terminé ✅ (session 17 — 2026-05-19)
-- [x] Skills Claude Code : /humanizer + /prompt-architect installés + règles session-awareness
-- [x] Docs humanisées (README, v0.1-v0.4) — suppression patterns AI
-- [x] MTP : detect_mtp() binaire GGUF, badge cyan partout, export fine-tune rapporte MTP
-- [x] Vision llama.cpp : find_mmproj() + detect_vision_handler() + chat_handler au chargement
-- [x] Strip image_url pour modèles sans vision (évite réponse vide)
-- [x] Vision badge ground truth = mmproj présent sur disque
-- [x] Fix détection vision : image-text-to-text pipeline_tag HF reconnu
-- [x] Badges capabilities dans ModelPickerModal, LoadModelModal, ChatTopBar, ModelDetailPanel
-- [x] Reload model depuis footer : load_config persisté par message, bouton mismatch
-- [x] Clipboard Wayland : wl-paste subprocess via Tauri Rust command
-- [x] vLLM compat check : subprocess via get_default_python() (356 archs)
-- [x] vLLM max_tokens overflow : clip à max_model_len - prompt_tokens
-- [x] Image lightbox : clic miniature → fullscreen Framer Motion
-- [x] 1 commentaire Reddit posté (llama.cpp MTP thread)
-- [x] docs/v0.5-mtp.md + docs/v0.6-vision-mtp-ux.md créés
-- [x] README mis à jour (v0.5 + v0.6)
-
-## Terminé ✅ (session 16 — 2026-05-19)
-- [x] Support MoE : détection is_moe, active_params_billion, badge amber Discover/Picker
-- [x] LoadModelModal MoE : banner + auto-fill n_gpu_layers/cpu_overflow
-- [x] llama_service MoE : n_batch=128 + no_perf=True → évite crash CUDA graph
-
-## Terminé ✅ (sessions 13-15 — 2026-05-19)
-- [x] Section Fine-tune complète, Unsloth QLoRA, export GGUF, eval before/after
-- [x] Pipeline asyncio.Task indépendant, resume logic, pipeline_stage en DB
-- [x] GGUFs fine-tunés dans Library + ModelPicker + delete
-- [x] llama-cpp-python dans Settings → Engines
-- [x] Download history persistée SQLite
+- [x] MTP detection binaire GGUF + badge cyan
+- [x] Vision llama.cpp : mmproj auto + chat_handler
+- [x] Badges capabilities partout
+- [x] Reload model footer
+- [x] Clipboard Wayland
+- [x] vLLM compat check + max_tokens fix
+- [x] Image lightbox
 
 ## Terminé ✅ (sessions précédentes)
-- [x] quality_scorer.py, benchmarks, multi-venv vLLM
-- [x] InstallerApp natif, système MAJ, fresh install E2E
-- [x] App Tauri native, dual-engine, SQLite, profils
-- [x] GitHub public MIT : https://github.com/trinityUwU/echohub
+- [x] Fine-tuning Unsloth QLoRA, export GGUF, eval before/after
+- [x] Multi-venv vLLM, benchmarks, quality scoring
+- [x] Installer App natif, système MAJ, fresh install E2E
+- [x] GitHub public MIT
