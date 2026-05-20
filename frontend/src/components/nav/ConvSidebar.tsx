@@ -39,7 +39,7 @@ export function ConvSidebar({ conversations, archivedConversations, activeId, on
   }
 
   return (
-    <aside className="w-[240px] bg-surface border-r border-border flex flex-col flex-shrink-0 overflow-hidden">
+    <aside className="w-[240px] h-full bg-surface border-r border-border flex flex-col flex-shrink-0 overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 px-3.5 py-3 border-b border-border">
         <h2 className="flex-1 text-xs font-semibold uppercase tracking-widest text-text-muted">Chats</h2>
