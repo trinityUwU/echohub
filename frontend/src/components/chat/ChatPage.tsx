@@ -10,7 +10,7 @@ import { ChatTopBar, LogsPanel } from './ChatTopBar'
 import { CpuBanner } from './CpuBanner'
 import { MigrationBanner } from '@/components/shared/MigrationBanner'
 import { MessageRow } from './MessageRow'
-import { InputBar } from './InputBar'
+import { InputBar, type SlashCommand } from './InputBar'
 import { RightPanel } from './RightPanel'
 import { ProjectsPanel } from './ProjectsPanel'
 import { ProjectsHub } from './ProjectsHub'
@@ -99,6 +99,19 @@ export function ChatPage({
     setActiveMessages([])
     if (activeId) clearMessages(activeId).catch(() => {})
   }
+
+  const handleCommand = useCallback((cmd: SlashCommand): void => {
+    if (cmd.id === 'clear') { handleClear(); return }
+    if (cmd.id === 'tokens') {
+      const max = loadedModel?.max_context_window ?? 0
+      alert(`Tokens: ${usedTokens} / ${max} (${max ? Math.round(usedTokens / max * 100) : 0}%)`)
+      return
+    }
+    if (cmd.id === 'model') {
+      alert(loadedModel ? `${loadedModel.name} — ${loadedModel.engine ?? 'llama'}` : 'No model loaded')
+      return
+    }
+  }, [handleClear, usedTokens, loadedModel])
 
   const handleRegenerate = (): void => {
     const lastAssistant = [...messages].reverse().findIndex(m => m.role === 'assistant')
@@ -293,6 +306,8 @@ export function ChatPage({
           onStop={stop}
           onLoadModel={onLoadModel}
           showLogs={showLogs}
+          onCommand={handleCommand}
+          isDevMode={false}
         />
         <PanelWrapper side="right" collapsed={rightCollapsed} onToggle={toggleRight}>
           <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />
@@ -325,6 +340,8 @@ interface ChatContentProps {
   onSend: (text: string, attachments?: Attachment[]) => void
   onStop: () => void
   onLoadModel?: (config: LoadConfig) => void
+  onCommand?: (cmd: SlashCommand) => void
+  isDevMode?: boolean
 }
 
 function ChatContent({
@@ -333,6 +350,7 @@ function ChatContent({
   params, usedTokens, isTokensExact, bottomRef,
   toolCalls, workspaceFiles, onRefreshFiles,
   onRegenerate, onEditUser, onSend, onStop, onLoadModel, showLogs,
+  onCommand, isDevMode,
 }: ChatContentProps): React.ReactElement {
   const inner = (
     <>
@@ -362,8 +380,10 @@ function ChatContent({
         usedTokens={usedTokens}
         maxTokens={loadedModel?.max_context_window ?? null}
         tokensExact={isTokensExact}
+        isDevMode={isDevMode}
         onSend={onSend}
         onStop={onStop}
+        onCommand={onCommand}
       />
     </>
   )
@@ -587,6 +607,35 @@ function ProjectWorkspace({
     setActiveMessages([])
   }
 
+  const handleCommand = useCallback((cmd: SlashCommand): void => {
+    if (cmd.id === 'clear') { handleClear(); return }
+    if (cmd.id === 'compact' && isDevMode) {
+      // Trigger immediate compaction by forcing usedTokens to 99% of context
+      // The compact function is internal to useToolChat, so we trigger via a dummy send
+      // Instead, expose compact directly
+      void toolChatHook.compact()
+      return
+    }
+    if (cmd.id === 'tokens') {
+      const used = usedTokens
+      const max = loadedModel?.max_context_window ?? 0
+      alert(`Tokens: ${used} / ${max} (${max ? Math.round(used / max * 100) : 0}%)`)
+      return
+    }
+    if (cmd.id === 'model') {
+      alert(loadedModel ? `${loadedModel.name} — ${loadedModel.engine ?? 'llama'}` : 'No model loaded')
+      return
+    }
+    if (cmd.id === 'limit' && isDevMode) {
+      // Inject a message to the model asking it to call set_tool_limit
+      void toolChatHook.send(
+        `Call set_tool_limit with new_limit=${cmd.value} and reason="User requested limit increase via /limit command."`,
+        buildDevSystemPrompt(params)
+      )
+      return
+    }
+  }, [handleClear, isDevMode, toolChatHook, usedTokens, loadedModel, params])
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       <ChatTopBar
@@ -676,6 +725,8 @@ function ProjectWorkspace({
           onStop={stop}
           onLoadModel={onLoadModel}
           showLogs={showLogs}
+          onCommand={handleCommand}
+          isDevMode={isDevMode}
         />
         <PanelWrapper side="right" collapsed={rightCollapsed} onToggle={() => setRightCollapsed(v => !v)}>
           <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />

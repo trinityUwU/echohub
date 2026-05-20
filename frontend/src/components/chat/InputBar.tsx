@@ -1,6 +1,37 @@
-import { useRef, useState, type KeyboardEvent } from 'react'
+import { useRef, useState, useEffect, type KeyboardEvent } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import { invoke } from '@tauri-apps/api/core'
 import type { Attachment, ChatParams } from '@/types'
+
+// ── Slash commands ────────────────────────────────────────────────────────────
+
+export type SlashCommand =
+  | { id: 'clear' }
+  | { id: 'compact' }
+  | { id: 'tokens' }
+  | { id: 'model' }
+  | { id: 'files' }
+  | { id: 'limit'; value: number }
+
+interface CommandDef {
+  id: string
+  label: string
+  description: string
+  devOnly?: boolean
+  hasArg?: boolean
+  argPlaceholder?: string
+}
+
+const COMMANDS: CommandDef[] = [
+  { id: 'clear',   label: '/clear',   description: 'Clear the conversation' },
+  { id: 'compact', label: '/compact', description: 'Summarize and compact context now', devOnly: true },
+  { id: 'tokens',  label: '/tokens',  description: 'Show current token count' },
+  { id: 'model',   label: '/model',   description: 'Show loaded model info' },
+  { id: 'files',   label: '/files',   description: 'List workspace files', devOnly: true },
+  { id: 'limit',   label: '/limit',   description: 'Set tool call limit', devOnly: true, hasArg: true, argPlaceholder: 'number' },
+]
+
+// ── Props ─────────────────────────────────────────────────────────────────────
 
 interface InputBarProps {
   modelLoaded: boolean
@@ -10,27 +41,123 @@ interface InputBarProps {
   usedTokens?: number
   maxTokens?: number | null
   tokensExact?: boolean
+  isDevMode?: boolean
   onSend: (text: string, attachments: Attachment[]) => void
   onStop: () => void
+  onCommand?: (cmd: SlashCommand) => void
 }
 
-export function InputBar({ modelLoaded, visionEnabled, streaming, params, usedTokens, maxTokens, tokensExact, onSend, onStop }: InputBarProps): React.ReactElement {
+// ── Component ─────────────────────────────────────────────────────────────────
+
+export function InputBar({
+  modelLoaded, visionEnabled, streaming, params,
+  usedTokens, maxTokens, tokensExact,
+  isDevMode = false,
+  onSend, onStop, onCommand,
+}: InputBarProps): React.ReactElement {
   const [text, setText] = useState('')
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [slashOpen, setSlashOpen] = useState(false)
+  const [slashQuery, setSlashQuery] = useState('')
+  const [slashIndex, setSlashIndex] = useState(0)
   const textRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const canSend = (text.trim() || attachments.length > 0) && modelLoaded && !streaming
 
+  // Filtered commands based on current query and mode
+  const filteredCmds = COMMANDS.filter(c => {
+    if (c.devOnly && !isDevMode) return false
+    return c.id.startsWith(slashQuery) || c.label.includes(slashQuery)
+  })
+
+  // Detect slash command mode as user types
+  const handleTextChange = (val: string): void => {
+    setText(val)
+    if (val.startsWith('/') && !val.includes(' ')) {
+      setSlashQuery(val.slice(1).toLowerCase())
+      setSlashOpen(true)
+      setSlashIndex(0)
+    } else {
+      setSlashOpen(false)
+    }
+  }
+
+  // Close slash menu on click outside
+  useEffect(() => {
+    if (!slashOpen) return
+    const handler = (): void => setSlashOpen(false)
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [slashOpen])
+
+  const executeCommand = (def: CommandDef, argStr?: string): void => {
+    setSlashOpen(false)
+    setText('')
+    if (textRef.current) textRef.current.style.height = 'auto'
+    if (!onCommand) return
+
+    if (def.id === 'limit') {
+      const n = parseInt(argStr ?? '', 10)
+      if (!isNaN(n) && n > 0) onCommand({ id: 'limit', value: n })
+      return
+    }
+    onCommand({ id: def.id } as SlashCommand)
+  }
+
+  const selectCommand = (def: CommandDef): void => {
+    if (def.hasArg) {
+      // Fill in the command name, let user type the arg
+      setText(`/${def.id} `)
+      setSlashOpen(false)
+      textRef.current?.focus()
+      return
+    }
+    executeCommand(def)
+  }
+
   const submit = (): void => {
+    // Check if it's a complete slash command with optional arg
+    const trimmed = text.trim()
+    if (trimmed.startsWith('/')) {
+      const parts = trimmed.slice(1).split(' ')
+      const cmdId = parts[0].toLowerCase()
+      const argStr = parts.slice(1).join(' ')
+      const def = COMMANDS.find(c => c.id === cmdId)
+      if (def) {
+        executeCommand(def, argStr)
+        return
+      }
+    }
     if (!canSend) return
-    onSend(text.trim(), attachments)
+    onSend(trimmed, attachments)
     setText('')
     setAttachments([])
-    if (textRef.current) { textRef.current.style.height = 'auto' }
+    if (textRef.current) textRef.current.style.height = 'auto'
   }
 
   const handleKey = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (slashOpen && filteredCmds.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSlashIndex(i => (i + 1) % filteredCmds.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSlashIndex(i => (i - 1 + filteredCmds.length) % filteredCmds.length)
+        return
+      }
+      if (e.key === 'Tab' || e.key === 'Enter') {
+        e.preventDefault()
+        selectCommand(filteredCmds[slashIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        setSlashOpen(false)
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
   }
 
@@ -61,8 +188,6 @@ export function InputBar({ modelLoaded, visionEnabled, streaming, params, usedTo
   }
 
   const handlePaste = (e: React.ClipboardEvent): void => {
-
-    // Try standard clipboardData.items first (works in Chrome/Electron)
     const items = Array.from(e.clipboardData.items)
     const imageItem = items.find(i => i.type.startsWith('image/'))
     if (imageItem) {
@@ -70,17 +195,12 @@ export function InputBar({ modelLoaded, visionEnabled, streaming, params, usedTo
       if (file) handleFiles([file] as unknown as FileList)
       return
     }
-
-    // Fallback for WebKitGTK/Linux via Tauri Rust command (arboard)
-    // clipboardData.items is empty for images on WebKitGTK — read directly from clipboard
-    // Only intercept if vision is enabled — otherwise let the browser handle text paste normally
     if (!visionEnabled) return
     e.preventDefault()
     invoke<string | null>('read_clipboard_image').then(dataUrl => {
       if (!dataUrl) {
-        // No image — restore text paste manually
-        const text = e.clipboardData.getData('text')
-        if (text) document.execCommand('insertText', false, text)
+        const t = e.clipboardData.getData('text')
+        if (t) document.execCommand('insertText', false, t)
         return
       }
       const byteStr = atob(dataUrl.split(',')[1])
@@ -89,15 +209,13 @@ export function InputBar({ modelLoaded, visionEnabled, streaming, params, usedTo
       const blob = new Blob([arr], { type: 'image/png' })
       const file = new File([blob], 'clipboard.png', { type: 'image/png' })
       handleFiles([file] as unknown as FileList)
-    }).catch((err) => {
-      console.error('[paste] read_clipboard_image failed:', err)
-    })
+    }).catch(() => {})
   }
 
   return (
     <div className="px-5 pb-4 pt-3 bg-surface border-t border-border flex-shrink-0">
 
-      {/* Attachment previews */}
+      {/* Attachments */}
       {attachments.length > 0 && (
         <div className="flex gap-2 mb-2 flex-wrap">
           {attachments.map(a => (
@@ -124,6 +242,37 @@ export function InputBar({ modelLoaded, visionEnabled, streaming, params, usedTo
         </div>
       )}
 
+      {/* Slash command menu */}
+      <AnimatePresence>
+        {slashOpen && filteredCmds.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 6 }}
+            transition={{ duration: 0.12 }}
+            className="mb-2 rounded-lg border border-border bg-elevated shadow-xl overflow-hidden"
+            onMouseDown={e => e.preventDefault()}
+          >
+            {filteredCmds.map((cmd, i) => (
+              <button
+                key={cmd.id}
+                onClick={() => selectCommand(cmd)}
+                className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors cursor-pointer ${
+                  i === slashIndex ? 'bg-accent/15' : 'hover:bg-overlay'
+                }`}
+              >
+                <span className="text-xs font-mono font-semibold text-accent w-24 flex-shrink-0">{cmd.label}{cmd.hasArg ? ` <${cmd.argPlaceholder}>` : ''}</span>
+                <span className="text-xs text-text-muted">{cmd.description}</span>
+                {cmd.devOnly && (
+                  <span className="ml-auto text-2xs text-yellow-400/60 flex-shrink-0">dev</span>
+                )}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Input area */}
       <div className="bg-elevated border border-border focus-within:border-accent rounded-lg px-3 py-2.5 flex items-end gap-2.5 transition-colors">
         {visionEnabled && (
           <>
@@ -142,11 +291,11 @@ export function InputBar({ modelLoaded, visionEnabled, streaming, params, usedTo
           </>
         )}
         <textarea ref={textRef} value={text}
-          onChange={e => setText(e.target.value)}
+          onChange={e => handleTextChange(e.target.value)}
           onKeyDown={handleKey}
           onPaste={handlePaste}
           placeholder={modelLoaded
-            ? visionEnabled ? 'Message… (paste image with Ctrl+V)' : 'Message…'
+            ? '/ for commands · message…'
             : 'Load a model to start chatting'}
           rows={1}
           className="flex-1 bg-transparent border-none outline-none resize-none font-sans text-md text-text-primary placeholder-text-muted leading-relaxed max-h-[200px] min-h-[22px]"
@@ -162,7 +311,8 @@ export function InputBar({ modelLoaded, visionEnabled, streaming, params, usedTo
           : <SendBtn onClick={submit} disabled={!canSend} />
         }
       </div>
-      {/* Context usage bar */}
+
+      {/* Context bar */}
       {maxTokens != null && usedTokens != null && (
         <ContextBar used={usedTokens} max={maxTokens} exact={!!tokensExact} />
       )}
@@ -177,6 +327,8 @@ export function InputBar({ modelLoaded, visionEnabled, streaming, params, usedTo
     </div>
   )
 }
+
+// ── Sub-components ────────────────────────────────────────────────────────────
 
 function SendBtn({ onClick, disabled }: { onClick: () => void; disabled: boolean }): React.ReactElement {
   return (

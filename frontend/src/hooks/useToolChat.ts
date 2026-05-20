@@ -58,6 +58,7 @@ export interface UseToolChatReturn {
   send: (text: string, systemPrompt?: string) => Promise<void>
   stop: () => void
   clear: () => void
+  compact: () => Promise<void>
   loadHistory: (msgs: Array<{ role: string; content: string }>) => void
   clearAndResend: (history: ChatMessage[], newText: string, systemPrompt?: string) => void
 }
@@ -351,5 +352,5 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     send(newText, systemPrompt)
   }, [send])
 
-  return { messages, toolCalls, workspaceFiles, streaming, genStats, usedTokens, send, stop, clear, loadHistory, clearAndResend }
+  return { messages, toolCalls, workspaceFiles, streaming, genStats, usedTokens, send, stop, clear, compact, loadHistory, clearAndResend }
 }
