@@ -389,7 +389,7 @@ async def tool_chat(req: ToolChatRequest):
             return
 
         for iteration in range(MAX_ITERATIONS):
-            # Call the model with tools
+            # First: try tool calling (non-streaming, needed for tool_calls detection)
             response_dict: dict | None = None
             try:
                 async for result in engine_router.generate_with_tools(
@@ -450,14 +450,33 @@ async def tool_chat(req: ToolChatRequest):
                 # Continue loop — model may want to call more tools
                 continue
 
-            # No tool_calls → final text answer, stream word by word for live feel
-            final_text: str = message.get("content") or ""
-            if final_text:
-                # Stream as text_chunk events (matches useToolChat SSE handler)
-                chunk_size = 4  # characters per chunk — small enough for live feel
-                for i in range(0, len(final_text), chunk_size):
-                    chunk = final_text[i:i + chunk_size]
-                    yield f"data: {_json.dumps({'type': 'text_chunk', 'content': chunk})}\n\n"
+            # No tool_calls → stream final answer via generate() for real token-by-token streaming
+            # generate_with_tools is non-streaming (needed for tool detection) but for plain text
+            # we re-run with streaming=True so the user sees tokens as they arrive.
+            try:
+                async for chunk in engine_router.generate(
+                    messages=messages,
+                    stream=True,
+                    temperature=req.temperature,
+                    max_tokens=req.max_tokens,
+                ):
+                    if not chunk:
+                        continue
+                    content = ""
+                    if isinstance(chunk, str) and '"content"' in chunk:
+                        import re as _re
+                        m = _re.search(r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', chunk)
+                        content = m.group(1) if m else ""
+                    elif isinstance(chunk, dict):
+                        content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "") or ""
+                    if content:
+                        yield f"data: {_json.dumps({'type': 'text_chunk', 'content': content})}\n\n"
+            except Exception as e:
+                logger.error(f"[tool-chat] streaming fallback error: {e}")
+                # Fallback: send the already-generated text from generate_with_tools
+                final_text: str = message.get("content") or ""
+                if final_text:
+                    yield f"data: {_json.dumps({'type': 'text_chunk', 'content': final_text})}\n\n"
 
             break  # done
 
