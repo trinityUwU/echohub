@@ -46,6 +46,16 @@ function isSseEvent(v: unknown): v is SseEvent {
   return typeof v === 'object' && v !== null && 'type' in v
 }
 
+function deduplicateMessages(msgs: ChatMessage[]): ChatMessage[] {
+  const seen = new Set<string>()
+  return msgs.filter(m => {
+    const key = `${m.role}:${typeof m.content === 'string' ? m.content.slice(0, 200) : JSON.stringify(m.content).slice(0, 200)}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export interface UseToolChatReturn {
@@ -122,12 +132,14 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
       content: m.content,
       id: crypto.randomUUID(),
     }))
-    messagesRef.current = hydrated
-    setMessages(hydrated)
+    const deduped = deduplicateMessages(hydrated)
+    messagesRef.current = deduped
+    setMessages(deduped)
     setToolCalls([])
     setWorkspaceFiles([])
     setGenStats(null)
-    _setUsedTokens(0)
+    const historyChars = msgs.reduce((sum, m) => sum + m.content.length, 0)
+    _setUsedTokens(Math.round(historyChars / 4))
   }, [])
 
   // compactedSummaryRef: holds the current summary for injection into historyToSend.
@@ -186,7 +198,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     // Build history to send to backend:
     // If a compact summary exists, inject it first + last 4 real messages.
     // Otherwise send all real messages (excluding display-only compact markers).
-    const realMsgs = messagesRef.current.filter(m => {
+    const realMsgs = deduplicateMessages(messagesRef.current).filter(m => {
       const c = typeof m.content === 'string' ? m.content : ''
       return (m.role === 'user' || m.role === 'assistant') && c.trim()
     })

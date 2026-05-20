@@ -163,69 +163,89 @@ function parseSegments(raw: string): Segment[] {
 // ── ToolCallBlock ─────────────────────────────────────────────────────────────
 
 function ToolCallBlock({ content, streaming }: { content: string; streaming?: boolean }): React.ReactElement {
-  // streaming=true means the tag is still open — always show content live
-  // user can collapse after streaming ends
-  const [collapsed, setCollapsed] = useState(false)
-  const open = streaming ? true : !collapsed
+  // While streaming (tag still open): always expanded, showing live content.
+  // Once done: collapsed by default, user can toggle.
+  const [open, setOpen] = useState(false)
+  const isOpen = streaming ? true : open
 
   const nameMatch = content.match(/"name"\s*:\s*"([^"]+)"/)
   let toolName = nameMatch ? nameMatch[1] : ''
   let argsDisplay = content.trim()
+  let wordCount = 0
 
   if (!streaming) {
     try {
       const parsed = JSON.parse(content.trim())
       toolName = parsed.name ?? toolName
       const args = parsed.arguments ?? parsed.args ?? parsed
-      argsDisplay = JSON.stringify(typeof args === 'string' ? JSON.parse(args) : args, null, 2)
+      const argsStr = JSON.stringify(typeof args === 'string' ? JSON.parse(args) : args, null, 2)
+      argsDisplay = argsStr
+      wordCount = argsStr.trim().split(/\s+/).length
     } catch { /* raw display */ }
   }
 
   return (
-    <div className="mb-3 rounded-xl border border-yellow-500/20 bg-yellow-500/5 overflow-hidden">
+    <div className="mb-2 rounded-lg border border-white/5 bg-surface overflow-hidden">
       <button
-        onClick={() => !streaming && setCollapsed(c => !c)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-yellow-500/10 transition-colors cursor-pointer"
+        onClick={() => !streaming && setOpen(o => !o)}
+        className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${streaming ? 'cursor-default' : 'hover:bg-white/[0.03] cursor-pointer'}`}
       >
         {streaming ? (
           <motion.svg
-            className="w-3.5 h-3.5 flex-shrink-0 text-yellow-400"
+            className="w-3.5 h-3.5 flex-shrink-0 text-text-muted"
             viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
             animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
           >
             <path d="M21 12a9 9 0 1 1-6.22-8.56"/>
           </motion.svg>
         ) : (
-          <svg className="w-3.5 h-3.5 flex-shrink-0 text-yellow-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg className="w-3.5 h-3.5 flex-shrink-0 text-text-muted/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
           </svg>
         )}
-        <span className={`text-xs ${streaming ? 'text-yellow-400 animate-pulse' : 'text-yellow-300'}`}>
-          {streaming ? `⚙ ${toolName || 'tool_call'}…` : `⚙ ${toolName || 'tool_call'}`}
+        <span className={`text-xs font-mono ${streaming ? 'text-text-muted animate-pulse' : 'text-text-muted/80'}`}>
+          {toolName || 'tool_call'}
         </span>
-        <span className="text-xs text-yellow-400/60 ml-auto">
-          {streaming ? 'running' : 'done'}
-        </span>
-        {!streaming && (
-          <svg
-            className={`w-3.5 h-3.5 text-yellow-400 transition-transform ${open ? 'rotate-180' : ''}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          {streaming ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-text-muted/60 tracking-wide uppercase">
+              running
+            </span>
+          ) : (
+            <>
+              {wordCount > 0 && (
+                <span className="text-[10px] text-text-muted/40">{wordCount}w</span>
+              )}
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-text-muted/50 tracking-wide uppercase">
+                done
+              </span>
+              <svg
+                className={`w-3 h-3 text-text-muted/40 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </>
+          )}
+        </div>
       </button>
-      <AnimatePresence>
-        {open && (
+      <AnimatePresence initial={false}>
+        {isOpen && (
           <motion.div
+            key="body"
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            style={{ overflow: 'hidden' }}
           >
-            <pre className="px-3 pb-3 pt-2 text-xs text-yellow-200/70 leading-relaxed whitespace-pre-wrap border-t border-yellow-500/10 font-mono max-h-64 overflow-y-auto">
-              {argsDisplay}
-              {streaming && <span className="inline-block w-1 h-3 bg-yellow-400/60 animate-pulse rounded-sm ml-0.5 align-middle" />}
+            <pre className="px-3 pb-3 pt-2 text-xs text-text-muted/60 leading-relaxed whitespace-pre-wrap border-t border-white/5 font-mono max-h-64 overflow-y-auto">
+              {streaming && !argsDisplay.trim() ? (
+                <span className="text-text-muted/40 italic">Executing…</span>
+              ) : (
+                argsDisplay
+              )}
+              {streaming && <span className="inline-block w-1 h-3 bg-text-muted/40 animate-pulse rounded-sm ml-0.5 align-middle" />}
             </pre>
           </motion.div>
         )}
@@ -238,35 +258,41 @@ function ToolCallBlock({ content, streaming }: { content: string; streaming?: bo
 
 function ToolResultBlock({ tool, content }: { tool: string; content: string }): React.ReactElement {
   const [open, setOpen] = useState(false)
-  const words = content.trim().split(/\s+/).length
+  const words = content.trim() ? content.trim().split(/\s+/).length : 0
 
   return (
-    <div className="mb-3 rounded-xl border border-green-500/20 bg-green-500/5 overflow-hidden">
+    <div className="mb-2 rounded-lg border border-white/5 bg-surface overflow-hidden">
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-green-500/10 transition-colors cursor-pointer"
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.03] transition-colors cursor-pointer"
       >
-        <svg className="w-3.5 h-3.5 flex-shrink-0 text-green-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <svg className="w-3.5 h-3.5 flex-shrink-0 text-text-muted/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="20 6 9 17 4 12"/>
         </svg>
-        <span className="text-xs text-green-300">↩ {tool}</span>
-        <span className="text-xs text-green-400/60 ml-auto">{words} words</span>
-        <svg
-          className={`w-3.5 h-3.5 text-green-400 transition-transform ${open ? 'rotate-180' : ''}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
+        <span className="text-xs font-mono text-text-muted/80">{tool}</span>
+        <div className="ml-auto flex items-center gap-2">
+          {words > 0 && (
+            <span className="text-[10px] text-text-muted/40">{words}w</span>
+          )}
+          <svg
+            className={`w-3 h-3 text-text-muted/40 transition-transform ${open ? 'rotate-180' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
       </button>
-      <AnimatePresence>
+      <AnimatePresence initial={false}>
         {open && (
           <motion.div
+            key="body"
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+            style={{ overflow: 'hidden' }}
           >
-            <div className="px-3 pb-3 pt-2 text-xs text-green-200/70 leading-relaxed whitespace-pre-wrap border-t border-green-500/10 font-mono max-h-64 overflow-y-auto">
+            <div className="px-3 pb-3 pt-2 text-xs text-text-muted/60 leading-relaxed whitespace-pre-wrap border-t border-white/5 font-mono max-h-64 overflow-y-auto">
               {content}
             </div>
           </motion.div>
