@@ -286,6 +286,62 @@ class McpManager:
     # Internal helpers
     # -----------------------------------------------------------------------
 
+    async def _needs_build(self, skill_dir: Path) -> tuple[bool, str | None]:
+        """
+        Return (needs_build, build_command) for a skill directory.
+        - Next.js: .next/ absent → bun run build
+        - Python: never needs a separate build step
+        - Others: check for a build script in package.json
+        """
+        pkg_json = skill_dir / "package.json"
+        if pkg_json.exists():
+            try:
+                pkg = json.loads(pkg_json.read_text())
+                scripts = pkg.get("scripts", {})
+                # Next.js: .next dir is the build output
+                if "next" in pkg.get("dependencies", {}) or "next" in pkg.get("devDependencies", {}):
+                    if not (skill_dir / ".next").exists():
+                        return True, "bun run build"
+                    return False, None
+                # Generic: has a build script and no dist/out dir
+                if "build" in scripts:
+                    for dist_dir in ("dist", "out", "build", ".next"):
+                        if (skill_dir / dist_dir).exists():
+                            return False, None
+                    return True, "bun run build"
+            except Exception:
+                pass
+        return False, None
+
+    async def _run_build(self, skill_id: str, skill_dir: Path, build_cmd: str, log_file: Path, env: dict) -> bool:
+        """Run build command, stream to log file. Returns True on success."""
+        logger.info("[mcp] Building '{}' — {}", skill_id, build_cmd)
+        _db.update_mcp_status(skill_id, "starting", error="Building...")
+        try:
+            with open(log_file, "a") as lf:
+                lf.write(f"\n=== BUILD: {build_cmd} ===\n")
+                proc = await asyncio.create_subprocess_shell(
+                    build_cmd,
+                    cwd=str(skill_dir),
+                    env=env,
+                    stdout=lf,
+                    stderr=lf,
+                )
+            rc = await asyncio.wait_for(proc.wait(), timeout=300)
+            if rc != 0:
+                err = f"Build failed (exit {rc}) — check {log_file}"
+                _db.update_mcp_status(skill_id, "error", error=err)
+                logger.error("[mcp] {} build failed (exit {})", skill_id, rc)
+                return False
+            logger.info("[mcp] {} build succeeded", skill_id)
+            return True
+        except asyncio.TimeoutError:
+            _db.update_mcp_status(skill_id, "error", error="Build timed out (300s)")
+            return False
+        except Exception as exc:
+            _db.update_mcp_status(skill_id, "error", error=f"Build error: {exc}")
+            return False
+
     async def _start_locked(self, skill_id: str) -> dict:
         record = _db.get_mcp_server(skill_id)
         if not record:
@@ -311,11 +367,19 @@ class McpManager:
                 pass
         env["PORT"] = str(port)
 
-        _db.update_mcp_status(skill_id, "starting")
+        # ── Auto-build if needed ───────────────────────────────────────────────
+        needs_build, build_cmd = await self._needs_build(skill_dir)
+        if needs_build and build_cmd:
+            ok = await self._run_build(skill_id, skill_dir, build_cmd, log_file, env)
+            if not ok:
+                return _db.get_mcp_server(skill_id)  # type: ignore[return-value]
+
+        _db.update_mcp_status(skill_id, "starting", error=None)
         logger.info("Starting MCP server '{}' on port {} — {}", skill_id, port, start_command)
 
         try:
             log_fd = open(log_file, "a")  # noqa: SIM115 — needed for subprocess
+            log_fd.write(f"\n=== START: {start_command} ===\n")
             proc = await asyncio.create_subprocess_shell(
                 start_command,
                 cwd=str(skill_dir),
@@ -336,7 +400,13 @@ class McpManager:
             _db.update_mcp_status(skill_id, "running", pid=proc.pid, last_seen=time.time())
             logger.info("MCP server '{}' is running (pid={})", skill_id, proc.pid)
         else:
-            _db.update_mcp_status(skill_id, "error", error="health check timeout")
+            # Read last log lines for a useful error message
+            try:
+                last_lines = log_file.read_text(errors="replace").splitlines()[-15:]
+                error_hint = "\n".join(last_lines).strip() or "health check timeout"
+            except Exception:
+                error_hint = "health check timeout"
+            _db.update_mcp_status(skill_id, "error", error=error_hint)
             logger.warning("MCP server '{}' did not become healthy", skill_id)
 
         return _db.get_mcp_server(skill_id)  # type: ignore[return-value]

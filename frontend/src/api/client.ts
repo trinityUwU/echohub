@@ -770,6 +770,34 @@ export const detectMcp = (id: string): Promise<{
 export const startMcp = (id: string): Promise<McpStatus> =>
   apiRequest(`/skills/${id}/mcp/start`, { method: 'POST' })
 
+export type McpStartEvent =
+  | { type: 'log'; msg: string }
+  | { type: 'done'; result: McpStatus }
+  | { type: 'error'; message: string }
+
+export async function* startMcpStream(id: string): AsyncGenerator<McpStartEvent> {
+  const url = await apiUrl(`/skills/${id}/mcp/start-stream`)
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+  if (!res.ok || !res.body) {
+    yield { type: 'error', message: `API error ${res.status}` }
+    return
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const blocks = buf.split('\n\n')
+    buf = blocks.pop() ?? ''
+    for (const block of blocks) {
+      if (!block.startsWith('data: ')) continue
+      try { yield JSON.parse(block.slice(6)) as McpStartEvent } catch { /* skip */ }
+    }
+  }
+}
+
 export const stopMcp = (id: string): Promise<McpStatus> =>
   apiRequest(`/skills/${id}/mcp/stop`, { method: 'POST' })
 

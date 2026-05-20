@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { listSkills, deleteSkill, patchSkill, analyzeSkillStream, installSkillStream, searchSkills, detectMcp, startMcp, stopMcp, getMcpStatus } from '@/api/client'
+import { listSkills, deleteSkill, patchSkill, analyzeSkillStream, installSkillStream, searchSkills, detectMcp, startMcpStream, stopMcp, getMcpStatus } from '@/api/client'
 import type { AnalyzeResult } from '@/api/client'
 import type { NativeSkill, CommunitySkill, GithubSkillResult, McpStatus } from '@/api/client'
 import { useDialog } from '@/components/shared/Dialog'
@@ -384,7 +384,9 @@ function McpSection({ skill }: { skill: CommunitySkill }): React.ReactElement {
   const [detecting, setDetecting] = useState(false)
   const [detectResult, setDetectResult] = useState<{ is_mcp: boolean; transport: string | null; start_command: string | null; port_hint: number | null; detail: string } | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
+  const [startLog, setStartLog] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  const startLogRef = useRef<HTMLDivElement>(null)
 
   // Poll status if is_mcp is known
   const isMcp = skill.is_mcp === true || detectResult?.is_mcp === true
@@ -419,9 +421,18 @@ function McpSection({ skill }: { skill: CommunitySkill }): React.ReactElement {
   const handleStart = async (): Promise<void> => {
     setActionLoading(true)
     setError(null)
+    setStartLog([])
     try {
-      const s = await startMcp(skill.id)
-      setMcpStatus(s)
+      for await (const event of startMcpStream(skill.id)) {
+        if (event.type === 'log') {
+          setStartLog(prev => [...prev, event.msg])
+          setTimeout(() => { if (startLogRef.current) startLogRef.current.scrollTop = startLogRef.current.scrollHeight }, 10)
+        } else if (event.type === 'done') {
+          setMcpStatus(event.result)
+        } else if (event.type === 'error') {
+          setError(event.message)
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Start failed')
     }
@@ -522,6 +533,12 @@ function McpSection({ skill }: { skill: CommunitySkill }): React.ReactElement {
             <span className="text-2xs text-text-muted">PID {mcpStatus.pid}</span>
           )}
         </div>
+        {(startLog.length > 0 || actionLoading) && (
+          <div ref={startLogRef} className="bg-elevated border border-border/50 rounded px-2.5 py-2 max-h-[100px] overflow-y-auto font-mono text-2xs text-text-muted space-y-0.5">
+            {startLog.map((l, i) => <div key={i}>{l}</div>)}
+            {actionLoading && <div className="animate-pulse">▌</div>}
+          </div>
+        )}
         {transport && (
           <div className="flex items-center gap-1.5">
             <span className="text-2xs text-text-muted">Transport:</span>
