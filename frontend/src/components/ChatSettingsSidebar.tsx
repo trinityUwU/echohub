@@ -6,17 +6,68 @@ import { DEFAULT_CHAT_PARAMS } from '@/hooks/useChat'
 const PROFILES_KEY = 'echohub_profiles'
 
 const DEFAULT_PROFILES: ChatProfile[] = [
-  { id: 'default', name: 'Default', params: { ...DEFAULT_CHAT_PARAMS } },
-  { id: 'precise', name: 'Precise', params: { ...DEFAULT_CHAT_PARAMS, temperature: 0.2 } },
-  { id: 'creative', name: 'Creative', params: { ...DEFAULT_CHAT_PARAMS, temperature: 1.0 } },
-  { id: 'balanced', name: 'Balanced', params: { ...DEFAULT_CHAT_PARAMS, temperature: 0.7 } },
+  {
+    id: 'default',
+    name: 'Default',
+    params: {
+      ...DEFAULT_CHAT_PARAMS,
+      temperature: 0.6,
+      systemPrompt: 'You are a direct, competent assistant. Answer accurately and concisely. No filler, no flattery, no unnecessary caveats.',
+      permanentRules: '- Never open with affirmations (great, sure, absolutely, of course, certainly)\n- Answer what was asked — nothing more unless context requires it\n- If uncertain, flag it in one sentence — do not pad around it\n- Prose over bullet points for simple answers',
+    },
+  },
+  {
+    id: 'precise',
+    name: 'Precise',
+    params: {
+      ...DEFAULT_CHAT_PARAMS,
+      temperature: 0.2,
+      systemPrompt: 'You are a precision-focused assistant. Prioritize correctness over completeness. When uncertain, state your confidence level explicitly. Never fill gaps with plausible-sounding approximations.',
+      permanentRules: '- Flag information that may be outdated or based on training data\n- Never speculate without explicitly marking it as speculation\n- Prefer specific numbers, dates, and names over vague descriptors\n- If the answer is unknown, say so directly — do not approximate',
+    },
+  },
+  {
+    id: 'creative',
+    name: 'Creative',
+    params: {
+      ...DEFAULT_CHAT_PARAMS,
+      temperature: 1.0,
+      systemPrompt: 'You are an expansive, associative thinker. Generate original ideas, unexpected angles, and divergent perspectives. Push past the obvious answer. Surface the non-trivial.',
+      permanentRules: '- Always include at least one non-obvious angle per response\n- Do not self-censor unconventional ideas — surface them with one-line reasoning\n- Prefer vivid, specific language over abstract generalities\n- Short responses are valid when the idea is complete — do not inflate',
+    },
+  },
+  {
+    id: 'balanced',
+    name: 'Balanced',
+    params: {
+      ...DEFAULT_CHAT_PARAMS,
+      temperature: 0.7,
+      systemPrompt: 'You are a clear-headed analyst. Balance depth with concision. Structure your reasoning before outputting conclusions. Suited for tradeoffs, multi-part problems, and technical decisions.',
+      permanentRules: '- Logic flow: context before recommendation, cause before effect\n- For tradeoffs: state both sides before giving a position\n- Keep answer length proportional to question complexity\n- No filler transitions (furthermore, in conclusion, it is worth noting)',
+    },
+  },
+  {
+    id: 'coder',
+    name: 'Coder',
+    params: {
+      ...DEFAULT_CHAT_PARAMS,
+      temperature: 0.3,
+      systemPrompt: 'You are a senior software engineer. Write working code. Think in systems. Spot edge cases before they are asked. Default stack: Python, TypeScript, React, FastAPI, Bun, SQLite, Tailwind. Use these unless the user specifies otherwise.',
+      permanentRules: '- Always write complete, runnable code — no pseudocode, no TODO placeholders\n- Code first, explanation after — only if asked or genuinely necessary\n- If the approach itself is wrong, say so and propose the correct one before writing anything\n- Note known limitations or edge cases in one line after the code block\n- Prefer explicit over clever — readable beats terse',
+    },
+  },
 ]
+
+const LOCKED_IDS = new Set(DEFAULT_PROFILES.map(p => p.id))
 
 function loadProfiles(): ChatProfile[] {
   try {
     const raw = localStorage.getItem(PROFILES_KEY)
     if (!raw) return DEFAULT_PROFILES
-    return JSON.parse(raw) as ChatProfile[]
+    const stored = JSON.parse(raw) as ChatProfile[]
+    // Always use fresh DEFAULT_PROFILES for locked IDs — ensures prompts are up-to-date
+    const custom = stored.filter(p => !LOCKED_IDS.has(p.id))
+    return [...DEFAULT_PROFILES, ...custom]
   } catch {
     return DEFAULT_PROFILES
   }
@@ -243,7 +294,7 @@ export function ChatSettingsSidebar({ params, onChange, maxContextWindow }: Prop
     const profile = profiles.find((p) => p.id === selectedProfileId)
     if (!profile) return
     // Prevent deleting built-in profiles
-    if (['default', 'precise', 'creative', 'balanced'].includes(profile.id)) return
+    if (['default', 'precise', 'creative', 'balanced', 'coder'].includes(profile.id)) return
     const updated = profiles.filter((p) => p.id !== selectedProfileId)
     setProfiles(updated)
     saveProfiles(updated)
@@ -253,7 +304,7 @@ export function ChatSettingsSidebar({ params, onChange, maxContextWindow }: Prop
   }
 
   const tokenEstimate = Math.round(params.systemPrompt.length / 4)
-  const isBuiltIn = ['default', 'precise', 'creative', 'balanced'].includes(selectedProfileId)
+  const isBuiltIn = ['default', 'precise', 'creative', 'balanced', 'coder'].includes(selectedProfileId)
 
   return (
     <div className="flex flex-col h-full overflow-y-auto bg-surface-1 border-l border-border w-[280px] shrink-0">
