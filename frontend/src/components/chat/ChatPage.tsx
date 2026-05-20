@@ -442,6 +442,8 @@ function PanelWrapper({ side, collapsed, onToggle, children }: PanelWrapperProps
 // so useProfiles initialises with the correct project scope from the start.
 
 import type { Project } from '@/hooks/useProjects'
+import { useProjectConversations } from '@/hooks/useProjectConversations'
+import type { ProjectConversation } from '@/hooks/useProjectConversations'
 
 interface ProjectWorkspaceProps {
   project: Project
@@ -470,6 +472,7 @@ function ProjectWorkspace({
 }: ProjectWorkspaceProps): React.ReactElement {
   const profilesHook = useProfiles({ mode: project.mode, projectId: project.id })
   const [rightCollapsed, setRightCollapsed] = useState(false)
+  const [convSidebarCollapsed, setConvSidebarCollapsed] = useState(false)
   const [showLogs, setShowLogs] = useState(false)
   const [params, setParams] = useState(profilesHook.activeProfile.params)
   const prevProfileId = useRef(profilesHook.activeId)
@@ -483,15 +486,31 @@ function ProjectWorkspace({
 
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  const convHook = useProjectConversations(project.id)
+
   const chatHook = useChat(
     params, activeMessages, setActiveMessages,
     loadedModel?.max_context_window ?? undefined,
     loadedModel?.id, undefined, loadedModel?.name ?? null,
   )
 
-  const toolChatHook = useToolChat(project.id)
+  const toolChatHook = useToolChat(project.id, {
+    conversationId: convHook.activeId,
+    onSaveMessage: convHook.saveMessage,
+  })
 
   const isDevMode = project.mode === 'dev'
+
+  // Load history when active conversation changes
+  const prevConvId = useRef<string | null>(null)
+  useEffect(() => {
+    if (!isDevMode || !convHook.activeId) return
+    if (convHook.activeId === prevConvId.current) return
+    prevConvId.current = convHook.activeId
+    convHook.loadMessages(convHook.activeId).then(msgs => {
+      toolChatHook.loadHistory(msgs)
+    }).catch(() => {})
+  }, [convHook.activeId, isDevMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const messages = isDevMode ? toolChatHook.messages : chatHook.messages
   const streaming = isDevMode ? toolChatHook.streaming : chatHook.streaming
@@ -539,7 +558,11 @@ function ProjectWorkspace({
   }
 
   const handleClear = (): void => {
-    if (isDevMode) { toolChatHook.clear(); return }
+    if (isDevMode) {
+      toolChatHook.clear()
+      if (convHook.activeId) void convHook.clearMessages(convHook.activeId)
+      return
+    }
     chatHook.setMessages([])
     setActiveMessages([])
   }
@@ -594,6 +617,20 @@ function ProjectWorkspace({
             Logs
           </button>
         </motion.div>
+        {isDevMode && (
+          <PanelWrapper side="left" collapsed={convSidebarCollapsed} onToggle={() => setConvSidebarCollapsed(v => !v)}>
+            <ProjectConvSidebar
+              conversations={convHook.conversations}
+              activeId={convHook.activeId}
+              onSelect={id => {
+                convHook.selectConversation(id)
+              }}
+              onNew={() => { void convHook.createConversation() }}
+              onDelete={id => { void convHook.deleteConversation(id) }}
+              onRename={convHook.renameConversation}
+            />
+          </PanelWrapper>
+        )}
         <ChatContent
           view={view}
           mode={mode}
@@ -623,6 +660,113 @@ function ProjectWorkspace({
         <PanelWrapper side="right" collapsed={rightCollapsed} onToggle={() => setRightCollapsed(v => !v)}>
           <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />
         </PanelWrapper>
+      </div>
+    </div>
+  )
+}
+
+// ── Project Conversation Sidebar ───────────────────────────────────────────
+
+interface ProjectConvSidebarProps {
+  conversations: ProjectConversation[]
+  activeId: string | null
+  onSelect: (id: string) => void
+  onNew: () => void
+  onDelete: (id: string) => void
+  onRename: (id: string, title: string) => Promise<void>
+}
+
+function ProjectConvSidebar({
+  conversations, activeId, onSelect, onNew, onDelete, onRename,
+}: ProjectConvSidebarProps): React.ReactElement {
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState('')
+
+  const startEdit = (conv: ProjectConversation, e: React.MouseEvent): void => {
+    e.stopPropagation()
+    setEditingId(conv.id)
+    setEditValue(conv.title)
+  }
+
+  const commitEdit = (id: string): void => {
+    if (editValue.trim()) void onRename(id, editValue.trim())
+    setEditingId(null)
+  }
+
+  return (
+    <div className="w-[200px] flex flex-col h-full bg-surface py-2">
+      <div className="flex items-center justify-between px-3 pb-2 border-b border-border">
+        <span className="text-xs font-medium text-text-muted uppercase tracking-wider">Conversations</span>
+        <button
+          onClick={onNew}
+          title="New conversation"
+          className="w-6 h-6 flex items-center justify-center rounded text-text-muted hover:text-text-primary hover:bg-overlay transition-colors cursor-pointer"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto py-1">
+        <AnimatePresence initial={false}>
+          {conversations.map(conv => (
+            <motion.div
+              key={conv.id}
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.15 }}
+              className={`group relative flex items-center mx-1 mb-0.5 rounded-md cursor-pointer transition-colors ${
+                conv.id === activeId
+                  ? 'bg-accent/15 text-text-primary'
+                  : 'text-text-secondary hover:bg-overlay hover:text-text-primary'
+              }`}
+              onClick={() => onSelect(conv.id)}
+            >
+              {editingId === conv.id ? (
+                <input
+                  autoFocus
+                  className="flex-1 px-2 py-1.5 text-xs bg-transparent outline-none"
+                  value={editValue}
+                  onChange={e => setEditValue(e.target.value)}
+                  onBlur={() => commitEdit(conv.id)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') commitEdit(conv.id)
+                    if (e.key === 'Escape') setEditingId(null)
+                  }}
+                  onClick={e => e.stopPropagation()}
+                />
+              ) : (
+                <>
+                  <span className="flex-1 px-2 py-1.5 text-xs truncate">{conv.title}</span>
+                  <div className="hidden group-hover:flex items-center gap-0.5 pr-1 flex-shrink-0">
+                    <button
+                      title="Rename"
+                      className="w-5 h-5 flex items-center justify-center rounded hover:bg-overlay text-text-muted hover:text-text-secondary cursor-pointer"
+                      onClick={e => startEdit(conv, e)}
+                    >
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                      </svg>
+                    </button>
+                    <button
+                      title="Delete"
+                      className="w-5 h-5 flex items-center justify-center rounded hover:bg-red/20 text-text-muted hover:text-red cursor-pointer"
+                      onClick={e => { e.stopPropagation(); onDelete(conv.id) }}
+                    >
+                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
+                      </svg>
+                    </button>
+                  </div>
+                </>
+              )}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+        {conversations.length === 0 && (
+          <p className="px-3 py-2 text-xs text-text-muted italic">No conversations yet</p>
+        )}
       </div>
     </div>
   )

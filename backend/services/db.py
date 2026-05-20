@@ -265,6 +265,34 @@ def init_db() -> None:
                 results TEXT NOT NULL, score_avg REAL, created_at TEXT NOT NULL
             )""")
             conn.commit()
+        # Add project_conversations and project_messages tables if missing
+        existing_tables2 = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "project_conversations" not in existing_tables2:
+            conn.execute("""
+                CREATE TABLE project_conversations (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT 'New conversation',
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_proj_convs ON project_conversations(project_id)")
+            conn.commit()
+        if "project_messages" not in existing_tables2:
+            conn.execute("""
+                CREATE TABLE project_messages (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    FOREIGN KEY (conversation_id) REFERENCES project_conversations(id) ON DELETE CASCADE
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_proj_msgs ON project_messages(conversation_id)")
+            conn.commit()
+
         # Add load_config to messages if missing
         msg_cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
         if "load_config" not in msg_cols:
@@ -866,6 +894,87 @@ def delete_download_history_entry(model_id: str) -> bool:
         cur = conn.execute("DELETE FROM download_history WHERE model_id = ?", (model_id,))
         conn.commit()
     return cur.rowcount > 0
+
+
+# ── Project conversations ──────────────────────────────────────────────────
+
+import time as _time
+import uuid as _uuid
+
+
+def create_project_conversation(project_id: str, title: str = "New conversation") -> dict:
+    now = _time.time()
+    conv_id = str(_uuid.uuid4())
+    with _lock:
+        conn = _get_conn()
+        conn.execute(
+            "INSERT INTO project_conversations (id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (conv_id, project_id, title, now, now),
+        )
+        conn.commit()
+    return {"id": conv_id, "project_id": project_id, "title": title, "created_at": now, "updated_at": now}
+
+
+def list_project_conversations(project_id: str) -> list[dict]:
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT * FROM project_conversations WHERE project_id = ? ORDER BY updated_at DESC",
+            (project_id,),
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def delete_project_conversation(conv_id: str) -> None:
+    with _lock:
+        conn = _get_conn()
+        conn.execute("DELETE FROM project_conversations WHERE id = ?", (conv_id,))
+        conn.commit()
+
+
+def rename_project_conversation(conv_id: str, title: str) -> None:
+    now = _time.time()
+    with _lock:
+        conn = _get_conn()
+        conn.execute(
+            "UPDATE project_conversations SET title = ?, updated_at = ? WHERE id = ?",
+            (title, now, conv_id),
+        )
+        conn.commit()
+
+
+def save_project_message(conv_id: str, role: str, content: str) -> dict:
+    now = _time.time()
+    msg_id = str(_uuid.uuid4())
+    with _lock:
+        conn = _get_conn()
+        conn.execute(
+            "INSERT INTO project_messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+            (msg_id, conv_id, role, content, now),
+        )
+        conn.execute(
+            "UPDATE project_conversations SET updated_at = ? WHERE id = ?",
+            (now, conv_id),
+        )
+        conn.commit()
+    return {"id": msg_id, "conversation_id": conv_id, "role": role, "content": content, "created_at": now}
+
+
+def list_project_messages(conv_id: str) -> list[dict]:
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT * FROM project_messages WHERE conversation_id = ? ORDER BY created_at ASC",
+            (conv_id,),
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def delete_project_messages(conv_id: str) -> None:
+    with _lock:
+        conn = _get_conn()
+        conn.execute("DELETE FROM project_messages WHERE conversation_id = ?", (conv_id,))
+        conn.commit()
 
 
 _BUILTIN_PROFILES = [

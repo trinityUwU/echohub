@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toolChat } from '@/api/client'
 import type { ChatMessage, ToolCall, WorkspaceFile } from '@/types'
 
@@ -47,13 +47,23 @@ export interface UseToolChatReturn {
   send: (text: string, systemPrompt?: string) => void
   stop: () => void
   clear: () => void
+  loadHistory: (msgs: Array<{ role: string; content: string }>) => void
 }
 
-export function useToolChat(projectId: string): UseToolChatReturn {
+interface UseToolChatOptions {
+  conversationId: string | null
+  onSaveMessage?: (convId: string, role: string, content: string) => Promise<void>
+}
+
+export function useToolChat(projectId: string, options: UseToolChatOptions = { conversationId: null }): UseToolChatReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [toolCalls, setToolCalls] = useState<ToolCall[]>([])
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([])
   const [streaming, setStreaming] = useState(false)
+  const optionsRef = useRef(options)
+
+  // Keep options ref fresh so send() always reads current values
+  useEffect(() => { optionsRef.current = options }, [options])
 
   // Maps tool name → local ToolCall id so we can update status on tool_result
   // Maps tool name → marker message id (for inline chat display)
@@ -77,6 +87,20 @@ export function useToolChat(projectId: string): UseToolChatReturn {
     pendingToolMsgMap.current.clear()
   }, [])
 
+  const loadHistory = useCallback((msgs: Array<{ role: string; content: string }>): void => {
+    const hydrated: ChatMessage[] = msgs.map(m => ({
+      role: m.role as ChatMessage['role'],
+      content: m.content,
+      id: crypto.randomUUID(),
+    }))
+    messagesRef.current = hydrated
+    setMessages(hydrated)
+    setToolCalls([])
+    setWorkspaceFiles([])
+    pendingToolMap.current.clear()
+    pendingToolMsgMap.current.clear()
+  }, [])
+
   const send = useCallback((text: string, systemPrompt?: string): void => {
     setStreaming(true)
 
@@ -93,6 +117,12 @@ export function useToolChat(projectId: string): UseToolChatReturn {
       }),
       userMsg,
     ]
+
+    // Persist user message
+    const { conversationId, onSaveMessage } = optionsRef.current
+    if (conversationId && onSaveMessage) {
+      void onSaveMessage(conversationId, 'user', text)
+    }
 
     // Update state + ref
     const withUser = [...messagesRef.current, userMsg]
@@ -181,6 +211,11 @@ export function useToolChat(projectId: string): UseToolChatReturn {
           } else if (raw.type === 'done') {
             setWorkspaceFiles(raw.files)
             setStreaming(false)
+            // Persist completed assistant message
+            const { conversationId: cid, onSaveMessage: onSave } = optionsRef.current
+            if (cid && onSave && accumulated) {
+              void onSave(cid, 'assistant', accumulated)
+            }
           } else if (raw.type === 'error') {
             setMessages(prev => {
               const updated = [...prev]
@@ -217,5 +252,5 @@ export function useToolChat(projectId: string): UseToolChatReturn {
     })()
   }, [projectId])
 
-  return { messages, toolCalls, workspaceFiles, streaming, send, stop, clear }
+  return { messages, toolCalls, workspaceFiles, streaming, send, stop, clear, loadHistory }
 }
