@@ -84,12 +84,15 @@ class McpStdioClient:
         """Spawn subprocess and run MCP initialize handshake."""
         logger.info("[stdio] starting '{}' — {}", self.skill_id, " ".join(self.command_parts))
         try:
+            # limit=8MB — default 64KB is too small for large MCP responses (e.g. search_papers)
+            reader_limit = 8 * 1024 * 1024
             self._proc = await asyncio.create_subprocess_exec(
                 *self.command_parts,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.cwd,
+                limit=reader_limit,
             )
         except FileNotFoundError as exc:
             raise RuntimeError(
