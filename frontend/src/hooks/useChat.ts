@@ -14,6 +14,8 @@ export const DEFAULT_CHAT_PARAMS: ChatParams = {
   frequencyPenalty: 0.0,
   stop: '',
   enableThinking: false,
+  autoTitle: true,
+  contextCompaction: false,
 }
 
 function messageTextLength(msg: ChatMessage): number {
@@ -145,8 +147,8 @@ export function useChat(
     const userMsg: ChatMessage = { role: 'user', content, id: userMsgId }
     let currentMessages = [...messages, userMsg]
 
-    // Autocompact check: if estimated tokens > 75% of context, compact before sending
-    if (maxContextTokens) {
+    // Autocompact check: if enabled and estimated tokens > 75% of context, compact before sending
+    if (maxContextTokens && params.contextCompaction) {
       const estimated = estimateTokens(currentMessages, params.systemPrompt, params.permanentRules) + params.maxTokens
       const threshold = maxContextTokens * 0.75
       if (estimated > threshold && currentMessages.filter(m => m.role !== 'system').length > 6) {
@@ -162,9 +164,9 @@ export function useChat(
 
     // Persist user message
     if (convId) {
-      // Auto-title on first user message
+      // Auto-title on first user message (if enabled)
       const isFirstUserMsg = !messages.some(m => m.role === 'user')
-      if (isFirstUserMsg) {
+      if (isFirstUserMsg && params.autoTitle) {
         const rawText = extractFirstUserText(content)
         const title = rawText.slice(0, 40) + (rawText.length > 40 ? '…' : '')
         updateConversation(convId, { title }).catch(() => {/* best-effort */})

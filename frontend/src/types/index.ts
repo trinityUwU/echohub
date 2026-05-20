@@ -166,6 +166,8 @@ export interface ChatParams {
   frequencyPenalty: number
   stop: string
   enableThinking: boolean
+  autoTitle: boolean
+  contextCompaction: boolean
 }
 
 export interface ChatProfile {

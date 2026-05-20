@@ -12,7 +12,7 @@ const CHAT_BUILTINS: ChatProfile[] = [
     params: {
       systemPrompt: '', permanentRules: '', temperature: 0.7, maxTokens: 4096,
       topP: 0.95, topK: -1, repetitionPenalty: 1.1,
-      presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: false,
+      presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: false, autoTitle: true, contextCompaction: false,
     },
   },
   {
@@ -22,7 +22,7 @@ const CHAT_BUILTINS: ChatProfile[] = [
       systemPrompt: 'You are an expert software engineer. Write clean, correct, well-structured code.',
       permanentRules: '', temperature: 0.2, maxTokens: 4096,
       topP: 0.95, topK: -1, repetitionPenalty: 1.05,
-      presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: true,
+      presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: true, autoTitle: true, contextCompaction: false,
     },
   },
   {
@@ -32,7 +32,7 @@ const CHAT_BUILTINS: ChatProfile[] = [
       systemPrompt: '', permanentRules: '',
       temperature: 1.1, maxTokens: 4096,
       topP: 0.98, topK: 50, repetitionPenalty: 1.15,
-      presencePenalty: 0.1, frequencyPenalty: 0, stop: '', enableThinking: false,
+      presencePenalty: 0.1, frequencyPenalty: 0, stop: '', enableThinking: false, autoTitle: true, contextCompaction: false,
     },
   },
 ]
@@ -47,7 +47,7 @@ const PROJECT_BUILTINS: Record<ProjectMode, ChatProfile[]> = {
         permanentRules: '- Always verify imports exist\n- Never use blocking calls in async\n- Check all edge cases',
         temperature: 0.2, maxTokens: 8192,
         topP: 0.95, topK: -1, repetitionPenalty: 1.05,
-        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: true,
+        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: true, autoTitle: true, contextCompaction: false,
       },
     },
     {
@@ -58,7 +58,7 @@ const PROJECT_BUILTINS: Record<ProjectMode, ChatProfile[]> = {
         permanentRules: '- Always show the full stack trace analysis\n- Propose only the minimal fix needed',
         temperature: 0.1, maxTokens: 4096,
         topP: 0.9, topK: -1, repetitionPenalty: 1.0,
-        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: true,
+        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: true, autoTitle: true, contextCompaction: false,
       },
     },
     {
@@ -69,7 +69,7 @@ const PROJECT_BUILTINS: Record<ProjectMode, ChatProfile[]> = {
         permanentRules: '',
         temperature: 0.3, maxTokens: 4096,
         topP: 0.95, topK: -1, repetitionPenalty: 1.05,
-        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: false,
+        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: false, autoTitle: true, contextCompaction: false,
       },
     },
   ],
@@ -82,7 +82,7 @@ const PROJECT_BUILTINS: Record<ProjectMode, ChatProfile[]> = {
         permanentRules: '',
         temperature: 0.5, maxTokens: 8192,
         topP: 0.95, topK: -1, repetitionPenalty: 1.1,
-        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: false,
+        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: false, autoTitle: true, contextCompaction: false,
       },
     },
     {
@@ -93,7 +93,7 @@ const PROJECT_BUILTINS: Record<ProjectMode, ChatProfile[]> = {
         permanentRules: '- Always include a TL;DR at the top\n- Use bullet points for key facts',
         temperature: 0.3, maxTokens: 4096,
         topP: 0.9, topK: -1, repetitionPenalty: 1.05,
-        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: false,
+        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: false, autoTitle: true, contextCompaction: false,
       },
     },
     {
@@ -104,7 +104,7 @@ const PROJECT_BUILTINS: Record<ProjectMode, ChatProfile[]> = {
         permanentRules: '',
         temperature: 0.4, maxTokens: 8192,
         topP: 0.95, topK: -1, repetitionPenalty: 1.1,
-        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: false,
+        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: false, autoTitle: true, contextCompaction: false,
       },
     },
   ],
@@ -117,7 +117,7 @@ const PROJECT_BUILTINS: Record<ProjectMode, ChatProfile[]> = {
         permanentRules: '- Always cite sources when available\n- Distinguish facts from inferences',
         temperature: 0.4, maxTokens: 8192,
         topP: 0.95, topK: -1, repetitionPenalty: 1.05,
-        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: true,
+        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: true, autoTitle: true, contextCompaction: false,
       },
     },
     {
@@ -128,7 +128,7 @@ const PROJECT_BUILTINS: Record<ProjectMode, ChatProfile[]> = {
         permanentRules: '',
         temperature: 0.9, maxTokens: 4096,
         topP: 0.98, topK: 50, repetitionPenalty: 1.15,
-        presencePenalty: 0.1, frequencyPenalty: 0, stop: '', enableThinking: false,
+        presencePenalty: 0.1, frequencyPenalty: 0, stop: '', enableThinking: false, autoTitle: true, contextCompaction: false,
       },
     },
     {
@@ -139,7 +139,7 @@ const PROJECT_BUILTINS: Record<ProjectMode, ChatProfile[]> = {
         permanentRules: '- Always explain your reasoning\n- Rate confidence: High / Medium / Low',
         temperature: 0.1, maxTokens: 4096,
         topP: 0.9, topK: -1, repetitionPenalty: 1.0,
-        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: true,
+        presencePenalty: 0, frequencyPenalty: 0, stop: '', enableThinking: true, autoTitle: true, contextCompaction: false,
       },
     },
   ],
@@ -162,7 +162,12 @@ function loadProfilesFromStorage(storageKey: string, builtins: ChatProfile[]): C
     })
     const normalize = (p: ChatProfile): ChatProfile => ({
       ...p,
-      params: { ...p.params, permanentRules: p.params.permanentRules ?? '' },
+      params: {
+        ...p.params,
+        permanentRules: p.params.permanentRules ?? '',
+        autoTitle: p.params.autoTitle ?? true,
+        contextCompaction: p.params.contextCompaction ?? false,
+      },
     })
     return [...mergedBuiltins.map(normalize), ...custom.map(normalize)]
   } catch {

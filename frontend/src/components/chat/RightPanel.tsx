@@ -76,9 +76,8 @@ export function RightPanel({ params, onChange, profiles, loadedModel, skills }: 
         ) : (
           <ToggleRow label="Enable thinking" value={params.enableThinking} onChange={v => set('enableThinking', v)} />
         )}
-        <ToggleRow label="Stream output"      value={true}  onChange={() => {}} />
-        <ToggleRow label="Auto-title"         value={true}  onChange={() => {}} />
-        <ToggleRow label="Context compaction" value={false} onChange={() => {}} />
+        <ToggleRow label="Auto-title"         value={params.autoTitle}         onChange={v => set('autoTitle', v)} />
+        <ToggleRow label="Context compaction" value={params.contextCompaction} onChange={v => set('contextCompaction', v)} />
       </Accordion>
     </aside>
   )
