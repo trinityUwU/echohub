@@ -425,14 +425,14 @@ async def tool_chat(req: ToolChatRequest):
                 # Continue loop — model may want to call more tools
                 continue
 
-            # No tool_calls → final text answer
+            # No tool_calls → final text answer, stream word by word for live feel
             final_text: str = message.get("content") or ""
             if final_text:
-                # Stream text as standard SSE content chunks
-                chunk_payload = _json.dumps({
-                    "choices": [{"delta": {"content": final_text}, "finish_reason": "stop"}]
-                })
-                yield f"data: {chunk_payload}\n\n"
+                # Stream as text_chunk events (matches useToolChat SSE handler)
+                chunk_size = 4  # characters per chunk — small enough for live feel
+                for i in range(0, len(final_text), chunk_size):
+                    chunk = final_text[i:i + chunk_size]
+                    yield f"data: {_json.dumps({'type': 'text_chunk', 'content': chunk})}\n\n"
 
             break  # done
 
