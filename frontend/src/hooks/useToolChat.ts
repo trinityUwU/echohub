@@ -124,40 +124,40 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     setUsedTokens(0)
   }, [])
 
-  // Auto-compact: summarize conversation when context hits 98%
+  // compactedSummaryRef: holds the current summary for injection into historyToSend.
+  // Chat display is NEVER modified — all messages stay visible.
+  const compactedSummaryRef = useRef<string | null>(null)
+
+  // Runs compact in background, shows animation in chat via a transient marker message
   const compact = useCallback(async (): Promise<void> => {
-    const msgs = messagesRef.current.filter(m => {
+    const msgs = messagesRef.current
+    const human = msgs.filter(m => {
       const c = typeof m.content === 'string' ? m.content : ''
-      // Skip existing compact markers and empty messages
-      return c.trim() && c !== '__compacting__' && !c.startsWith('__compacted__:')
+      return (m.role === 'user' || m.role === 'assistant') && c.trim()
     })
-    const human = msgs.filter(m => m.role === 'user' || m.role === 'assistant')
     if (human.length < 4) return
 
-    // Insert "compacting" marker into chat
-    const compactingMsg: ChatMessage = { role: 'system', content: '__compacting__', id: crypto.randomUUID() }
-    const withMarker = [...messagesRef.current, compactingMsg]
-    messagesRef.current = withMarker
-    setMessages([...withMarker])
+    // Show "compacting…" indicator at end of chat (display only — messagesRef untouched)
+    const markerId = crypto.randomUUID()
+    const compactingMsg: ChatMessage = { role: 'system', content: '__compacting__', id: markerId }
+    setMessages(prev => [...prev, compactingMsg])
 
     try {
       const toSummarize = human.slice(0, -4)
-      const toKeep = human.slice(-4)
       const { summary } = await summarizeMessages(toSummarize)
+      compactedSummaryRef.current = summary
 
-      // Replace compacting marker with compacted result, keep recent messages
-      const compactedMsg: ChatMessage = { role: 'system', content: `__compacted__:${summary}`, id: crypto.randomUUID() }
-      const compacted: ChatMessage[] = [compactedMsg, ...toKeep]
-      messagesRef.current = compacted
-      setMessages([...compacted])
+      // Replace spinner with "done" marker (display only)
+      const doneMsg: ChatMessage = { role: 'system', content: `__compacted__:${summary}`, id: markerId }
+      setMessages(prev => prev.map(m => m.id === markerId ? doneMsg : m))
 
-      // Recalculate tokens after compaction
-      const newChars = compacted.reduce((s, m) => s + (typeof m.content === 'string' ? m.content.length : 0), 0)
-      setUsedTokens(Math.round(newChars / 4))
+      // Update token estimate to reflect compacted context size
+      const summaryTokens = Math.round(summary.length / 4)
+      const recentTokens = human.slice(-4).reduce((s, m) => s + (typeof m.content === 'string' ? m.content.length : 0), 0)
+      setUsedTokens(Math.round(summaryTokens + recentTokens / 4))
     } catch {
-      // Failed — remove marker, keep original messages
-      messagesRef.current = msgs
-      setMessages([...msgs])
+      // Remove marker on failure — silently continue
+      setMessages(prev => prev.filter(m => m.id !== markerId))
     }
   }, [])
 
@@ -177,23 +177,22 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
 
     const userMsg: ChatMessage = { role: 'user', content: text, id: crypto.randomUUID() }
 
-    // Build history — exclude compact markers from what we send to backend
-    const historyToSend = [
-      ...messagesRef.current.filter(m => {
-        const c = typeof m.content === 'string' ? m.content : ''
-        if (!c.trim()) return false
-        if (c === '__compacting__') return false
-        // Compact summary → send as system context message
-        return true
-      }).map(m => {
-        const c = typeof m.content === 'string' ? m.content : ''
-        if (c.startsWith('__compacted__:')) {
-          return { ...m, content: `[Previous context summary]: ${c.slice(14)}` }
-        }
-        return m
-      }),
-      userMsg,
-    ]
+    // Build history to send to backend:
+    // If a compact summary exists, inject it first + last 4 real messages.
+    // Otherwise send all real messages (excluding display-only compact markers).
+    const realMsgs = messagesRef.current.filter(m => {
+      const c = typeof m.content === 'string' ? m.content : ''
+      return (m.role === 'user' || m.role === 'assistant') && c.trim()
+    })
+
+    const historyToSend: Array<{ role: string; content: string }> = []
+    if (compactedSummaryRef.current) {
+      historyToSend.push({ role: 'system', content: `[Context summary — conversation so far]: ${compactedSummaryRef.current}` })
+      realMsgs.slice(-4).forEach(m => historyToSend.push({ role: m.role, content: typeof m.content === 'string' ? m.content : '' }))
+    } else {
+      realMsgs.forEach(m => historyToSend.push({ role: m.role, content: typeof m.content === 'string' ? m.content : '' }))
+    }
+    historyToSend.push({ role: 'user', content: text })
 
     const { conversationId, onSaveMessage } = optionsRef.current
     if (conversationId && onSaveMessage) {
@@ -221,10 +220,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     let pendingToolName = ''
 
     const req = {
-      messages: historyToSend.map(m => ({
-        role: m.role,
-        content: typeof m.content === 'string' ? m.content : '',
-      })),
+      messages: historyToSend,
       project_id: projectId,
       system_prompt: systemPrompt,
     }
