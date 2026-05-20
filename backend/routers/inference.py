@@ -362,7 +362,31 @@ async def tool_chat(req: ToolChatRequest):
         messages: list[dict] = []
         if req.system_prompt and req.system_prompt.strip():
             messages.append({"role": "system", "content": req.system_prompt})
-        messages.extend(req.messages)
+
+        # Filter out empty messages — llama.cpp crashes on empty assistant content
+        for m in req.messages:
+            role: str = m.get("role", "")
+            content = m.get("content", "")
+            tool_calls = m.get("tool_calls")
+
+            if role == "tool":
+                # Always keep tool results
+                messages.append(m)
+            elif role in ("user", "system"):
+                if isinstance(content, str) and content.strip():
+                    messages.append(m)
+                elif isinstance(content, list) and content:
+                    messages.append(m)
+            elif role == "assistant":
+                has_content = isinstance(content, str) and content.strip()
+                has_tool_calls = bool(tool_calls)
+                if has_content or has_tool_calls:
+                    messages.append(m)
+
+        # Require at least one user message
+        if not any(m.get("role") == "user" for m in messages):
+            yield f"data: {_json.dumps({'type': 'error', 'error': 'No user message in conversation'})}\n\n"
+            return
 
         for iteration in range(MAX_ITERATIONS):
             # Call the model with tools

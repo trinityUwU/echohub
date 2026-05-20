@@ -56,8 +56,10 @@ export function useToolChat(projectId: string): UseToolChatReturn {
   const [streaming, setStreaming] = useState(false)
 
   // Maps tool name → local ToolCall id so we can update status on tool_result
+  // Maps tool name → marker message id (for inline chat display)
   const messagesRef = useRef<ChatMessage[]>([])
   const pendingToolMap = useRef<Map<string, string>>(new Map())
+  const pendingToolMsgMap = useRef<Map<string, string>>(new Map())
   const abortRef = useRef<AbortController | null>(null)
 
   const stop = useCallback((): void => {
@@ -72,6 +74,7 @@ export function useToolChat(projectId: string): UseToolChatReturn {
     setToolCalls([])
     setWorkspaceFiles([])
     pendingToolMap.current.clear()
+    pendingToolMsgMap.current.clear()
   }, [])
 
   const send = useCallback((text: string, systemPrompt?: string): void => {
@@ -83,7 +86,10 @@ export function useToolChat(projectId: string): UseToolChatReturn {
     const historyToSend = [
       ...messagesRef.current.filter(m => {
         const c = typeof m.content === 'string' ? m.content : ''
-        return c.trim().length > 0
+        if (c.trim().length === 0) return false
+        // Exclude inline tool-call marker messages — backend must not see them
+        if (c.startsWith('[tool:')) return false
+        return true
       }),
       userMsg,
     ]
@@ -128,6 +134,18 @@ export function useToolChat(projectId: string): UseToolChatReturn {
             }
             pendingToolMap.current.set(raw.tool, tcId)
             setToolCalls(prev => [...prev, tc])
+
+            // Insert inline marker message before the assistant placeholder
+            const markerMsgId = crypto.randomUUID()
+            const markerContent = `[tool:${raw.tool}]${JSON.stringify(raw.args)}`
+            const markerMsg: ChatMessage = { role: 'assistant', content: markerContent, id: markerMsgId }
+            pendingToolMsgMap.current.set(raw.tool, markerMsgId)
+            setMessages(prev => {
+              // Insert before last element (the assistant placeholder)
+              const updated = [...prev.slice(0, -1), markerMsg, prev[prev.length - 1]]
+              messagesRef.current = updated
+              return updated
+            })
           } else if (raw.type === 'tool_result') {
             const tcId = pendingToolMap.current.get(raw.tool)
             if (tcId) {
@@ -137,6 +155,19 @@ export function useToolChat(projectId: string): UseToolChatReturn {
                 ),
               )
               pendingToolMap.current.delete(raw.tool)
+            }
+            // Update inline marker message with result
+            const markerMsgId = pendingToolMsgMap.current.get(raw.tool)
+            if (markerMsgId) {
+              const resultContent = `[tool:${raw.tool}]${JSON.stringify(raw.result)}`
+              setMessages(prev => {
+                const updated = prev.map(m =>
+                  m.id === markerMsgId ? { ...m, content: resultContent } : m,
+                )
+                messagesRef.current = updated
+                return updated
+              })
+              pendingToolMsgMap.current.delete(raw.tool)
             }
           } else if (raw.type === 'text_chunk') {
             accumulated += raw.content

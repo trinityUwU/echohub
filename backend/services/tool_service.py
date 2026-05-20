@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -81,40 +80,22 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "run_command",
-            "description": "Run a shell command in the workspace directory. Only safe commands allowed.",
+            "name": "edit_file",
+            "description": "Edit a file by replacing a specific string with a new string. Useful for targeted modifications without rewriting the entire file.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string", "description": "Shell command to run"},
-                    "timeout": {
-                        "type": "integer",
-                        "description": "Timeout in seconds, max 30",
-                        "default": 10,
-                    },
+                    "path": {"type": "string", "description": "Relative path from workspace root"},
+                    "old_string": {"type": "string", "description": "The exact string to find and replace"},
+                    "new_string": {"type": "string", "description": "The string to replace it with"},
                 },
-                "required": ["command"],
+                "required": ["path", "old_string", "new_string"],
             },
         },
     },
 ]
 
-# Commands that are never allowed in run_command
-_BLACKLIST_PATTERNS: list[str] = [
-    "rm -rf /",
-    "sudo",
-    "curl",
-    "wget",
-    "nc ",
-    "ncat",
-    " nc\n",
-    ";nc",
-    "&&nc",
-]
-
 _MAX_READ_BYTES = 50 * 1024       # 50 KB
-_MAX_OUTPUT_BYTES = 4 * 1024      # 4 KB
-_MAX_COMMAND_TIMEOUT = 30
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -164,8 +145,8 @@ def execute_tool(name: str, arguments: dict[str, Any], project_id: str) -> str:
             return _list_files(workspace, arguments)
         elif name == "delete_file":
             return _delete_file(workspace, arguments)
-        elif name == "run_command":
-            return _run_command(workspace, arguments)
+        elif name == "edit_file":
+            return _edit_file(workspace, arguments)
         else:
             raise ValueError(f"Unknown tool: {name!r}")
     except (ValueError, FileNotFoundError) as e:
@@ -255,35 +236,23 @@ def _delete_file(workspace: Path, args: dict[str, Any]) -> str:
     return f"Deleted: {path_str}"
 
 
-def _run_command(workspace: Path, args: dict[str, Any]) -> str:
-    command: str = args.get("command", "")
-    timeout: int = min(int(args.get("timeout", 10)), _MAX_COMMAND_TIMEOUT)
-    if not command:
-        raise ValueError("command is required")
-
-    # Blacklist check
-    cmd_lower = command.lower()
-    for pattern in _BLACKLIST_PATTERNS:
-        if pattern in cmd_lower:
-            logger.warning(f"[tool_service] run_command blocked: {command!r} matches pattern {pattern!r}")
-            return f"Error: command blocked by security policy (matched: {pattern!r})"
-
-    logger.info(f"[tool_service] run_command cwd={workspace} cmd={command!r} timeout={timeout}s")
-    try:
-        proc = subprocess.run(
-            command,
-            shell=True,
-            cwd=str(workspace),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        output = proc.stdout + proc.stderr
-        if len(output.encode()) > _MAX_OUTPUT_BYTES:
-            output = output[:_MAX_OUTPUT_BYTES] + f"\n[... output truncated at {_MAX_OUTPUT_BYTES} bytes]"
-        return_info = f"\n[exit code: {proc.returncode}]"
-        return (output or "(no output)") + return_info
-    except subprocess.TimeoutExpired:
-        return f"Error: command timed out after {timeout}s"
-    except Exception as e:
-        return f"Error: {e}"
+def _edit_file(workspace: Path, args: dict[str, Any]) -> str:
+    path_str: str = args.get("path", "")
+    old_string: str = args.get("old_string", "")
+    new_string: str = args.get("new_string", "")
+    if not path_str:
+        raise ValueError("path is required")
+    if not old_string:
+        raise ValueError("old_string is required")
+    target = _safe_path(workspace, path_str)
+    if not target.exists():
+        raise FileNotFoundError(f"File not found: {path_str}")
+    if not target.is_file():
+        raise ValueError(f"Not a file: {path_str}")
+    content = target.read_text(encoding="utf-8")
+    if old_string not in content:
+        raise ValueError(f"old_string not found in {path_str}")
+    updated = content.replace(old_string, new_string, 1)
+    target.write_text(updated, encoding="utf-8")
+    logger.info(f"[tool_service] edit_file {target} (replaced {len(old_string)} chars)")
+    return f"Edited: {path_str} (replaced {len(old_string)} chars)"
