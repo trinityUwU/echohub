@@ -236,26 +236,8 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
           if (controller.signal.aborted) break
           if (!isSseEvent(raw)) continue
 
-          if (raw.type === 'tool_call_pending') {
-            // no-op
-          } else if (raw.type === 'tool_call_streaming') {
-            // First token of a new tool_call block — open the tag in accumulated
-            if (!inToolCallBlock) {
-              accumulated += '\n<tool_call>'
-              inToolCallBlock = true
-            }
-            accumulated += raw.content
-            const snap = accumulated
-            setMessages(prev => {
-              const updated = [...prev]
-              updated[updated.length - 1] = { role: 'assistant', content: snap, id: assistantId }
-              messagesRef.current = updated
-              return updated
-            })
-          } else if (raw.type === 'text_chunk') {
-            accumulated += raw.content
-            const snap = accumulated
-            // Count tokens from full context: all messages + current generation
+          // Helper — update message + token counter after every content change
+          const updateAccumulated = (snap: string): void => {
             const historyChars = messagesRef.current.reduce((sum, m) => {
               const c = typeof m.content === 'string' ? m.content : ''
               return sum + c.length
@@ -267,6 +249,20 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
               messagesRef.current = updated
               return updated
             })
+          }
+
+          if (raw.type === 'tool_call_pending') {
+            // no-op
+          } else if (raw.type === 'tool_call_streaming') {
+            if (!inToolCallBlock) {
+              accumulated += '\n<tool_call>'
+              inToolCallBlock = true
+            }
+            accumulated += raw.content
+            updateAccumulated(accumulated)
+          } else if (raw.type === 'text_chunk') {
+            accumulated += raw.content
+            updateAccumulated(accumulated)
           } else if (raw.type === 'tool_call') {
             // Tool call fully parsed — close the streaming block and update DevPanel
             if (inToolCallBlock) {
