@@ -125,21 +125,25 @@ def load_model(
     # n_gpu_layers: user override > auto detection
     n_gpu = n_gpu_layers_override if n_gpu_layers_override is not None else _n_gpu_layers(gpu_type)
 
-    # MoE safety: -1 (full GPU offload) crashes on 12GB when model experts exceed VRAM.
-    # For MoE without explicit override, compute safe layer count from VRAM.
-    # IQ4_XS ≈ 0.45 bits/param → 35B ≈ ~20GB total; on 12GB ~60% fits → use ~60% of layers.
-    # llama.cpp typically has 94 layers for Qwen3.6-MoE; 56 layers ≈ 10GB.
+    # MoE on 12GB VRAM: key insight from llama.cpp community —
+    # Only 3B active params per token, but ALL expert weights must be in accessible memory.
+    # Strategy confirmed working on RTX 3060 12GB (r/LocalLLaMA):
+    #   - n_gpu_layers=65 (not -1): fits GPU layers without OOM at load time
+    #   - GGML_CUDA_ENABLE_UNIFIED_MEMORY=1: spills expert weights to system RAM transparently
+    #   - split_mode=LAYER (NOT ROW): MoE does not support tensor parallelism
+    #   - n_batch=128: reduces activation memory during inference
+    # IQ4_XS ~18.8GB total, ~10GB on GPU, rest in unified/RAM → works.
     if is_moe and n_gpu == -1 and n_gpu_layers_override is None:
-        try:
-            free_vram_mb = _get_free_vram_mb()
-            if free_vram_mb is not None and free_vram_mb < 10 * 1024:  # less than 10GB free
-                n_gpu = 32
-                cpu_overflow = True  # force cpu_overflow so remaining layers use RAM
-                _log(f"[llama] MoE VRAM guard: n_gpu_layers={n_gpu}, cpu_overflow=True (free VRAM: {free_vram_mb}MB)")
-        except Exception:
-            n_gpu = 32
-            cpu_overflow = True
-            _log("[llama] MoE VRAM guard: n_gpu_layers=32, cpu_overflow=True (VRAM check failed)")
+        free_vram_mb = _get_free_vram_mb() or 0
+        # Scale GPU layers based on available VRAM: ~150MB per layer for MoE
+        safe_layers = max(16, min(65, int(free_vram_mb / 150)))
+        n_gpu = safe_layers
+        _log(f"[llama] MoE VRAM guard: n_gpu_layers={n_gpu} (free VRAM: {free_vram_mb}MB)")
+
+    # Enable CUDA unified memory for MoE — spills expert weights to system RAM automatically
+    if is_moe:
+        import os as _os
+        _os.environ.setdefault("GGML_CUDA_ENABLE_UNIFIED_MEMORY", "1")
 
     n_threads = _detect_n_threads()
 
@@ -163,8 +167,16 @@ def load_model(
         use_mmap=True,
         use_mlock=False,
     )
-    # split_mode=1 (row split) allows overflow to CPU RAM when VRAM is full
-    if cpu_overflow and n_gpu != 0:
+    # split_mode: ROW for dense cpu_overflow, LAYER for MoE (MoE does not support tensor parallelism)
+    if is_moe:
+        try:
+            from llama_cpp import LLAMA_SPLIT_MODE_LAYER
+            llama_kwargs["split_mode"] = LLAMA_SPLIT_MODE_LAYER
+            llama_kwargs["n_batch"] = 128  # reduce activation memory for MoE inference
+            _log("[llama] MoE: split_mode=LAYER, n_batch=128")
+        except ImportError:
+            _log("[llama] MoE: LLAMA_SPLIT_MODE_LAYER not available, using default")
+    elif cpu_overflow and n_gpu != 0:
         try:
             from llama_cpp import LLAMA_SPLIT_MODE_ROW
             llama_kwargs["split_mode"] = LLAMA_SPLIT_MODE_ROW
