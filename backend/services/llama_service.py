@@ -124,6 +124,23 @@ def load_model(
     _reset_log()
     # n_gpu_layers: user override > auto detection
     n_gpu = n_gpu_layers_override if n_gpu_layers_override is not None else _n_gpu_layers(gpu_type)
+
+    # MoE safety: -1 (full GPU offload) crashes on 12GB when model experts exceed VRAM.
+    # For MoE without explicit override, compute safe layer count from VRAM.
+    # IQ4_XS ≈ 0.45 bits/param → 35B ≈ ~20GB total; on 12GB ~60% fits → use ~60% of layers.
+    # llama.cpp typically has 94 layers for Qwen3.6-MoE; 56 layers ≈ 10GB.
+    if is_moe and n_gpu == -1 and n_gpu_layers_override is None:
+        try:
+            free_vram_mb = _get_free_vram_mb()
+            if free_vram_mb is not None and free_vram_mb < 10 * 1024:  # less than 10GB free
+                n_gpu = 32
+                cpu_overflow = True  # force cpu_overflow so remaining layers use RAM
+                _log(f"[llama] MoE VRAM guard: n_gpu_layers={n_gpu}, cpu_overflow=True (free VRAM: {free_vram_mb}MB)")
+        except Exception:
+            n_gpu = 32
+            cpu_overflow = True
+            _log("[llama] MoE VRAM guard: n_gpu_layers=32, cpu_overflow=True (VRAM check failed)")
+
     n_threads = _detect_n_threads()
 
     _log(f"[llama] Loading {model_id}")
@@ -260,6 +277,21 @@ def unload_model() -> None:
 
     # Log VRAM après unload pour vérification
     _log_vram_freed()
+
+
+def _get_free_vram_mb() -> Optional[int]:
+    """Return free VRAM in MB from nvidia-smi, or None if unavailable."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return int(result.stdout.strip().split("\n")[0].strip())
+    except Exception:
+        pass
+    return None
 
 
 def _log_vram_freed() -> None:
