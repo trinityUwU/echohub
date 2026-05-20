@@ -164,7 +164,12 @@ function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRe
           <div className={`rounded-md px-3.5 py-2.5 text-md leading-relaxed border ${
             isUser ? 'bg-accent-dim border-accent/20' : 'bg-elevated border-border'
           } text-text-primary`}>
-            {visibleText ? <MarkdownContent content={visibleText} /> : <span className="text-text-muted animate-pulse">…</span>}
+            {visibleText
+              ? <MarkdownContent content={visibleText} />
+              : !isUser && streaming && isLast
+                ? <img src="/claude_math.gif" alt="" className="w-14 h-14 object-contain opacity-90" />
+                : <span className="text-text-muted animate-pulse">…</span>
+            }
           </div>
         )}
 

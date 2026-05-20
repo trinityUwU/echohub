@@ -430,14 +430,26 @@ async def generate_with_tools(
     loop = asyncio.get_event_loop()
 
     def _sync() -> dict:
-        return _llm.create_chat_completion(
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=False,
-        )
+        has_user = any(m.get("role") == "user" for m in messages)
+        if not has_user:
+            raise ValueError("No user message in conversation")
+        try:
+            return _llm.create_chat_completion(
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=False,
+            )
+        except Exception as tools_err:
+            logger.warning(f"[llama] tools call failed ({tools_err}), falling back to plain generate")
+            return _llm.create_chat_completion(
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=False,
+            )
 
     try:
         result = await loop.run_in_executor(None, _sync)
