@@ -74,7 +74,6 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
   const [genStats, setGenStats] = useState<GenerationStats | null>(null)
   const [usedTokens, setUsedTokens] = useState(0)
 
-  // Poll workspace files every 2s for real-time panel updates
   useEffect(() => {
     let alive = true
     const poll = async (): Promise<void> => {
@@ -87,16 +86,11 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     const id = setInterval(poll, 2000)
     return () => { alive = false; clearInterval(id) }
   }, [projectId])
-  const optionsRef = useRef(options)
 
-  // Keep options ref fresh so send() always reads current values
+  const optionsRef = useRef(options)
   useEffect(() => { optionsRef.current = options }, [options])
 
-  // Maps tool name → local ToolCall id so we can update status on tool_result
-  // Maps tool name → marker message id (for inline chat display)
   const messagesRef = useRef<ChatMessage[]>([])
-  const pendingToolMap = useRef<Map<string, string>>(new Map())
-  const pendingToolMsgMap = useRef<Map<string, string>>(new Map())
   const abortRef = useRef<AbortController | null>(null)
 
   const stop = useCallback((): void => {
@@ -112,8 +106,6 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     setWorkspaceFiles([])
     setGenStats(null)
     setUsedTokens(0)
-    pendingToolMap.current.clear()
-    pendingToolMsgMap.current.clear()
   }, [])
 
   const loadHistory = useCallback((msgs: Array<{ role: string; content: string }>): void => {
@@ -128,39 +120,31 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     setWorkspaceFiles([])
     setGenStats(null)
     setUsedTokens(0)
-    pendingToolMap.current.clear()
-    pendingToolMsgMap.current.clear()
   }, [])
 
   const send = useCallback((text: string, systemPrompt?: string): void => {
     setStreaming(true)
+    setGenStats(null)
 
     const userMsg: ChatMessage = { role: 'user', content: text, id: crypto.randomUUID() }
 
-    // Build the messages to send synchronously using the ref (not state, which is async)
     const historyToSend = [
       ...messagesRef.current.filter(m => {
         const c = typeof m.content === 'string' ? m.content : ''
-        if (c.trim().length === 0) return false
-        // Exclude inline tool-call marker messages — backend must not see them
-        if (c.startsWith('[tool:')) return false
-        return true
+        return c.trim().length > 0
       }),
       userMsg,
     ]
 
-    // Persist user message
     const { conversationId, onSaveMessage } = optionsRef.current
     if (conversationId && onSaveMessage) {
       void onSaveMessage(conversationId, 'user', text)
     }
 
-    // Update state + ref
     const withUser = [...messagesRef.current, userMsg]
     messagesRef.current = withUser
     setMessages(withUser)
 
-    // Seed the assistant placeholder
     const assistantId = crypto.randomUUID()
     const withPlaceholder = [...withUser, { role: 'assistant' as const, content: '', id: assistantId }]
     messagesRef.current = withPlaceholder
@@ -168,7 +152,10 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
 
     const controller = new AbortController()
     abortRef.current = controller
+    // accumulated tracks the full text for the current assistant turn (including tool_call tags)
     let accumulated = ''
+    // pendingToolName tracks which tool is currently executing so we can inject tool_result inline
+    let pendingToolName = ''
 
     const req = {
       messages: historyToSend.map(m => ({
@@ -186,65 +173,33 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
           if (!isSseEvent(raw)) continue
 
           if (raw.type === 'tool_call_pending') {
-            // Backend is parsing a tool call — show GIF to keep UI alive
-            setMessages(prev => {
-              const updated = [...prev]
-              const last = updated[updated.length - 1]
-              if (last && last.role === 'assistant' && last.content === '') {
-                updated[updated.length - 1] = { ...last, content: '' } // force re-render with GIF
-                messagesRef.current = updated
-              }
-              return updated
-            })
-          } else if (raw.type === 'tool_call') {
-            const tcId = crypto.randomUUID()
-            const tc: ToolCall = {
-              id: tcId,
-              tool: raw.tool,
-              args: raw.args,
-              status: 'running',
-            }
-            pendingToolMap.current.set(raw.tool, tcId)
-            setToolCalls(prev => [...prev, tc])
-
-            // Insert inline marker message before the assistant placeholder
-            const markerMsgId = crypto.randomUUID()
-            const markerContent = `[tool:${raw.tool}]${JSON.stringify(raw.args)}`
-            const markerMsg: ChatMessage = { role: 'assistant', content: markerContent, id: markerMsgId }
-            pendingToolMsgMap.current.set(raw.tool, markerMsgId)
-            setMessages(prev => {
-              // Insert before last element (the assistant placeholder)
-              const updated = [...prev.slice(0, -1), markerMsg, prev[prev.length - 1]]
-              messagesRef.current = updated
-              return updated
-            })
-          } else if (raw.type === 'tool_result') {
-            const tcId = pendingToolMap.current.get(raw.tool)
-            if (tcId) {
-              setToolCalls(prev =>
-                prev.map(tc =>
-                  tc.id === tcId ? { ...tc, result: raw.result, status: 'done' } : tc,
-                ),
-              )
-              pendingToolMap.current.delete(raw.tool)
-            }
-            // Update inline marker message with result
-            const markerMsgId = pendingToolMsgMap.current.get(raw.tool)
-            if (markerMsgId) {
-              const resultContent = `[tool:${raw.tool}]${JSON.stringify(raw.result)}`
-              setMessages(prev => {
-                const updated = prev.map(m =>
-                  m.id === markerMsgId ? { ...m, content: resultContent } : m,
-                )
-                messagesRef.current = updated
-                return updated
-              })
-              pendingToolMsgMap.current.delete(raw.tool)
-            }
+            // No-op — text is already streaming live
           } else if (raw.type === 'text_chunk') {
             accumulated += raw.content
             const snap = accumulated
             setUsedTokens(Math.round(snap.length / 4))
+            setMessages(prev => {
+              const updated = [...prev]
+              updated[updated.length - 1] = { role: 'assistant', content: snap, id: assistantId }
+              messagesRef.current = updated
+              return updated
+            })
+          } else if (raw.type === 'tool_call') {
+            // Update DevPanel sidebar
+            const tcId = crypto.randomUUID()
+            const tc: ToolCall = { id: tcId, tool: raw.tool, args: raw.args, status: 'running' }
+            pendingToolName = raw.tool
+            setToolCalls(prev => [...prev, tc])
+          } else if (raw.type === 'tool_result') {
+            // Update DevPanel sidebar status
+            setToolCalls(prev =>
+              prev.map(tc => tc.tool === raw.tool ? { ...tc, result: raw.result, status: 'done' } : tc)
+            )
+            // Inject result inline into the accumulated text so MessageContent can render it
+            const resultTag = `\n<tool_result tool="${raw.tool}">${raw.result}</tool_result>\n`
+            accumulated += resultTag
+            pendingToolName = ''
+            const snap = accumulated
             setMessages(prev => {
               const updated = [...prev]
               updated[updated.length - 1] = { role: 'assistant', content: snap, id: assistantId }
@@ -265,7 +220,6 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
                 modelName: raw.model_name ?? null,
               })
             }
-            // Persist completed assistant message
             const { conversationId: cid, onSaveMessage: onSave } = optionsRef.current
             if (cid && onSave && accumulated) {
               void onSave(cid, 'assistant', accumulated)
@@ -273,11 +227,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
           } else if (raw.type === 'error') {
             setMessages(prev => {
               const updated = [...prev]
-              updated[updated.length - 1] = {
-                role: 'assistant',
-                content: `Error: ${raw.error}`,
-                id: assistantId,
-              }
+              updated[updated.length - 1] = { role: 'assistant', content: `Error: ${raw.error}`, id: assistantId }
               messagesRef.current = updated
               return updated
             })
@@ -292,28 +242,23 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
         const errMsg = e instanceof Error ? e.message : String(e)
         setMessages(prev => {
           const updated = [...prev]
-          updated[updated.length - 1] = {
-            role: 'assistant',
-            content: `Error: ${errMsg}`,
-            id: assistantId,
-          }
+          updated[updated.length - 1] = { role: 'assistant', content: `Error: ${errMsg}`, id: assistantId }
           return updated
         })
         setStreaming(false)
       } finally {
         abortRef.current = null
+        // suppress unused var warning
+        void pendingToolName
       }
     })()
   }, [projectId])
 
   const clearAndResend = useCallback((history: ChatMessage[], newText: string, systemPrompt?: string): void => {
-    // Reset state to only the provided history, then send newText
     abortRef.current?.abort()
     messagesRef.current = history
     setMessages(history)
     setToolCalls([])
-    pendingToolMap.current.clear()
-    pendingToolMsgMap.current.clear()
     send(newText, systemPrompt)
   }, [send])
 

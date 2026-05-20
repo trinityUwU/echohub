@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, memo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ChatMessage, GenerationStats, LoadConfig } from '@/types'
 import { MarkdownContent } from './MarkdownContent'
-import { ThinkingBlock } from './ThinkingBlock'
+import { MessageContent } from '@/components/MessageContent'
 import { PairEditor } from '@/components/finetune/PairEditor'
 
 interface MessageRowProps {
@@ -20,122 +20,10 @@ interface MessageRowProps {
   onReload?: (config: LoadConfig) => void
 }
 
-// ── Tool call marker detection ────────────────────────────────────────────────
-
-const TOOL_MARKER_RE = /^\[tool:([^\]]+)\](.*)$/s
-
-interface ParsedToolMarker {
-  tool: string
-  payload: string
-}
-
-function parseToolMarker(content: string): ParsedToolMarker | null {
-  const m = content.match(TOOL_MARKER_RE)
-  if (!m) return null
-  return { tool: m[1], payload: m[2] }
-}
-
-function ToolCallRow({ tool, payload }: ParsedToolMarker): React.ReactElement {
-  const [open, setOpen] = React.useState(true)
-
-  // Marker format:
-  //   pending/call:  [tool:name]{"key":"val",...}   → payload is JSON object → args shown
-  //   result:        [tool:name]"File created: x"   → payload is JSON string → result shown
-  let args: string | null = null
-  let result: string | null = null
-  let isDone = false
-
-  try {
-    const parsed = JSON.parse(payload)
-    if (typeof parsed === 'object' && parsed !== null) {
-      args = JSON.stringify(parsed, null, 2)
-    } else {
-      result = String(parsed)
-      isDone = true
-      // Also try to recover original args from raw payload for display
-      // (not available here — just show result)
-    }
-  } catch {
-    // Not JSON — treat as plain result string
-    if (payload) { result = payload; isDone = true }
-  }
-
-  // When done, use the raw result as body content too so expanding shows something useful
-  const bodyContent = args ?? (isDone ? result : null)
-
-  const statusColor = isDone ? 'text-green-400 border-green-500/20 bg-green-500/5' : 'text-yellow-400 border-yellow-500/20 bg-yellow-500/5'
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.15 }}
-      className="px-5 py-1"
-    >
-      <div className={`rounded-md border overflow-hidden ${statusColor}`}>
-        {/* Header — clickable to toggle */}
-        <button
-          onClick={() => setOpen(v => !v)}
-          className="w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-white/[0.03] transition-colors text-left"
-        >
-          {isDone ? (
-            <svg className="w-3 h-3 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="20 6 9 17 4 12"/>
-            </svg>
-          ) : (
-            <motion.svg
-              className="w-3 h-3 flex-shrink-0"
-              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-              animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
-            >
-              <path d="M21 12a9 9 0 1 1-6.22-8.56"/>
-            </motion.svg>
-          )}
-          <span className="text-2xs font-mono font-medium">{tool}</span>
-          {isDone && result && (
-            <span className="text-2xs text-text-muted/60 truncate max-w-[200px] ml-1">{result}</span>
-          )}
-          <motion.svg
-            className="w-3 h-3 ml-auto flex-shrink-0 opacity-50"
-            viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-            animate={{ rotate: open ? 90 : 0 }} transition={{ duration: 0.15 }}
-          >
-            <polyline points="9 18 15 12 9 6"/>
-          </motion.svg>
-        </button>
-
-        {/* Body — collapsible */}
-        <AnimatePresence initial={false}>
-          {open && bodyContent && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="overflow-hidden border-t border-current/10"
-            >
-              <pre className="text-2xs font-mono leading-relaxed px-3 py-2 text-current/60 overflow-x-auto max-h-48 whitespace-pre-wrap break-all">
-                {bodyContent}
-              </pre>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </motion.div>
-  )
-}
-
 // ── MessageRow ────────────────────────────────────────────────────────────────
 
 function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRegenerate, onEditUser, promptForPair, sourceConvId, sourceMsgId, loadedModelId, onReload }: MessageRowProps): React.ReactElement {
   const isUser = message.role === 'user'
-
-  // Detect tool call marker — render as compact badge, not a full message bubble
-  const rawContent = typeof message.content === 'string' ? message.content : ''
-  const toolMarker = !isUser ? parseToolMarker(rawContent) : null
-  if (toolMarker) {
-    return <ToolCallRow tool={toolMarker.tool} payload={toolMarker.payload} />
-  }
   const [copied, setCopied] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState('')
@@ -150,27 +38,12 @@ function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRe
     ? message.content.filter(p => p.type === 'image_url').map(p => (p as { type: 'image_url'; image_url: { url: string } }).image_url.url)
     : []
 
-  // Match <think>...</think> anywhere in text (model sometimes emits preamble before <think>)
-  const thinkMatch = text.match(/^([\s\S]*?)<think>([\s\S]*?)<\/think>([\s\S]*)$/s)
-  // <think> open without closing — still streaming
-  const thinkOpen = !thinkMatch && text.includes('<think>') && !text.includes('</think>')
-  // </think> present but no <think> — opening tag was dropped by throttle, treat whole prefix as thinking
-  const thinkOrphanClose = !thinkMatch && !thinkOpen && text.includes('</think>')
-  const visibleText = thinkMatch
-    ? (thinkMatch[1] + thinkMatch[3]).trim()
-    : thinkOpen
-      ? ''
-      : thinkOrphanClose
-        ? text.slice(text.indexOf('</think>') + 8).trim()
-        : text
-  const thinkContent = thinkMatch
-    ? thinkMatch[2]
-    : thinkOpen
-      ? text.slice(text.indexOf('<think>') + 7)
-      : thinkOrphanClose
-        ? text.slice(0, text.indexOf('</think>'))
-        : ''
-  const hasThink = thinkMatch !== null || thinkOpen || thinkOrphanClose
+  // For copy action — strip tags to get plain visible text
+  const visibleText = text
+    .replace(/<think>[\s\S]*?<\/think>/g, '')
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+    .replace(/<tool_result[^>]*>[\s\S]*?<\/tool_result>/g, '')
+    .trim()
 
   const copy = (): void => {
     navigator.clipboard.writeText(visibleText).then(() => {
@@ -242,10 +115,6 @@ function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRe
             </motion.div>
           )}
         </AnimatePresence>
-        {hasThink && !isUser && (
-          <ThinkingBlock content={thinkContent} streaming={thinkOpen} />
-        )}
-
         {editing ? (
           <div className="flex flex-col gap-2 w-full">
             <textarea
@@ -274,14 +143,16 @@ function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRe
               </button>
             </div>
           </div>
+        ) : isUser ? (
+          <div className="rounded-md px-3.5 py-2.5 text-md leading-relaxed border bg-accent-dim border-accent/20 text-text-primary">
+            <MarkdownContent content={text} />
+          </div>
         ) : (
-          <div className={`rounded-md px-3.5 py-2.5 text-md leading-relaxed border ${
-            isUser ? 'bg-accent-dim border-accent/20' : 'bg-elevated border-border'
-          } text-text-primary`}>
-            {visibleText
-              ? <MarkdownContent content={visibleText} />
-              : !isUser && streaming && isLast
-                ? <img src="/claude_math.gif" alt="" className="w-14 h-14 object-contain opacity-90" />
+          <div className="rounded-md px-3.5 py-2.5 text-md leading-relaxed border bg-elevated border-border text-text-primary">
+            {text
+              ? <MessageContent content={text} streaming={streaming && isLast} />
+              : streaming && isLast
+                ? <span className="inline-block w-1.5 h-4 bg-text-muted/60 animate-pulse rounded-sm" />
                 : <span className="text-text-muted animate-pulse">…</span>
             }
           </div>

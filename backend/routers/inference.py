@@ -396,8 +396,8 @@ async def tool_chat(req: ToolChatRequest):
             return
 
         _TC_RE = _re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", _re.DOTALL)
-        total_tool_calls = 0  # hard cap across all iterations
-        _total_text_len = 0  # track total output chars across all iterations
+        total_tool_calls = 0
+        _total_text_len = 0
 
         for iteration in range(MAX_ITERATIONS):
             response_dict: dict | None = None
@@ -416,6 +416,9 @@ async def tool_chat(req: ToolChatRequest):
                             if _first_token_time is None:
                                 _first_token_time = _time.perf_counter()
                             accumulated_text_buf += content
+                            # Stream every chunk immediately — frontend parses inline
+                            chunk_evt = _json.dumps({"type": "text_chunk", "content": content})
+                            yield f"data: {chunk_evt}\n\n"
                     elif event_type == "response":
                         response_dict = event
                     elif event_type == "error":
@@ -428,18 +431,15 @@ async def tool_chat(req: ToolChatRequest):
                 yield f"data: {_json.dumps({'type': 'error', 'error': str(e)})}\n\n"
                 return
 
-            if response_dict is None and "<tool_call>" not in accumulated_text_buf:
-                # Plain text, no tool calls — emit and done
-                if accumulated_text_buf:
-                    _total_text_len += len(accumulated_text_buf)
-                    yield f"data: {_json.dumps({'type': 'text_chunk', 'content': accumulated_text_buf})}\n\n"
-                break
+            _total_text_len += len(accumulated_text_buf)
 
-            choice = response_dict.get("choices", [{}])[0] if response_dict else {}
-            message = choice.get("message", {})
-            tool_calls = message.get("tool_calls")
+            # Determine tool_calls from structured response or text fallback
+            tool_calls = None
+            if response_dict:
+                choice = response_dict.get("choices", [{}])[0]
+                message = choice.get("message", {})
+                tool_calls = message.get("tool_calls") or None
 
-            # Fallback: model emitted tool call as text (e.g. <tool_call>{...}</tool_call>)
             if not tool_calls and "<tool_call>" in accumulated_text_buf:
                 tc_matches = _TC_RE.findall(accumulated_text_buf)
                 if tc_matches:
@@ -458,70 +458,61 @@ async def tool_chat(req: ToolChatRequest):
                             })
                         except _json.JSONDecodeError:
                             logger.warning(f"[tool-chat] failed to parse text tool_call: {tc_json[:100]}")
-                    # Strip <tool_call> blocks from text before injecting into history
                     clean_text = _TC_RE.sub("", accumulated_text_buf).strip()
                     messages.append({"role": "assistant", "content": clean_text or ""})
-                    # Emit visible text (without the raw <tool_call> blocks)
-                    if clean_text:
-                        yield f"data: {_json.dumps({'type': 'text_chunk', 'content': clean_text})}\n\n"
+                else:
+                    tool_calls = None
 
-            if tool_calls:
-                # Append assistant message with tool_calls for context continuity
+            if not tool_calls:
+                # Pure text response — already streamed live, just need history entry
+                messages.append({"role": "assistant", "content": accumulated_text_buf})
+                break
+
+            # Has tool calls — emit them and execute
+            if response_dict:
+                msg_obj = response_dict.get("choices", [{}])[0].get("message", {})
                 messages.append({
                     "role": "assistant",
-                    "content": message.get("content") or "",
+                    "content": msg_obj.get("content") or "",
                     "tool_calls": tool_calls,
                 })
 
-                for tc in tool_calls:
-                    total_tool_calls += 1
-                    if total_tool_calls > MAX_ITERATIONS:
-                        logger.warning(f"[tool-chat] hard tool call cap reached ({total_tool_calls})")
-                        _cap_msg = _json.dumps({'type': 'text_chunk', 'content': '\n\n[Max tool calls reached.]'})
-                        yield f"data: {_cap_msg}\n\n"
-                        break
+            for tc in tool_calls:
+                total_tool_calls += 1
+                if total_tool_calls > MAX_ITERATIONS:
+                    logger.warning(f"[tool-chat] hard tool call cap reached ({total_tool_calls})")
+                    _cap_msg = _json.dumps({"type": "text_chunk", "content": "\n\n[Max tool calls reached.]"})
+                    yield f"data: {_cap_msg}\n\n"
+                    break
 
-                    tc_id: str = tc.get("id", f"call_{iteration}")
-                    func = tc.get("function", {})
-                    tool_name: str = func.get("name", "")
-                    raw_args: str = func.get("arguments", "{}")
+                tc_id: str = tc.get("id", f"call_{iteration}")
+                func = tc.get("function", {})
+                tool_name: str = func.get("name", "")
+                raw_args: str = func.get("arguments", "{}")
 
-                    try:
-                        tool_args: dict = _json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                    except _json.JSONDecodeError:
-                        tool_args = {}
+                try:
+                    tool_args: dict = _json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                except _json.JSONDecodeError:
+                    tool_args = {}
 
-                    # Notify client of the tool call
-                    yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
+                yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
 
-                    # Execute
-                    tool_result: str = execute_tool(tool_name, tool_args, req.project_id)
+                tool_result: str = execute_tool(tool_name, tool_args, req.project_id)
 
-                    # Notify client of the result
-                    yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
+                yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
 
-                    # Inject tool result back into messages
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc_id,
-                        "content": tool_result,
-                    })
-                else:
-                    # Continue loop — model may want to call more tools
-                    continue
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": tool_result,
+                })
+            else:
+                continue
 
-                # Broke out of for loop (hard cap hit)
-                break
-
-            # No tool_calls — emit buffered text if not already emitted via fallback path
-            if accumulated_text_buf and not ("<tool_call>" in accumulated_text_buf):
-                _total_text_len += len(accumulated_text_buf)
-                yield f"data: {_json.dumps({'type': 'text_chunk', 'content': accumulated_text_buf})}\n\n"
-            break  # done
+            break
 
         else:
-            # Hit max iterations
-            _cap_msg2 = _json.dumps({'type': 'text_chunk', 'content': '\n\n[Max tool calls reached.]'})
+            _cap_msg2 = _json.dumps({"type": "text_chunk", "content": "\n\n[Max tool calls reached.]"})
             yield f"data: {_cap_msg2}\n\n"
 
         # Always emit done with workspace file list — even after errors/loops
