@@ -387,7 +387,12 @@ function CommunitySkillCard({ skill, onDelete, onRefresh }: { skill: CommunitySk
       setAwareness(result.suggested_awareness)
       setEditing(true)
     } catch (e) {
-      setAnalyzeError(e instanceof Error ? e.message : 'Analysis failed')
+      const msg = e instanceof Error ? e.message : 'Analysis failed'
+      if (msg.includes('503') || msg.includes('No model loaded')) {
+        setAnalyzeError('No model loaded — load a model from the Chat page first, then retry.')
+      } else {
+        setAnalyzeError(msg)
+      }
     }
     setAnalyzing(false)
   }
@@ -443,7 +448,12 @@ function CommunitySkillCard({ skill, onDelete, onRefresh }: { skill: CommunitySk
                   }
                   {skill.awareness && <DetailRow label="Awareness" value={skill.awareness} />}
                   {analyzeError && (
-                    <p className="text-xs text-red">{analyzeError}</p>
+                    <div className="flex items-start gap-2 px-3 py-2.5 bg-elevated border border-border rounded-md">
+                      <svg className="w-3.5 h-3.5 text-text-muted flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                      </svg>
+                      <p className="text-xs text-text-secondary leading-relaxed">{analyzeError}</p>
+                    </div>
                   )}
                   <div className="flex gap-2 flex-wrap">
                     <button
