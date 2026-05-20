@@ -135,18 +135,20 @@ export function ChatPage({
 
   return (
     <div className="flex flex-1 overflow-hidden">
-      <ConvSidebar
-        conversations={conversations}
-        archivedConversations={archivedConversations}
-        activeId={activeId}
-        onSelect={onSelectConversation}
-        onNew={onNewConversation}
-        onDelete={onDeleteConversation}
-        onArchive={onArchiveConversation}
-        onUnarchive={onUnarchiveConversation}
-        onRename={onRenameConversation}
-        gpu={gpu}
-      />
+      {view === 'chat' && (
+        <ConvSidebar
+          conversations={conversations}
+          archivedConversations={archivedConversations}
+          activeId={activeId}
+          onSelect={onSelectConversation}
+          onNew={onNewConversation}
+          onDelete={onDeleteConversation}
+          onArchive={onArchiveConversation}
+          onUnarchive={onUnarchiveConversation}
+          onRename={onRenameConversation}
+          gpu={gpu}
+        />
+      )}
       <div className="flex flex-col flex-1 overflow-hidden">
         <ChatTopBar
           loadedModel={loadedModel}
@@ -192,7 +194,7 @@ export function ChatPage({
           onLoadModel={onLoadModel}
         />
       </div>
-      <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />
+      {view === 'chat' && <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />}
     </div>
   )
 }
