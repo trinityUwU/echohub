@@ -19,6 +19,7 @@ import { useChatMode } from '@/hooks/useChatMode'
 import { useProjects } from '@/hooks/useProjects'
 import { clearMessages, deleteMessage } from '@/api/client'
 import { useContextMenu } from '@/components/shared/useContextMenu'
+import { useAlert } from '@/components/shared/useAlert'
 
 interface ChatPageProps {
   loadedModel: ModelInfo | null
@@ -64,6 +65,7 @@ export function ChatPage({
   const projectsHook = useProjects()
   const profilesHook = useProfiles() // chat-scoped only — project workspace has its own
   const skillsHook = useSkills()
+  const alertHook = useAlert()
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [rightCollapsed, setRightCollapsed] = useState(false)
   const [showLogs, setShowLogs] = useState(false)
@@ -138,14 +140,14 @@ export function ChatPage({
     if (cmd.id === 'clear') { handleClear(); return }
     if (cmd.id === 'tokens') {
       const max = loadedModel?.max_context_window ?? 0
-      alert(`Tokens: ${usedTokens} / ${max} (${max ? Math.round(usedTokens / max * 100) : 0}%)`)
+      alertHook.show('Token usage', `${usedTokens.toLocaleString()} / ${max.toLocaleString()} (${max ? Math.round(usedTokens / max * 100) : 0}%)`)
       return
     }
     if (cmd.id === 'model') {
-      alert(loadedModel ? `${loadedModel.name} — ${loadedModel.engine ?? 'llama'}` : 'No model loaded')
+      alertHook.show('Loaded model', loadedModel ? `${loadedModel.name} — ${loadedModel.engine ?? 'llama'}` : 'No model loaded')
       return
     }
-  }, [handleClear, usedTokens, loadedModel])
+  }, [handleClear, usedTokens, loadedModel, alertHook])
 
   const handleRegenerate = (): void => {
     const lastAssistant = [...messages].reverse().findIndex(m => m.role === 'assistant')
@@ -255,6 +257,7 @@ export function ChatPage({
   // Chat workspace
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
+      {alertHook.element}
       <ChatTopBar
         loadedModel={loadedModel}
         loading={loading}
@@ -569,6 +572,7 @@ function ProjectWorkspace({
   })
 
   const projectSkillsHook = useSkills()
+  const projectAlertHook = useAlert()
   const isDevMode = project.mode === 'dev'
 
   // Load history when active conversation changes
@@ -655,11 +659,11 @@ function ProjectWorkspace({
     if (cmd.id === 'tokens') {
       const used = usedTokens
       const max = loadedModel?.max_context_window ?? 0
-      alert(`Tokens: ${used} / ${max} (${max ? Math.round(used / max * 100) : 0}%)`)
+      projectAlertHook.show('Token usage', `${used.toLocaleString()} / ${max.toLocaleString()} (${max ? Math.round(used / max * 100) : 0}%)`)
       return
     }
     if (cmd.id === 'model') {
-      alert(loadedModel ? `${loadedModel.name} — ${loadedModel.engine ?? 'llama'}` : 'No model loaded')
+      projectAlertHook.show('Loaded model', loadedModel ? `${loadedModel.name} — ${loadedModel.engine ?? 'llama'}` : 'No model loaded')
       return
     }
     if (cmd.id === 'limit' && isDevMode) {
@@ -675,6 +679,7 @@ function ProjectWorkspace({
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
+      {projectAlertHook.element}
       <ChatTopBar
         loadedModel={loadedModel}
         loading={loading}
