@@ -74,7 +74,12 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([])
   const [streaming, setStreaming] = useState(false)
   const [genStats, setGenStats] = useState<GenerationStats | null>(null)
-  const [usedTokens, setUsedTokens] = useState(0)
+  const [usedTokens, _setUsedTokensState] = useState(0)
+  const usedTokensRef = useRef(0)
+  const _setUsedTokens = useCallback((n: number) => {
+    usedTokensRef.current = n
+    _setUsedTokensState(n)
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -107,7 +112,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     setToolCalls([])
     setWorkspaceFiles([])
     setGenStats(null)
-    setUsedTokens(0)
+    _setUsedTokens(0)
   }, [])
 
   const loadHistory = useCallback((msgs: Array<{ role: string; content: string }>): void => {
@@ -121,7 +126,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     setToolCalls([])
     setWorkspaceFiles([])
     setGenStats(null)
-    setUsedTokens(0)
+    _setUsedTokens(0)
   }, [])
 
   // compactedSummaryRef: holds the current summary for injection into historyToSend.
@@ -154,7 +159,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
       // Update token estimate to reflect compacted context size
       const summaryTokens = Math.round(summary.length / 4)
       const recentTokens = human.slice(-4).reduce((s, m) => s + (typeof m.content === 'string' ? m.content.length : 0), 0)
-      setUsedTokens(Math.round(summaryTokens + recentTokens / 4))
+      _setUsedTokens(Math.round(summaryTokens + recentTokens / 4))
     } catch {
       // Remove marker on failure — silently continue
       setMessages(prev => prev.filter(m => m.id !== markerId))
@@ -163,11 +168,11 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
 
   const send = useCallback(async (text: string, systemPrompt?: string): Promise<void> => {
     // Auto-compact at 98% of context window before sending
+    // Use usedTokensRef (synced with the displayed token counter) as the source of truth
     const { maxContextTokens } = optionsRef.current
     if (maxContextTokens) {
-      const currentChars = messagesRef.current.reduce((s, m) => s + (typeof m.content === 'string' ? m.content.length : 0), 0)
-      const estimated = Math.round((currentChars + text.length) / 4)
-      if (estimated >= maxContextTokens * 0.98) {
+      const currentTokens = usedTokensRef.current + Math.round(text.length / 4)
+      if (currentTokens >= maxContextTokens * 0.98) {
         await compact()
       }
     }
@@ -203,7 +208,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     messagesRef.current = withUser
     setMessages(withUser)
     const sendChars = withUser.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0)
-    setUsedTokens(Math.round(sendChars / 4))
+    _setUsedTokens(Math.round(sendChars / 4))
 
     const assistantId = crypto.randomUUID()
     const withPlaceholder = [...withUser, { role: 'assistant' as const, content: '', id: assistantId }]
@@ -255,7 +260,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
               const c = typeof m.content === 'string' ? m.content : ''
               return sum + c.length
             }, 0)
-            setUsedTokens(Math.round((historyChars + snap.length) / 4))
+            _setUsedTokens(Math.round((historyChars + snap.length) / 4))
             setMessages(prev => {
               const updated = [...prev]
               updated[updated.length - 1] = { role: 'assistant', content: snap, id: assistantId }
@@ -296,7 +301,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
               const c = typeof m.content === 'string' ? m.content : ''
               return sum + c.length
             }, 0)
-            setUsedTokens(Math.round(finalChars / 4))
+            _setUsedTokens(Math.round(finalChars / 4))
             if (raw.tokens_generated != null) {
               setGenStats({
                 tokensGenerated: raw.tokens_generated,
