@@ -533,14 +533,18 @@ function ProjectWorkspace({
 
   const handleRegenerate = (): void => {
     if (!loadedModel) return
-    // Find last assistant message, re-send everything before it
     const lastIdx = [...messages].reverse().findIndex(m => m.role === 'assistant')
     if (lastIdx === -1) return
     const history = messages.slice(0, messages.length - 1 - lastIdx)
     if (isDevMode) {
-      // Re-send from last user message text
-      const lastUser = [...history].reverse().find(m => m.role === 'user')
-      if (lastUser) toolChatHook.send(typeof lastUser.content === 'string' ? lastUser.content : '', params.systemPrompt || undefined)
+      const lastUser = [...history].reverse().find(m => m.role === 'user' && !String(m.content).startsWith('[tool:'))
+      if (!lastUser) return
+      // Clear state and resend only the user messages up to this point
+      toolChatHook.clearAndResend(
+        history.filter(m => m.role === 'user' && !String(m.content).startsWith('[tool:')),
+        typeof lastUser.content === 'string' ? lastUser.content : '',
+        params.systemPrompt || undefined,
+      )
     } else {
       chatHook.sendFromHistory(history)
     }
@@ -548,12 +552,13 @@ function ProjectWorkspace({
 
   const handleEditUser = (index: number, newText: string): void => {
     if (!loadedModel) return
-    const updated = { ...messages[index], content: newText }
-    const history = [...messages.slice(0, index), updated]
     if (isDevMode) {
-      toolChatHook.send(newText, params.systemPrompt || undefined)
+      // Keep only user messages before this index, then resend with new text
+      const prevUserMessages = messages.slice(0, index).filter(m => m.role === 'user' && !String(m.content).startsWith('[tool:'))
+      toolChatHook.clearAndResend(prevUserMessages, newText, params.systemPrompt || undefined)
     } else {
-      chatHook.sendFromHistory(history)
+      const updated = { ...messages[index], content: newText }
+      chatHook.sendFromHistory([...messages.slice(0, index), updated])
     }
   }
 

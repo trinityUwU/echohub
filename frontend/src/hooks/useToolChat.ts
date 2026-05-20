@@ -48,6 +48,7 @@ export interface UseToolChatReturn {
   stop: () => void
   clear: () => void
   loadHistory: (msgs: Array<{ role: string; content: string }>) => void
+  clearAndResend: (history: ChatMessage[], newText: string, systemPrompt?: string) => void
 }
 
 interface UseToolChatOptions {
@@ -252,5 +253,16 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     })()
   }, [projectId])
 
-  return { messages, toolCalls, workspaceFiles, streaming, send, stop, clear, loadHistory }
+  const clearAndResend = useCallback((history: ChatMessage[], newText: string, systemPrompt?: string): void => {
+    // Reset state to only the provided history, then send newText
+    abortRef.current?.abort()
+    messagesRef.current = history
+    setMessages(history)
+    setToolCalls([])
+    pendingToolMap.current.clear()
+    pendingToolMsgMap.current.clear()
+    send(newText, systemPrompt)
+  }, [send])
+
+  return { messages, toolCalls, workspaceFiles, streaming, send, stop, clear, loadHistory, clearAndResend }
 }
