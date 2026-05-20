@@ -127,6 +127,19 @@ async def start_mcp_server(skill_id: str) -> dict[str, Any]:
             detail="No start_command configured. Run detect-mcp or configure-mcp first.",
         )
 
+    # Ensure DB row exists — upsert from registry before calling mcp_manager.start()
+    try:
+        from backend.services.db import upsert_mcp_server, get_mcp_server
+        if not get_mcp_server(skill_id):
+            port_hint = int(entry.get("mcp_port_hint") or 3000)
+            upsert_mcp_server(
+                skill_id=skill_id,
+                port=port_hint,
+                start_command=entry["mcp_start_command"],
+            )
+    except Exception as e:
+        logger.warning(f"[mcp] DB upsert failed for {skill_id}: {e}")
+
     try:
         result = await mcp_manager.start(skill_id)
         logger.info(f"[mcp] started {skill_id}: {result}")
