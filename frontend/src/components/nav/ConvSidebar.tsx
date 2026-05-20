@@ -197,7 +197,7 @@ function GpuSection({ gpu }: { gpu: GpuStats }): React.ReactElement {
   const shortName = gpu.name.replace('NVIDIA GeForce ', '').replace('AMD Radeon ', '').replace('Apple ', '')
 
   return (
-    <div className="border-t border-border">
+    <div className="border-t border-border mt-auto">
       <button onClick={() => setOpen(v => !v)}
         className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-overlay transition-colors cursor-pointer">
         <div className="flex items-center gap-2 text-xs font-medium text-text-secondary">
