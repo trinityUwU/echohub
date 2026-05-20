@@ -156,6 +156,9 @@ def load_model(
 
     start = time.time()
 
+    # KV cache quantization: Q8_0 halves KV VRAM vs FP16 with negligible quality loss.
+    # Qwen3 8B at 16K ctx: FP16 ≈ 3.7GB KV → Q8_0 ≈ 1.9GB → saves ~1.8GB.
+    # At 32K ctx saves ~3.6GB — critical for long context on 12GB.
     llama_kwargs: dict = dict(
         model_path=gguf_path,
         n_ctx=n_ctx,
@@ -166,6 +169,8 @@ def load_model(
         verbose=False,
         use_mmap=True,
         use_mlock=False,
+        type_k=8,   # Q8_0 for key cache — halves KV VRAM vs FP16
+        type_v=8,   # Q8_0 for value cache
     )
     # split_mode: ROW for dense cpu_overflow, LAYER for MoE (MoE does not support tensor parallelism)
     if is_moe:
