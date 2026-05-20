@@ -377,10 +377,12 @@ def search_skills(q: str = "", force_refresh: bool = False) -> dict[str, Any]:
 
     # Build GitHub query — GitHub API only supports OR between full qualifier expressions,
     # mixing stars: with OR-ed topics causes 422. Use plain keyword search instead.
+    # Filter to focused MCP servers (size < 5000KB excludes platforms like n8n).
+    # Compatible with Claude Code MCP format = compatible with EchoHub.
     if not q:
-        github_query = "topic:mcp-server stars:>5 fork:false"
+        github_query = "topic:mcp-server size:<5000 stars:>5 fork:false"
     else:
-        github_query = f"{q} topic:mcp-server fork:false"
+        github_query = f"{q} topic:mcp-server size:<5000 fork:false"
 
     headers: dict[str, str] = {"Accept": "application/vnd.github+json"}
     token = os.getenv("GITHUB_TOKEN", "")
