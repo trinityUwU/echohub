@@ -102,7 +102,7 @@ function DevPanel({ loadedModelHasTools }: { loadedModelHasTools: boolean }): Re
     <>
       <PanelHeader>Project Files</PanelHeader>
       {!loadedModelHasTools && (
-        <div className="mx-2 mt-2 px-2.5 py-2 bg-yellow-500/10 border border-yellow-500/25 rounded-md flex items-start gap-2">
+        <div className="mx-2 mt-2 px-2.5 py-2 bg-yellow-500/10 rounded-md flex items-start gap-2">
           <svg className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
             <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
