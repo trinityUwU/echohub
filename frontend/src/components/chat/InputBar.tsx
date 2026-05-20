@@ -63,6 +63,20 @@ export function InputBar({
   const textRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // Auto-focus textarea on any printable keypress when nothing else has focus
+  useEffect(() => {
+    const handler = (e: globalThis.KeyboardEvent): void => {
+      const active = document.activeElement
+      const tag = active?.tagName.toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || (active as HTMLElement)?.isContentEditable) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key.length !== 1) return // ignore Shift, Enter, ArrowUp, etc.
+      textRef.current?.focus()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   const canSend = (text.trim() || attachments.length > 0) && modelLoaded && !streaming
 
   // Filtered commands based on current query and mode
