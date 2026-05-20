@@ -190,6 +190,7 @@ function PickerItem({ model, isLoaded, isSelected, onClick }: {
           {model.has_mtp && <Badge variant="mtp">MTP</Badge>}
           {model.capabilities?.thinking && <Badge variant="think">thinking</Badge>}
           {model.capabilities?.vision && <Badge variant="vision">vision</Badge>}
+          {model.capabilities?.tools && <Badge variant="tools">tools</Badge>}
         </div>
       </div>
       <div className="flex flex-col items-end gap-1 flex-shrink-0 text-xs text-text-muted">
