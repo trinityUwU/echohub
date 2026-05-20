@@ -370,7 +370,7 @@ async def tool_chat(req: ToolChatRequest):
         messages: list[dict] = []
         _DEV_SYSTEM_PROMPT = (
             "You are a coding assistant operating in Dev mode with access to a file system workspace.\n"
-            "Available tools: create_file, read_file, edit_file, delete_file, list_files, get_workspace_info, run_command.\n\n"
+            "Available tools: create_file, read_file, edit_file, delete_file, list_files, get_workspace_info, run_command, set_tool_limit.\n\n"
             "MANDATORY RULES — these apply in every response, always:\n"
             "- ALWAYS write code and files using tools. NEVER output code in markdown code blocks.\n"
             "- When asked to build anything (a project, a game, a script, a component), call create_file immediately with the full content — do not show the code first.\n"
@@ -381,6 +381,7 @@ async def tool_chat(req: ToolChatRequest):
             "    * TypeScript: run_command('tsc --noEmit') if tsconfig exists, otherwise 'tsc file.ts --noEmit'\n"
             "    * Python: run_command('python3 -m py_compile file.py')\n"
             "  If run_command returns errors, fix them immediately with edit_file and re-validate. Repeat until clean.\n"
+            "- If you are approaching the tool call limit and still have work to do, call set_tool_limit with a higher value and a clear reason before continuing. Never stop mid-task because of the limit — raise it.\n"
             "- After all tool calls, write a brief 1-2 sentence summary of what was done. No code blocks in the summary."
         )
         user_system = (req.system_prompt or "").strip()
@@ -425,14 +426,29 @@ async def tool_chat(req: ToolChatRequest):
         _TC_JSON_RE = _re.compile(r"\{.*\}", _re.DOTALL)
 
         total_tool_calls = 0
-        MAX_TOOL_CALLS = 60  # absolute safety cap
-        WARN_THRESHOLD = 2   # inject reminder when this many calls remain before hard stop
+        MAX_TOOL_CALLS = 60  # model can raise this via set_tool_limit tool
+        ABSOLUTE_CAP = 300   # hard ceiling the model cannot exceed
+        WARN_THRESHOLD = 2
         _total_text_len = 0
         _cap_warning_injected = False
 
+        def _execute_tool_with_intercept(tool_name: str, tool_args: dict) -> str:
+            nonlocal MAX_TOOL_CALLS, _cap_warning_injected
+            if tool_name == "set_tool_limit":
+                new_limit = int(tool_args.get("new_limit", 0))
+                reason = str(tool_args.get("reason", ""))
+                if new_limit <= MAX_TOOL_CALLS:
+                    return f"Error: new_limit ({new_limit}) must be greater than current limit ({MAX_TOOL_CALLS})."
+                if new_limit > ABSOLUTE_CAP:
+                    return f"Error: new_limit ({new_limit}) exceeds the absolute maximum ({ABSOLUTE_CAP})."
+                old = MAX_TOOL_CALLS
+                MAX_TOOL_CALLS = new_limit
+                _cap_warning_injected = False  # reset so warning fires again near new cap
+                logger.info(f"[tool-chat] set_tool_limit {old} → {new_limit} (reason: {reason})")
+                return f"Tool limit updated: {old} → {new_limit}. Reason recorded: {reason}"
+            return execute_tool(tool_name, tool_args, req.project_id)
+
         def _maybe_inject_cap_warning() -> None:
-            """When 2 calls remain before cap, inject a system message reminding the model
-            it can continue — so it wraps up gracefully rather than being cut off."""
             nonlocal _cap_warning_injected
             remaining = MAX_TOOL_CALLS - total_tool_calls
             if remaining <= WARN_THRESHOLD and not _cap_warning_injected:
@@ -494,7 +510,7 @@ async def tool_chat(req: ToolChatRequest):
                                 tc_id = tc.get("id", f"native_{iteration}_{total_tool_calls}")
 
                                 yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
-                                tool_result = execute_tool(tool_name, tool_args, req.project_id)
+                                tool_result = _execute_tool_with_intercept(tool_name, tool_args)
                                 yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
 
                                 messages.append({"role": "assistant", "content": pass_text or "", "tool_calls": [tc]})
@@ -570,7 +586,7 @@ async def tool_chat(req: ToolChatRequest):
                                     stop_event.set()
 
                                     yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
-                                    tool_result = execute_tool(tool_name, tool_args, req.project_id)
+                                    tool_result = _execute_tool_with_intercept(tool_name, tool_args)
                                     yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
 
                                     tc_id = f"tc_{iteration}_{total_tool_calls}"

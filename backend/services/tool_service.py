@@ -108,6 +108,32 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "set_tool_limit",
+            "description": (
+                "Increase the maximum number of tool calls allowed for this session. "
+                "Use this when you have a large task that requires more tool calls than the current limit. "
+                "Only call this if you genuinely need more calls to complete the task — not as a workaround for loops. "
+                "The new limit must be higher than the current one. Maximum allowed: 300."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "new_limit": {
+                        "type": "integer",
+                        "description": "The new maximum number of tool calls (must be > current limit, max 300)",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Why you need more tool calls",
+                    },
+                },
+                "required": ["new_limit", "reason"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_command",
             "description": (
                 "Run a validation command in the workspace directory. "
