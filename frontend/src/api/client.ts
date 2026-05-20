@@ -707,7 +707,12 @@ export async function* analyzeSkillStream(id: string): AsyncGenerator<AnalyzeEve
   let buf = ''
   while (true) {
     const { done, value } = await reader.read()
-    if (done) break
+    if (done) {
+      if (buf.trim()) for (const block of buf.split('\n\n')) {
+        if (block.startsWith('data: ')) try { yield JSON.parse(block.slice(6)) as AnalyzeEvent } catch { /* skip */ }
+      }
+      break
+    }
     buf += decoder.decode(value, { stream: true })
     const blocks = buf.split('\n\n')
     buf = blocks.pop() ?? ''
@@ -731,7 +736,15 @@ export async function* installSkillStream(repoUrl: string, skillId?: string): As
   let buf = ''
   while (true) {
     const { done, value } = await reader.read()
-    if (done) break
+    if (done) {
+      // Flush any remaining buffer — last event may lack trailing \n\n
+      if (buf.trim()) {
+        for (const block of buf.split('\n\n')) {
+          if (block.startsWith('data: ')) yield block.slice(6)
+        }
+      }
+      break
+    }
     buf += decoder.decode(value, { stream: true })
     const lines = buf.split('\n\n')
     buf = lines.pop() ?? ''
@@ -787,7 +800,12 @@ export async function* startMcpStream(id: string): AsyncGenerator<McpStartEvent>
   let buf = ''
   while (true) {
     const { done, value } = await reader.read()
-    if (done) break
+    if (done) {
+      if (buf.trim()) for (const block of buf.split('\n\n')) {
+        if (block.startsWith('data: ')) try { yield JSON.parse(block.slice(6)) as McpStartEvent } catch { /* skip */ }
+      }
+      break
+    }
     buf += decoder.decode(value, { stream: true })
     const blocks = buf.split('\n\n')
     buf = blocks.pop() ?? ''
