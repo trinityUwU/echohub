@@ -17,7 +17,7 @@ import { ProjectsPanel } from './ProjectsPanel'
 import { ProjectsHub } from './ProjectsHub'
 import { useChatMode } from '@/hooks/useChatMode'
 import { useProjects } from '@/hooks/useProjects'
-import { clearMessages, deleteMessage } from '@/api/client'
+import { clearMessages, deleteMessage, addMessage } from '@/api/client'
 import { useContextMenu } from '@/components/shared/useContextMenu'
 import { useAlert } from '@/components/shared/useAlert'
 
@@ -101,6 +101,9 @@ export function ChatPage({
   const skillChatHook = useToolChat('__skills__', {
     conversationId: activeId ?? null,
     maxContextTokens: loadedModel?.max_context_window ?? undefined,
+    onSaveMessage: useCallback(async (convId: string, role: string, content: string) => {
+      await addMessage(convId, { id: crypto.randomUUID(), role, content, stats: null })
+    }, []),
   })
 
   const useSkillMode = skillsHook.hasToolSkills
