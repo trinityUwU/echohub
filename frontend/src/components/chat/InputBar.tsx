@@ -295,7 +295,7 @@ export function InputBar({
           onKeyDown={handleKey}
           onPaste={handlePaste}
           placeholder={modelLoaded
-            ? '/ for commands · message…'
+            ? 'Message… · type / for commands'
             : 'Load a model to start chatting'}
           rows={1}
           className="flex-1 bg-transparent border-none outline-none resize-none font-sans text-md text-text-primary placeholder-text-muted leading-relaxed max-h-[200px] min-h-[22px]"
