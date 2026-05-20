@@ -108,6 +108,7 @@ def load_model(
     is_moe: bool = False,
     mmproj_path: Optional[str] = None,
     vision_handler: Optional[str] = None,
+    kv_quant: Optional[str] = None,
 ) -> None:
     """Charge le modèle GGUF. Bloquant — appelé depuis un thread."""
     global _llm, _current_model, _load_error, _eject_requested, _load_config
@@ -156,9 +157,12 @@ def load_model(
 
     start = time.time()
 
-    # KV cache quantization: Q8_0 halves KV VRAM vs FP16 with negligible quality loss.
-    # Qwen3 8B at 16K ctx: FP16 ≈ 3.7GB KV → Q8_0 ≈ 1.9GB → saves ~1.8GB.
-    # At 32K ctx saves ~3.6GB — critical for long context on 12GB.
+    # KV cache quantization — user-selectable, default Q8_0 (halves VRAM vs BF16)
+    # q8_0=8, q4_0=2, bf16/None=1 (llama-cpp-python numeric type IDs)
+    _KV_TYPE = {"q8_0": 8, "q4_0": 2, "bf16": 1}
+    kv_type_id = _KV_TYPE.get(kv_quant or "q8_0", 8)
+    _log(f"[llama] KV cache: {kv_quant or 'q8_0'} (type_k=type_v={kv_type_id})")
+
     llama_kwargs: dict = dict(
         model_path=gguf_path,
         n_ctx=n_ctx,
@@ -169,8 +173,8 @@ def load_model(
         verbose=False,
         use_mmap=True,
         use_mlock=False,
-        type_k=8,   # Q8_0 for key cache — halves KV VRAM vs FP16
-        type_v=8,   # Q8_0 for value cache
+        type_k=kv_type_id,
+        type_v=kv_type_id,
     )
     # split_mode: ROW for dense cpu_overflow, LAYER for MoE (MoE does not support tensor parallelism)
     if is_moe:
@@ -243,6 +247,7 @@ def load_model_async(
     is_moe: bool = False,
     mmproj_path: Optional[str] = None,
     vision_handler: Optional[str] = None,
+    kv_quant: Optional[str] = None,
 ) -> None:
     """Lance le chargement dans un thread background — retourne immédiatement."""
     global _loading_model_id, _load_error, _eject_requested
@@ -253,7 +258,7 @@ def load_model_async(
     def _run() -> None:
         global _loading_model_id, _load_error
         try:
-            load_model(gguf_path, model_id, n_ctx, gpu_type, n_gpu_layers_override, cpu_overflow, is_moe, mmproj_path, vision_handler)
+            load_model(gguf_path, model_id, n_ctx, gpu_type, n_gpu_layers_override, cpu_overflow, is_moe, mmproj_path, vision_handler, kv_quant)
         except Exception as e:
             if not _eject_requested:
                 _load_error = str(e)

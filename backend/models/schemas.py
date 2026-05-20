@@ -57,6 +57,7 @@ class LoadRequest(BaseModel):
     cpu_overflow: bool = False          # llama.cpp only: allow overflow to CPU RAM if VRAM exceeded
     gguf_path: Optional[str] = None    # absolute path for finetuned GGUFs — bypasses HF resolution
     is_moe: bool = False               # llama.cpp only: MoE model — reduces n_batch + disables CUDA graph profiling
+    kv_quant: Optional[str] = None     # llama.cpp only: KV cache quantization — "q8_0" | "q4_0" | "bf16"
 
 
 class ChatMessage(BaseModel):

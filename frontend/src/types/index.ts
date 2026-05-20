@@ -61,6 +61,7 @@ export interface LoadRequest {
   cpu_overflow?: boolean
   gguf_path?: string | null
   is_moe?: boolean
+  kv_quant?: 'q8_0' | 'q4_0' | 'bf16'
 }
 
 export interface FinetunedModel {

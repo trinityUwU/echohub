@@ -62,6 +62,7 @@ def load_model(req: LoadRequest) -> dict:
             n_gpu_layers=req.n_gpu_layers,
             cpu_overflow=req.cpu_overflow,
             is_moe=req.is_moe,
+            kv_quant=req.kv_quant,
         )
         return {"status": "loading", "model_id": req.model_id}
     except FileNotFoundError as e:

@@ -21,6 +21,7 @@ interface LoadModelModalProps {
     gpuMemoryUtilization: number; maxModelLen: number | null
     enforceEager: boolean; maxCudagraphCaptureSize: number | null
     nGpuLayers?: number | null; cpuOverflow?: boolean; isMoe?: boolean
+    kvQuant?: 'q8_0' | 'q4_0' | 'bf16'
   }) => void
   onCancel: () => void
 }
@@ -43,6 +44,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
   const [gpuLayersPct, setGpuLayersPct] = useState(100) // 0=CPU, 100=full GPU
   const [cpuOverflow, setCpuOverflow] = useState(false)
   const [moeConfig, setMoeConfig] = useState<MoeLoadConfig | null>(null)
+  const [kvQuant, setKvQuant] = useState<'q8_0' | 'q4_0' | 'bf16'>('q8_0')
 
   useEffect(() => {
     getInferenceSettings().then(s => {
@@ -113,7 +115,10 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
     ? (backendEstimate && backendEstimate < params * 1.2 ? backendEstimate : params * ggufFactor)
     : (backendEstimate ?? params * 0.6)
 
-  const kv        = engine === 'vllm' ? kvCacheGb(ctxLen, params) : 0
+  // KV cache VRAM: applies to both vLLM and llama.cpp
+  // llama.cpp KV factor: bf16=1.0, q8_0=0.5, q4_0=0.25
+  const kvQuantFactor = kvQuant === 'bf16' ? 1.0 : kvQuant === 'q8_0' ? 0.5 : 0.25
+  const kv        = engine === 'vllm' ? kvCacheGb(ctxLen, params) : kvCacheGb(ctxLen, params) * kvQuantFactor
   const overhead  = engine === 'vllm' ? CUDA_OVERHEAD_GB : 0
   const totalNeed = weightsGb + kv + overhead
 
@@ -148,6 +153,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
             nGpuLayers: resolvedNGpuLayers,
             cpuOverflow: engine === 'llama' ? cpuOverflow : false,
             isMoe: model.is_moe ?? false,
+            kvQuant: engine === 'llama' ? kvQuant : undefined,
           })}>
           Load model
         </Btn>
@@ -278,6 +284,34 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
         {engine === 'vllm' && ctxMax < (model.max_context_window ?? 131072) && (
           <div className="text-xs text-yellow">
             Max safe ctx at {gpuUtilPct}% util: {ctxMax.toLocaleString('en')} tokens
+          </div>
+        )}
+
+        {/* KV Cache Quantization — llama.cpp only */}
+        {engine === 'llama' && (
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-2.5">KV Cache</div>
+            <div className="flex gap-2">
+              {([
+                { id: 'q8_0' as const, label: 'Q8_0', sub: '×0.5 VRAM · recommended', color: 'accent' },
+                { id: 'q4_0' as const, label: 'Q4_0', sub: '×0.25 VRAM · long context', color: 'green' },
+                { id: 'bf16' as const, label: 'BF16', sub: '×1.0 VRAM · max precision', color: 'text-muted' },
+              ]).map(opt => {
+                const active = kvQuant === opt.id
+                return (
+                  <button key={opt.id} onClick={() => setKvQuant(opt.id)}
+                    className={`flex-1 flex flex-col items-center gap-0.5 px-2 py-2 rounded-sm border cursor-pointer transition-colors text-center ${
+                      active ? 'border-accent/40 bg-accent-dim' : 'bg-elevated border-border hover:border-border-hover'
+                    }`}>
+                    <span className={`text-sm font-semibold ${active ? 'text-accent' : 'text-text-primary'}`}>{opt.label}</span>
+                    <span className="text-2xs text-text-muted leading-tight">{opt.sub}</span>
+                    <span className={`text-2xs font-medium mt-0.5 ${active ? 'text-accent' : 'text-text-muted'}`}>
+                      ~{(kv / kvQuantFactor * (opt.id === 'bf16' ? 1 : opt.id === 'q8_0' ? 0.5 : 0.25)).toFixed(1)} GB
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
           </div>
         )}
       </div>
