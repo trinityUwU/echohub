@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { listSkills, deleteSkill, patchSkill, installSkillStream, searchSkills } from '@/api/client'
+import { listSkills, deleteSkill, patchSkill, analyzeSkill, installSkillStream, searchSkills } from '@/api/client'
 import type { NativeSkill, CommunitySkill, GithubSkillResult } from '@/api/client'
 import { useDialog } from '@/components/shared/Dialog'
 
@@ -363,6 +363,8 @@ function CommunitySkillCard({ skill, onDelete, onRefresh }: { skill: CommunitySk
   const [tools, setTools] = useState(skill.tools.join(', '))
   const [awareness, setAwareness] = useState(skill.awareness)
   const [saving, setSaving] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null)
   const hasTools = skill.tools.length > 0
 
   const handleSave = async (): Promise<void> => {
@@ -374,6 +376,20 @@ function CommunitySkillCard({ skill, onDelete, onRefresh }: { skill: CommunitySk
       setEditing(false)
     } catch { /* ignore */ }
     setSaving(false)
+  }
+
+  const handleAnalyze = async (): Promise<void> => {
+    setAnalyzing(true)
+    setAnalyzeError(null)
+    try {
+      const result = await analyzeSkill(skill.id)
+      setTools(result.suggested_tools.join(', '))
+      setAwareness(result.suggested_awareness)
+      setEditing(true)
+    } catch (e) {
+      setAnalyzeError(e instanceof Error ? e.message : 'Analysis failed')
+    }
+    setAnalyzing(false)
   }
 
   return (
@@ -426,12 +442,28 @@ function CommunitySkillCard({ skill, onDelete, onRefresh }: { skill: CommunitySk
                     )
                   }
                   {skill.awareness && <DetailRow label="Awareness" value={skill.awareness} />}
-                  <button
-                    onClick={() => setEditing(true)}
-                    className="self-start text-xs px-3 py-1.5 rounded-sm border border-accent/40 text-accent hover:bg-accent/10 transition-colors cursor-pointer"
-                  >
-                    {hasTools ? 'Edit tools & awareness' : 'Configure tools'}
-                  </button>
+                  {analyzeError && (
+                    <p className="text-xs text-red">{analyzeError}</p>
+                  )}
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      onClick={handleAnalyze}
+                      disabled={analyzing}
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-sm bg-accent hover:bg-accent-hover disabled:opacity-40 text-white transition-colors cursor-pointer"
+                    >
+                      {analyzing ? (
+                        <><div className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" />Analyzing…</>
+                      ) : (
+                        <><svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/><path d="M12 8v4l3 3"/></svg>Auto-configure with AI</>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setEditing(true)}
+                      className="text-xs px-3 py-1.5 rounded-sm border border-border text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+                    >
+                      {hasTools ? 'Edit manually' : 'Configure manually'}
+                    </button>
+                  </div>
                 </>
               ) : (
                 <div className="flex flex-col gap-3">

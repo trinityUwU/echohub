@@ -413,6 +413,146 @@ def patch_skill(skill_id: str, req: SkillPatchRequest) -> dict[str, Any]:
     return entry
 
 
+@router.post("/{skill_id}/analyze")
+async def analyze_skill(skill_id: str) -> dict[str, Any]:
+    """
+    Use the loaded model to analyze a community skill's source code and auto-suggest
+    tools[] and awareness block. Returns suggestions — does NOT save automatically.
+    """
+    from backend.services import engine_router
+
+    if engine_router.get_status() is None:
+        raise HTTPException(status_code=503, detail="No model loaded. Load a model first.")
+
+    registry = _load_registry()
+    entry = next((r for r in registry if r["id"] == skill_id), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
+
+    skill_dir = Path(entry["path"])
+    if not skill_dir.exists():
+        raise HTTPException(status_code=404, detail="Skill directory not found on disk")
+
+    # ── Collect context from skill directory ──────────────────────────────────
+    context_parts: list[str] = []
+
+    def _read_safe(path: Path, max_chars: int = 4000) -> str:
+        try:
+            return path.read_text(errors="replace")[:max_chars]
+        except Exception:
+            return ""
+
+    # Priority: README, package.json, pyproject.toml, main source files
+    priority_files = ["README.md", "README.rst", "README.txt", "package.json",
+                      "pyproject.toml", "setup.py", "index.ts", "index.js",
+                      "main.py", "server.py", "src/index.ts", "src/main.ts",
+                      "src/index.js", "src/server.ts"]
+
+    seen: set[str] = set()
+    for fname in priority_files:
+        p = skill_dir / fname
+        if p.exists() and p.name not in seen:
+            seen.add(p.name)
+            content = _read_safe(p)
+            if content.strip():
+                context_parts.append(f"=== {fname} ===\n{content}")
+
+    # Scan top-level .ts/.js/.py files not yet included (max 3)
+    extras = 0
+    for p in sorted(skill_dir.rglob("*.ts")) + sorted(skill_dir.rglob("*.py")):
+        if extras >= 3:
+            break
+        if p.name in seen or "node_modules" in str(p) or ".git" in str(p):
+            continue
+        content = _read_safe(p, 2000)
+        if content.strip():
+            seen.add(p.name)
+            context_parts.append(f"=== {p.relative_to(skill_dir)} ===\n{content}")
+            extras += 1
+
+    if not context_parts:
+        raise HTTPException(status_code=422, detail="No readable source files found in skill directory")
+
+    full_context = "\n\n".join(context_parts)
+    # Cap total context to ~6000 chars to stay well within context window
+    if len(full_context) > 6000:
+        full_context = full_context[:6000] + "\n\n[... truncated ...]"
+
+    # ── Build prompt ──────────────────────────────────────────────────────────
+    prompt = f"""You are analyzing a software skill/plugin to configure it for an AI assistant.
+
+The skill is: {entry.get('name', skill_id)}
+Description: {entry.get('description', 'unknown')}
+
+Here is the source code:
+
+{full_context}
+
+Based on this code, determine:
+1. What tool functions does this skill expose that an AI model could call? (function names only)
+2. Write a concise awareness block (≤80 tokens) explaining to the model how and when to use these tools.
+
+Respond ONLY with valid JSON in this exact format, no explanation:
+{{
+  "tools": ["tool_name_1", "tool_name_2"],
+  "awareness": "One or two sentences explaining how to use these tools."
+}}"""
+
+    messages = [{"role": "user", "content": prompt}]
+
+    # ── Call model, collect response ───────────────────────────────────────────
+    accumulated = ""
+    try:
+        async for chunk in engine_router.generate(
+            messages=messages,
+            temperature=0.1,
+            max_tokens=256,
+            stream=True,
+        ):
+            if isinstance(chunk, str):
+                accumulated += chunk
+            elif isinstance(chunk, dict):
+                delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                if delta:
+                    accumulated += delta
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Model generation failed: {e}")
+
+    # ── Parse JSON from response ───────────────────────────────────────────────
+    # Model may wrap JSON in ```json ... ``` — strip that
+    text = accumulated.strip()
+    if "```" in text:
+        import re
+        m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+        if m:
+            text = m.group(1)
+
+    # Find first { ... } block
+    import re as _re
+    m = _re.search(r"\{.*\}", text, _re.DOTALL)
+    if not m:
+        raise HTTPException(status_code=422, detail=f"Model did not return valid JSON. Response: {accumulated[:200]}")
+
+    try:
+        result = json.loads(m.group())
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=422, detail=f"JSON parse error: {e}. Raw: {m.group()[:200]}")
+
+    tools = result.get("tools", [])
+    awareness = result.get("awareness", "")
+
+    if not isinstance(tools, list):
+        tools = []
+    tools = [str(t).strip() for t in tools if t]
+
+    return {
+        "skill_id": skill_id,
+        "suggested_tools": tools,
+        "suggested_awareness": awareness,
+        "model_used": engine_router.get_status().id if engine_router.get_status() else "unknown",
+    }
+
+
 @router.get("/search")
 def search_skills(q: str = "", force_refresh: bool = False) -> dict[str, Any]:
     """

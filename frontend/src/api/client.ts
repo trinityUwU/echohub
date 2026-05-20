@@ -672,6 +672,10 @@ export const deleteSkill = (id: string): Promise<{ status: string; id: string }>
 export const patchSkill = (id: string, patch: { tools?: string[]; awareness?: string; name?: string; description?: string }): Promise<CommunitySkill> =>
   apiRequest(`/skills/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
 
+export const analyzeSkill = (id: string): Promise<{
+  skill_id: string; suggested_tools: string[]; suggested_awareness: string; model_used: string
+}> => apiRequest(`/skills/${id}/analyze`, { method: 'POST' })
+
 export async function* installSkillStream(repoUrl: string, skillId?: string): AsyncGenerator<string> {
   const url = await apiUrl('/skills/install')
   const res = await fetch(url, {
