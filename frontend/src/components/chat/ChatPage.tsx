@@ -219,8 +219,6 @@ export function ChatPage({
         onViewChange={setView}
         onModeChange={setMode}
         loadedModelHasTools={!!loadedModel?.capabilities?.tools}
-        showLogs={showLogs}
-        onToggleLogs={toggleLogs}
       />
       {!hasCuda && <CpuBanner onGoToSettings={onGoToSettings} />}
       <MigrationBanner onGoToSettings={onGoToSettings} />
