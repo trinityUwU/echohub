@@ -18,14 +18,11 @@ interface ChatTopBarProps {
   onModeChange: (m: ProjectMode) => void
   onBackToHub?: () => void
   loadedModelHasTools: boolean
-  showLogs?: boolean
-  onToggleLogs?: () => void
 }
 
 export function ChatTopBar({
   loadedModel, loading, loadingPct, onOpenPicker, onClear, onEject, onExport,
   view, mode, activeProjectName, onViewChange, onModeChange, onBackToHub, loadedModelHasTools,
-  showLogs, onToggleLogs,
 }: ChatTopBarProps): React.ReactElement {
   if (loading) return <LoadingBar pct={loadingPct} modelName={loadedModel?.name ?? '…'} onEject={onEject} />
   return (
