@@ -133,28 +133,35 @@ def detect_mcp_server(skill_path: Path) -> dict[str, Any] | None:
         if pyproj.exists():
             content = pyproj.read_text(errors="ignore")
             if re.search(r"\bmcp\b", content):
-                # Try to find a start script
-                candidate: str | None = None
+                # Use the backend venv Python so installed packages are available
+                python = sys.executable
+
+                # Prefer [project.scripts] entry point: module:func
+                script_match = re.search(r'\[project\.scripts\][^\[]*?\S+\s*=\s*"([^"]+):([^"]+)"', content, re.DOTALL)
+                if script_match:
+                    module = script_match.group(1)
+                    return {
+                        "start_command": f"{python} -m {module}",
+                        "port_hint": _extract_port(content),
+                        "transport": "stdio",
+                    }
+
+                # Fallback: find a Python file with MCP patterns
                 for fname in ("server.py", "mcp_server.py", "main.py", "app.py"):
                     if (skill_path / fname).exists():
-                        candidate = fname
-                        break
-                if candidate is None:
-                    # fallback: look for any .py with mcp patterns
-                    for py in skill_path.glob("*.py"):
-                        txt = py.read_text(errors="ignore")
-                        if "FastMCP" in txt or "mcp.server" in txt or "Server(" in txt:
-                            candidate = py.name
-                            break
-                if candidate:
-                    start_command = f"python {candidate}"
-                    port_hint = _extract_port(content)
-                    transport = "http"
-                    return {
-                        "start_command": start_command,
-                        "port_hint": port_hint,
-                        "transport": transport,
-                    }
+                        return {
+                            "start_command": f"{python} {fname}",
+                            "port_hint": _extract_port(content),
+                            "transport": "stdio",
+                        }
+                for py in skill_path.glob("*.py"):
+                    txt = py.read_text(errors="ignore")
+                    if "FastMCP" in txt or "mcp.server" in txt or "Server(" in txt:
+                        return {
+                            "start_command": f"{python} {py.name}",
+                            "port_hint": _extract_port(content),
+                            "transport": "stdio",
+                        }
 
     # -----------------------------------------------------------------------
     # 4. Standalone server files with MCP patterns

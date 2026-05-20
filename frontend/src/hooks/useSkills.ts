@@ -103,9 +103,13 @@ export function useSkills() {
         mcpSkills.forEach(s => {
           if (runningIds.has(s.id)) return
           startMcp(s.id)
-            .then(() => {
+            .then(result => {
               fetchMcpStatuses()
-              addToast({ type: 'success', title: 'MCP server started', message: s.name })
+              if (result.status === 'running') {
+                addToast({ type: 'success', title: 'MCP server started', message: s.name })
+              } else {
+                addToast({ type: 'error', title: `${s.name} failed to start`, message: result.error ?? result.status })
+              }
             })
             .catch((err: unknown) => {
               const msg = err instanceof Error ? err.message : String(err)
@@ -143,18 +147,17 @@ export function useSkills() {
     if (skill?.is_mcp) {
       if (enabling) {
         startMcp(id)
-          .then(() => {
+          .then(result => {
             fetchMcpStatuses()
-            addToast({ type: 'success', title: 'MCP server started', message: skill.name })
+            if (result.status === 'running') {
+              addToast({ type: 'success', title: 'MCP server started', message: skill.name })
+            } else {
+              addToast({ type: 'error', title: `${skill.name} failed to start`, message: result.error ?? result.status })
+            }
           })
           .catch((err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err)
-            addToast({
-              type: 'error',
-              title: 'MCP failed to start',
-              message: msg,
-              action: { label: 'View skill', onClick: () => { /* navigate handled by caller */ } },
-            })
+            addToast({ type: 'error', title: `${skill.name} failed to start`, message: msg })
           })
       } else {
         stopMcp(id)
@@ -168,8 +171,18 @@ export function useSkills() {
   }, [fetchMcpStatuses])
 
   const activeSkills = allSkills.filter(s => activeIds.has(s.id))
-  const enabledTools = [...new Set(activeSkills.flatMap(s => s.tools))]
-  const awarenessBlock = activeSkills.map(s => s.awareness).filter(Boolean).join('\n')
+
+  // For MCP skills: only include tools/awareness if server is actually running
+  const effectiveSkills = activeSkills.filter(s => {
+    if (s.type !== 'community') return true
+    const raw = rawCommunityRef.current.find(r => r.id === s.id)
+    if (!raw?.is_mcp) return true  // non-MCP community skill — always include
+    const status = mcpStatuses[s.id]
+    return status?.status === 'running'
+  })
+
+  const enabledTools = [...new Set(effectiveSkills.flatMap(s => s.tools))]
+  const awarenessBlock = effectiveSkills.map(s => s.awareness).filter(Boolean).join('\n')
   const hasToolSkills = enabledTools.length > 0
 
   return { activeIds, allSkills, communitySkills, activeSkills, enabledTools, awarenessBlock, hasToolSkills, toggle, refresh, mcpStatuses }
