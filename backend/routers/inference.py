@@ -370,7 +370,7 @@ async def tool_chat(req: ToolChatRequest):
         messages: list[dict] = []
         _DEV_SYSTEM_PROMPT = (
             "You are a coding assistant operating in Dev mode with access to a file system workspace.\n"
-            "Available tools: create_file, read_file, edit_file, delete_file, list_files, get_workspace_info, run_command, set_tool_limit.\n\n"
+            "Available tools: create_file, read_file, edit_file, delete_file, list_files, get_workspace_info, run_command, set_tool_limit, fetch_url, web_search.\n\n"
             "MANDATORY RULES — these apply in every response, always:\n"
             "- ALWAYS write code and files using tools. NEVER output code in markdown code blocks.\n"
             "- When asked to build anything (a project, a game, a script, a component), call create_file immediately with the full content — do not show the code first.\n"

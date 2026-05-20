@@ -150,6 +150,45 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "fetch_url",
+            "description": (
+                "Fetch a URL and return its content as readable text (Markdown-like). "
+                "Use this to read documentation, GitHub files, API references, or any web page. "
+                "Returns the page content stripped of ads/nav, with links preserved. "
+                "For JavaScript-heavy pages, set dynamic=true (slower, uses a real browser)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "The URL to fetch"},
+                    "dynamic": {"type": "boolean", "description": "Use real browser for JS-rendered pages (default false)", "default": False},
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": (
+                "Search the web and return a list of results (title, URL, snippet). "
+                "Use this to find documentation, examples, error solutions, or any information not in your context. "
+                "Returns top results with titles and snippets — use fetch_url to read a specific result."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "max_results": {"type": "integer", "description": "Number of results (default 5, max 10)", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_command",
             "description": (
                 "Run a validation command in the workspace directory. "
@@ -225,6 +264,10 @@ def execute_tool(name: str, arguments: dict[str, Any], project_id: str) -> str:
             return _delete_file(workspace, arguments)
         elif name == "edit_file":
             return _edit_file(workspace, arguments)
+        elif name == "fetch_url":
+            return _fetch_url(arguments)
+        elif name == "web_search":
+            return _web_search(arguments)
         elif name == "get_workspace_info":
             return _get_workspace_info(workspace, project_id)
         elif name == "run_command":
@@ -394,6 +437,83 @@ def _edit_file(workspace: Path, args: dict[str, Any]) -> str:
     target.write_text(updated, encoding="utf-8")
     logger.info(f"[tool_service] edit_file {target} (string replacement, {len(old_string)} chars)")
     return f"Edited: {path_str} (replaced {len(old_string)} chars)"
+
+
+def _fetch_url(args: dict[str, Any]) -> str:
+    url: str = args.get("url", "").strip()
+    dynamic: bool = args.get("dynamic", False)
+    if not url:
+        raise ValueError("url is required")
+
+    _MAX_CHARS = 8000
+
+    try:
+        if dynamic:
+            from scrapling.fetchers import DynamicFetcher
+            f = DynamicFetcher()
+            r = f.get(url, timeout=20)
+        else:
+            from scrapling.fetchers import Fetcher
+            f = Fetcher()
+            r = f.get(url, timeout=15)
+
+        if r.status >= 400:
+            return f"Error: HTTP {r.status} for {url}"
+
+        # Try to get markdown-like text, fall back to raw text
+        try:
+            text = r.get_all_text(ignore_tags=["script", "style", "nav", "footer", "header"])
+        except Exception:
+            text = r.get_all_text() if hasattr(r, 'get_all_text') else str(r.html)
+
+        if len(text) > _MAX_CHARS:
+            text = text[:_MAX_CHARS] + f"\n\n[... truncated — {len(text)} total chars]"
+
+        return f"[{r.status}] {url}\n\n{text.strip()}"
+
+    except Exception as e:
+        return f"Error fetching {url}: {e}"
+
+
+def _web_search(args: dict[str, Any]) -> str:
+    query: str = args.get("query", "").strip()
+    max_results: int = min(int(args.get("max_results", 5)), 10)
+    if not query:
+        raise ValueError("query is required")
+
+    try:
+        from scrapling.fetchers import Fetcher
+        f = Fetcher()
+        # Use DuckDuckGo HTML (no JS required, no API key)
+        search_url = f"https://html.duckduckgo.com/html/?q={query.replace(' ', '+')}"
+        r = f.get(search_url, timeout=15)
+
+        results = []
+        # Parse DDG HTML results
+        result_divs = r.css(".result")
+        for div in result_divs[:max_results]:
+            title_els = div.css(".result__title a")
+            snippet_els = div.css(".result__snippet")
+            if not title_els:
+                continue
+            title_el = title_els[0]
+            title = title_el.text.strip()
+            href = title_el.attrib.get("href", "")
+            snippet = snippet_els[0].text.strip() if snippet_els else ""
+            # DDG wraps URLs — extract actual URL
+            if "uddg=" in href:
+                import urllib.parse
+                parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+                href = parsed.get("uddg", [href])[0]
+            results.append(f"**{title}**\n{href}\n{snippet}")
+
+        if not results:
+            return f"No results found for: {query}"
+
+        return f"Search results for: {query}\n\n" + "\n\n---\n\n".join(results)
+
+    except Exception as e:
+        return f"Error searching '{query}': {e}"
 
 
 def _run_command(workspace: Path, args: dict[str, Any]) -> str:
