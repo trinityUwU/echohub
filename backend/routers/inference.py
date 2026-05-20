@@ -388,11 +388,11 @@ async def tool_chat(req: ToolChatRequest):
             yield f"data: {_json.dumps({'type': 'error', 'error': 'No user message in conversation'})}\n\n"
             return
 
+        last_tool_signature: str | None = None  # detect infinite loops
+
         for iteration in range(MAX_ITERATIONS):
-            # Streaming tool use: text deltas arrive live, tool_calls accumulated
             response_dict: dict | None = None
             accumulated_text_buf = ""
-            # Whether we already emitted text tokens to the client this iteration
             streamed_text = False
             try:
                 async for event in engine_router.generate_with_tools(
@@ -405,23 +405,10 @@ async def tool_chat(req: ToolChatRequest):
                     if event_type == "text_delta":
                         content = event.get("content", "")
                         if content:
-                            prev_buf = accumulated_text_buf
                             accumulated_text_buf += content
-                            tool_call_pos = accumulated_text_buf.find("<tool_call>")
-
-                            if tool_call_pos == -1:
-                                # No tool call yet — stream normally
-                                streamed_text = True
-                                yield f"data: {_json.dumps({'type': 'text_chunk', 'content': content})}\n\n"
-                            elif tool_call_pos > len(prev_buf):
-                                # Tool call tag starts inside this chunk — emit text before it
-                                tail = accumulated_text_buf[len(prev_buf):tool_call_pos]
-                                if tail:
-                                    streamed_text = True
-                                    yield f"data: {_json.dumps({'type': 'text_chunk', 'content': tail})}\n\n"
-                                # Signal UI that a tool call is being parsed (keep UI alive)
-                                yield f"data: {_json.dumps({'type': 'tool_call_pending'})}\n\n"
-                            # else: inside tool_call block — keep accumulating, UI already shows pending
+                            # Stream everything — tool calls are plain text, user sees them live
+                            streamed_text = True
+                            yield f"data: {_json.dumps({'type': 'text_chunk', 'content': content})}\n\n"
                     elif event_type == "response":
                         response_dict = event
                     elif event_type == "error":
@@ -484,6 +471,15 @@ async def tool_chat(req: ToolChatRequest):
                         tool_args: dict = _json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                     except _json.JSONDecodeError:
                         tool_args = {}
+
+                    # Anti-loop: same tool+args twice in a row → break
+                    sig = f"{tool_name}:{raw_args}"
+                    if sig == last_tool_signature:
+                        logger.warning(f"[tool-chat] loop detected on {tool_name}, breaking")
+                        yield f"data: {_json.dumps({'type': 'text_chunk', 'content': f'\n\n[Tool loop detected — stopping]'})}\n\n"
+                        tool_calls = None  # type: ignore[assignment]
+                        break
+                    last_tool_signature = sig
 
                     # Notify client of the tool call
                     yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"

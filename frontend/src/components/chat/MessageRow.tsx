@@ -38,27 +38,30 @@ function parseToolMarker(content: string): ParsedToolMarker | null {
 function ToolCallRow({ tool, payload }: ParsedToolMarker): React.ReactElement {
   const [open, setOpen] = React.useState(true)
 
-  // payload is either JSON args (call in progress/just called) or a result string
+  // Marker format:
+  //   pending/call:  [tool:name]{"key":"val",...}   → payload is JSON object → args shown
+  //   result:        [tool:name]"File created: x"   → payload is JSON string → result shown
   let args: string | null = null
   let result: string | null = null
   let isDone = false
 
-  // Result is stored as a plain string (not valid JSON object) or starts with "File"/"Error"/"Edited"
   try {
     const parsed = JSON.parse(payload)
     if (typeof parsed === 'object' && parsed !== null) {
       args = JSON.stringify(parsed, null, 2)
     } else {
-      // String result from tool execution
       result = String(parsed)
       isDone = true
+      // Also try to recover original args from raw payload for display
+      // (not available here — just show result)
     }
   } catch {
-    if (payload) {
-      result = payload
-      isDone = true
-    }
+    // Not JSON — treat as plain result string
+    if (payload) { result = payload; isDone = true }
   }
+
+  // When done, use the raw result as body content too so expanding shows something useful
+  const bodyContent = args ?? (isDone ? result : null)
 
   const statusColor = isDone ? 'text-green-400 border-green-500/20 bg-green-500/5' : 'text-yellow-400 border-yellow-500/20 bg-yellow-500/5'
 
@@ -103,7 +106,7 @@ function ToolCallRow({ tool, payload }: ParsedToolMarker): React.ReactElement {
 
         {/* Body — collapsible */}
         <AnimatePresence initial={false}>
-          {open && args && (
+          {open && bodyContent && (
             <motion.div
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
@@ -112,7 +115,7 @@ function ToolCallRow({ tool, payload }: ParsedToolMarker): React.ReactElement {
               className="overflow-hidden border-t border-current/10"
             >
               <pre className="text-2xs font-mono leading-relaxed px-3 py-2 text-current/60 overflow-x-auto max-h-48 whitespace-pre-wrap break-all">
-                {args}
+                {bodyContent}
               </pre>
             </motion.div>
           )}
