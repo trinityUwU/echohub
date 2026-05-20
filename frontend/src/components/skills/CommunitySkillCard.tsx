@@ -89,9 +89,15 @@ export function CommunitySkillCard({ skill, onDelete, onRefresh }: { skill: Comm
             }
           </div>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-sm font-medium text-text-primary">{skill.name}</span>
               <span className="text-2xs text-text-muted">v{skill.version}</span>
+              {skill.is_mcp === true
+                ? <span className="text-2xs px-1.5 py-0.5 rounded bg-accent-dim text-accent border border-accent/30 font-medium">MCP</span>
+                : skill.is_mcp === false && hasTools
+                  ? <span className="text-2xs px-1.5 py-0.5 rounded bg-elevated text-text-muted border border-border">Skill</span>
+                  : null
+              }
               {!hasTools && <span className="text-2xs text-yellow px-1.5 py-0.5 rounded bg-yellow/10 border border-yellow/30">Setup required</span>}
             </div>
             <p className="text-xs text-text-muted mt-0.5 truncate">{skill.description}</p>
