@@ -669,6 +669,9 @@ export const listSkills = (): Promise<{ native: NativeSkill[]; community: Commun
 export const deleteSkill = (id: string): Promise<{ status: string; id: string }> =>
   apiRequest(`/skills/${id}`, { method: 'DELETE' })
 
+export const patchSkill = (id: string, patch: { tools?: string[]; awareness?: string; name?: string; description?: string }): Promise<CommunitySkill> =>
+  apiRequest(`/skills/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
+
 export async function* installSkillStream(repoUrl: string, skillId?: string): AsyncGenerator<string> {
   const url = await apiUrl('/skills/install')
   const res = await fetch(url, {

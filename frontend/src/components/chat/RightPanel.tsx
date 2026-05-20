@@ -253,51 +253,24 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
 }
 
 function SkillsSection({ skills }: { skills: UseSkillsReturn }): React.ReactElement {
+  const all = [...NATIVE_SKILLS, ...skills.communitySkills]
   return (
-    <div className="flex flex-col gap-1">
-      {/* Native skills */}
-      {NATIVE_SKILLS.map(skill => {
+    <div className="flex flex-col gap-0.5">
+      {all.map(skill => {
         const active = skills.activeIds.has(skill.id)
         return (
-          <div key={skill.id} className="flex items-center justify-between py-1.5 gap-2">
-            <div className="flex flex-col min-w-0">
-              <span className={`text-sm truncate ${active ? 'text-text-primary' : 'text-text-secondary'}`}>{skill.name}</span>
-              <span className="text-2xs text-text-muted leading-tight truncate">{skill.description}</span>
+          <div key={skill.id} className="flex items-center gap-2 py-1.5">
+            <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+              <span className={`text-sm truncate leading-tight ${active ? 'text-text-primary' : 'text-text-secondary'}`}>{skill.name}</span>
+              <span className="text-2xs text-text-muted truncate leading-tight">{skill.description || 'Community skill'}</span>
             </div>
             <Toggle on={active} onChange={() => skills.toggle(skill.id)} />
           </div>
         )
       })}
-
-      {/* Community skills */}
-      {skills.communitySkills.length > 0 && (
-        <>
-          <div className="border-t border-border my-1" />
-          {skills.communitySkills.map(skill => {
-            const active = skills.activeIds.has(skill.id)
-            const hasTools = skill.tools.length > 0
-            return (
-              <div key={skill.id} className="flex items-center justify-between py-1.5 gap-2">
-                <div className="flex flex-col min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className={`text-sm truncate ${active ? 'text-text-primary' : 'text-text-secondary'}`}>{skill.name}</span>
-                    {!hasTools && (
-                      <span className="text-2xs text-yellow/70 flex-shrink-0" title="No tools declared — add an 'echohub' key to package.json">
-                        ⚠
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-2xs text-text-muted leading-tight truncate">{skill.description || 'Community skill'}</span>
-                </div>
-                <Toggle on={active} onChange={() => skills.toggle(skill.id)} />
-              </div>
-            )
-          })}
-        </>
-      )}
-
+      {skills.communitySkills.length > 0 && <div className="border-t border-border mt-1 pt-1" />}
       {skills.hasToolSkills && (
-        <p className="text-2xs text-accent mt-1">Tool use actif — le chat utilise /tool-chat</p>
+        <p className="text-2xs text-accent">Tool use actif — le chat utilise /tool-chat</p>
       )}
     </div>
   )

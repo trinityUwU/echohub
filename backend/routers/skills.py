@@ -386,6 +386,33 @@ def delete_skill(skill_id: str) -> dict[str, str]:
     return {"status": "deleted", "id": skill_id}
 
 
+class SkillPatchRequest(BaseModel):
+    tools: list[str] | None = None
+    awareness: str | None = None
+    name: str | None = None
+    description: str | None = None
+
+
+@router.patch("/{skill_id}")
+def patch_skill(skill_id: str, req: SkillPatchRequest) -> dict[str, Any]:
+    """Update tools/awareness/name/description of a community skill."""
+    registry = _load_registry()
+    entry = next((r for r in registry if r["id"] == skill_id), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
+    if req.tools is not None:
+        entry["tools"] = req.tools
+    if req.awareness is not None:
+        entry["awareness"] = req.awareness
+    if req.name is not None:
+        entry["name"] = req.name
+    if req.description is not None:
+        entry["description"] = req.description
+    registry = [r if r["id"] != skill_id else entry for r in registry]
+    _save_registry(registry)
+    return entry
+
+
 @router.get("/search")
 def search_skills(q: str = "", force_refresh: bool = False) -> dict[str, Any]:
     """

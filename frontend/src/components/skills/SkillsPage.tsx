@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { listSkills, deleteSkill, installSkillStream, searchSkills } from '@/api/client'
+import { listSkills, deleteSkill, patchSkill, installSkillStream, searchSkills } from '@/api/client'
 import type { NativeSkill, CommunitySkill, GithubSkillResult } from '@/api/client'
 import { useDialog } from '@/components/shared/Dialog'
 
@@ -110,7 +110,7 @@ export function SkillsPage({ onGoToSettings }: { onGoToSettings?: () => void }):
         />
       </div>
       <div className={`flex-1 overflow-hidden ${tab === 'installed' ? '' : 'hidden'}`}>
-        <InstalledTab native={native} community={community} onDelete={handleDelete} />
+        <InstalledTab native={native} community={community} onDelete={handleDelete} onRefresh={refresh} />
       </div>
 
       <AnimatePresence>
@@ -289,8 +289,8 @@ function RateLimitBadge({ remaining, limit, resetTs, authenticated, onGoToSettin
 
 // ── Installed tab ──────────────────────────────────────────────────────────────
 
-function InstalledTab({ native, community, onDelete }: {
-  native: NativeSkill[]; community: CommunitySkill[]; onDelete: (s: CommunitySkill) => void
+function InstalledTab({ native, community, onDelete, onRefresh }: {
+  native: NativeSkill[]; community: CommunitySkill[]; onDelete: (s: CommunitySkill) => void; onRefresh: () => void
 }): React.ReactElement {
   return (
     <div className="flex-1 overflow-y-auto px-8 py-6 flex flex-col gap-8 h-full">
@@ -298,7 +298,7 @@ function InstalledTab({ native, community, onDelete }: {
         {native.map(s => <NativeSkillCard key={s.id} skill={s} />)}
       </SkillSection>
       <SkillSection title="Community skills" description="Installed from external repositories." count={community.length} empty="No community skills installed yet.">
-        {community.map(s => <CommunitySkillCard key={s.id} skill={s} onDelete={() => onDelete(s)} />)}
+        {community.map(s => <CommunitySkillCard key={s.id} skill={s} onDelete={() => onDelete(s)} onRefresh={onRefresh} />)}
       </SkillSection>
     </div>
   )
@@ -357,21 +357,40 @@ function NativeSkillCard({ skill }: { skill: NativeSkill }): React.ReactElement 
   )
 }
 
-function CommunitySkillCard({ skill, onDelete }: { skill: CommunitySkill; onDelete: () => void }): React.ReactElement {
+function CommunitySkillCard({ skill, onDelete, onRefresh }: { skill: CommunitySkill; onDelete: () => void; onRefresh: () => void }): React.ReactElement {
   const [expanded, setExpanded] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [tools, setTools] = useState(skill.tools.join(', '))
+  const [awareness, setAwareness] = useState(skill.awareness)
+  const [saving, setSaving] = useState(false)
+  const hasTools = skill.tools.length > 0
+
+  const handleSave = async (): Promise<void> => {
+    setSaving(true)
+    try {
+      const toolList = tools.split(',').map(t => t.trim()).filter(Boolean)
+      await patchSkill(skill.id, { tools: toolList, awareness })
+      onRefresh()
+      setEditing(false)
+    } catch { /* ignore */ }
+    setSaving(false)
+  }
+
   return (
-    <div className="bg-surface border border-border rounded-lg overflow-hidden">
+    <div className={`bg-surface border rounded-lg overflow-hidden transition-colors ${!hasTools ? 'border-yellow/30' : 'border-border'}`}>
       <div className="flex items-center gap-3 px-4 py-3.5">
         <button onClick={() => setExpanded(v => !v)} className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer">
-          <div className="w-8 h-8 rounded-md bg-elevated flex items-center justify-center flex-shrink-0 border border-border">
-            <svg className="w-4 h-4 text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
-            </svg>
+          <div className={`w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 border ${!hasTools ? 'bg-yellow/10 border-yellow/30' : 'bg-elevated border-border'}`}>
+            {!hasTools
+              ? <svg className="w-4 h-4 text-yellow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              : <svg className="w-4 h-4 text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            }
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-text-primary">{skill.name}</span>
               <span className="text-2xs text-text-muted">v{skill.version}</span>
+              {!hasTools && <span className="text-2xs text-yellow px-1.5 py-0.5 rounded bg-yellow/10 border border-yellow/30">Setup required</span>}
             </div>
             <p className="text-xs text-text-muted mt-0.5 truncate">{skill.description}</p>
           </div>
@@ -385,6 +404,7 @@ function CommunitySkillCard({ skill, onDelete }: { skill: CommunitySkill; onDele
           </svg>
         </button>
       </div>
+
       <AnimatePresence initial={false}>
         {expanded && (
           <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} transition={{ duration: 0.15 }} className="overflow-hidden">
@@ -392,8 +412,68 @@ function CommunitySkillCard({ skill, onDelete }: { skill: CommunitySkill; onDele
               <DetailRow label="Author" value={skill.author} />
               <DetailRow label="Repository" value={skill.repo_url} mono />
               <DetailRow label="Path" value={skill.path} mono />
-              {skill.tools.length > 0 && <DetailRow label="Tools" value={skill.tools.join(', ')} mono />}
-              {skill.awareness && <DetailRow label="Awareness" value={skill.awareness} />}
+
+              {/* Tools & Awareness editor */}
+              {!editing ? (
+                <>
+                  {hasTools
+                    ? <DetailRow label="Tools" value={skill.tools.join(', ')} mono />
+                    : (
+                      <div className="flex flex-col gap-1">
+                        <span className="text-2xs text-text-muted uppercase tracking-wider">Tools</span>
+                        <p className="text-xs text-yellow">No tools declared — configure below so the model can use this skill.</p>
+                      </div>
+                    )
+                  }
+                  {skill.awareness && <DetailRow label="Awareness" value={skill.awareness} />}
+                  <button
+                    onClick={() => setEditing(true)}
+                    className="self-start text-xs px-3 py-1.5 rounded-sm border border-accent/40 text-accent hover:bg-accent/10 transition-colors cursor-pointer"
+                  >
+                    {hasTools ? 'Edit tools & awareness' : 'Configure tools'}
+                  </button>
+                </>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-2xs text-text-muted uppercase tracking-wider">Tools (comma-separated tool names)</label>
+                    <input
+                      type="text"
+                      value={tools}
+                      onChange={e => setTools(e.target.value)}
+                      placeholder="tool_name_1, tool_name_2"
+                      className="bg-base border border-border focus:border-accent/60 rounded-sm px-2.5 py-1.5 text-xs font-mono text-text-primary placeholder-text-muted outline-none transition-colors"
+                    />
+                    <p className="text-2xs text-text-muted">Tool names exposed by this skill to the model. Must match what the skill actually registers.</p>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-2xs text-text-muted uppercase tracking-wider">Awareness block (≤100 tokens)</label>
+                    <textarea
+                      value={awareness}
+                      onChange={e => setAwareness(e.target.value)}
+                      rows={3}
+                      placeholder="Describe how the model should use this skill's tools..."
+                      className="bg-base border border-border focus:border-accent/60 rounded-sm px-2.5 py-1.5 text-xs text-text-primary placeholder-text-muted outline-none resize-none transition-colors"
+                    />
+                    <p className="text-2xs text-text-muted">Injected into the system prompt when this skill is active. Keep concise.</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleSave}
+                      disabled={saving}
+                      className="text-xs px-3 py-1.5 rounded-sm bg-accent hover:bg-accent-hover disabled:opacity-40 text-white transition-colors cursor-pointer"
+                    >
+                      {saving ? 'Saving…' : 'Save'}
+                    </button>
+                    <button
+                      onClick={() => { setEditing(false); setTools(skill.tools.join(', ')); setAwareness(skill.awareness) }}
+                      className="text-xs px-3 py-1.5 rounded-sm border border-border text-text-muted hover:text-text-secondary transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </motion.div>
         )}
