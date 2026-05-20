@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toolChat } from '@/api/client'
-import type { ChatMessage, ToolCall, WorkspaceFile } from '@/types'
+import type { ChatMessage, GenerationStats, ToolCall, WorkspaceFile } from '@/types'
 
 // ── SSE event shapes ──────────────────────────────────────────────────────────
 
@@ -24,6 +24,12 @@ interface TextChunkEvent {
 interface DoneEvent {
   type: 'done'
   files: WorkspaceFile[]
+  tokens_generated?: number
+  tok_per_sec?: number
+  ttft_ms?: number | null
+  total_ms?: number
+  engine?: string | null
+  model_name?: string | null
 }
 
 interface ErrorEvent {
@@ -46,6 +52,8 @@ export interface UseToolChatReturn {
   toolCalls: ToolCall[]
   workspaceFiles: WorkspaceFile[]
   streaming: boolean
+  genStats: GenerationStats | null
+  usedTokens: number
   send: (text: string, systemPrompt?: string) => void
   stop: () => void
   clear: () => void
@@ -63,6 +71,8 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
   const [toolCalls, setToolCalls] = useState<ToolCall[]>([])
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([])
   const [streaming, setStreaming] = useState(false)
+  const [genStats, setGenStats] = useState<GenerationStats | null>(null)
+  const [usedTokens, setUsedTokens] = useState(0)
 
   // Poll workspace files every 2s for real-time panel updates
   useEffect(() => {
@@ -100,6 +110,8 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     setMessages([])
     setToolCalls([])
     setWorkspaceFiles([])
+    setGenStats(null)
+    setUsedTokens(0)
     pendingToolMap.current.clear()
     pendingToolMsgMap.current.clear()
   }, [])
@@ -114,6 +126,8 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     setMessages(hydrated)
     setToolCalls([])
     setWorkspaceFiles([])
+    setGenStats(null)
+    setUsedTokens(0)
     pendingToolMap.current.clear()
     pendingToolMsgMap.current.clear()
   }, [])
@@ -230,6 +244,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
           } else if (raw.type === 'text_chunk') {
             accumulated += raw.content
             const snap = accumulated
+            setUsedTokens(Math.round(snap.length / 4))
             setMessages(prev => {
               const updated = [...prev]
               updated[updated.length - 1] = { role: 'assistant', content: snap, id: assistantId }
@@ -239,6 +254,17 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
           } else if (raw.type === 'done') {
             setWorkspaceFiles(raw.files)
             setStreaming(false)
+            if (raw.tokens_generated != null) {
+              setGenStats({
+                tokensGenerated: raw.tokens_generated,
+                tokensPerSecond: raw.tok_per_sec ?? 0,
+                timeMs: raw.total_ms ?? 0,
+                promptTokens: 0,
+                ttftMs: raw.ttft_ms ?? null,
+                engine: raw.engine ?? null,
+                modelName: raw.model_name ?? null,
+              })
+            }
             // Persist completed assistant message
             const { conversationId: cid, onSaveMessage: onSave } = optionsRef.current
             if (cid && onSave && accumulated) {
@@ -291,5 +317,5 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     send(newText, systemPrompt)
   }, [send])
 
-  return { messages, toolCalls, workspaceFiles, streaming, send, stop, clear, loadHistory, clearAndResend }
+  return { messages, toolCalls, workspaceFiles, streaming, genStats, usedTokens, send, stop, clear, loadHistory, clearAndResend }
 }

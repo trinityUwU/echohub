@@ -517,9 +517,9 @@ function ProjectWorkspace({
 
   const messages = isDevMode ? toolChatHook.messages : chatHook.messages
   const streaming = isDevMode ? toolChatHook.streaming : chatHook.streaming
-  const stats = isDevMode ? null : chatHook.stats
+  const stats = isDevMode ? toolChatHook.genStats : chatHook.stats
   const oomError = isDevMode ? false : chatHook.oomError
-  const usedTokens = isDevMode ? 0 : chatHook.usedTokens
+  const usedTokens = isDevMode ? toolChatHook.usedTokens : chatHook.usedTokens
   const isTokensExact = isDevMode ? false : chatHook.isTokensExact
   const toolCalls = isDevMode ? toolChatHook.toolCalls : []
   const workspaceFiles = isDevMode ? toolChatHook.workspaceFiles : []

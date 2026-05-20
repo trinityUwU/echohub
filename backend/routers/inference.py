@@ -360,6 +360,12 @@ async def tool_chat(req: ToolChatRequest):
 
     async def _event_stream():
         import re as _re
+        import time as _time
+        _start = _time.perf_counter()
+        _first_token_time: float | None = None
+        _token_count = 0
+        _active_engine = engine_router.get_active_engine()
+        _model_status = engine_router.get_status()
         messages: list[dict] = []
         if req.system_prompt and req.system_prompt.strip():
             messages.append({"role": "system", "content": req.system_prompt})
@@ -391,6 +397,7 @@ async def tool_chat(req: ToolChatRequest):
 
         _TC_RE = _re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", _re.DOTALL)
         total_tool_calls = 0  # hard cap across all iterations
+        _total_text_len = 0  # track total output chars across all iterations
 
         for iteration in range(MAX_ITERATIONS):
             response_dict: dict | None = None
@@ -406,6 +413,8 @@ async def tool_chat(req: ToolChatRequest):
                     if event_type == "text_delta":
                         content = event.get("content", "")
                         if content:
+                            if _first_token_time is None:
+                                _first_token_time = _time.perf_counter()
                             accumulated_text_buf += content
                     elif event_type == "response":
                         response_dict = event
@@ -422,6 +431,7 @@ async def tool_chat(req: ToolChatRequest):
             if response_dict is None and "<tool_call>" not in accumulated_text_buf:
                 # Plain text, no tool calls — emit and done
                 if accumulated_text_buf:
+                    _total_text_len += len(accumulated_text_buf)
                     yield f"data: {_json.dumps({'type': 'text_chunk', 'content': accumulated_text_buf})}\n\n"
                 break
 
@@ -504,6 +514,7 @@ async def tool_chat(req: ToolChatRequest):
 
             # No tool_calls — emit buffered text if not already emitted via fallback path
             if accumulated_text_buf and not ("<tool_call>" in accumulated_text_buf):
+                _total_text_len += len(accumulated_text_buf)
                 yield f"data: {_json.dumps({'type': 'text_chunk', 'content': accumulated_text_buf})}\n\n"
             break  # done
 
@@ -517,7 +528,14 @@ async def tool_chat(req: ToolChatRequest):
         except Exception as e:
             logger.warning(f"[tool-chat] list_workspace_files error: {e}")
             files = []
-        yield f"data: {_json.dumps({'type': 'done', 'files': files})}\n\n"
+        _end = _time.perf_counter()
+        _total_ms = round((_end - _start) * 1000)
+        _ttft_ms = round((_first_token_time - _start) * 1000) if _first_token_time else None
+        _estimated_tokens = max(1, _total_text_len // 4)
+        _decode_ms = max(_total_ms - (_ttft_ms or 0), 1)
+        _tok_per_sec = round(_estimated_tokens / (_decode_ms / 1000), 1) if _estimated_tokens else 0.0
+        _model_name = _model_status.name if _model_status else None
+        yield f"data: {_json.dumps({'type': 'done', 'files': files, 'tokens_generated': _estimated_tokens, 'tok_per_sec': _tok_per_sec, 'ttft_ms': _ttft_ms, 'total_ms': _total_ms, 'engine': _active_engine, 'model_name': _model_name})}\n\n"
 
     return StreamingResponse(
         _event_stream(),
