@@ -163,7 +163,10 @@ function parseSegments(raw: string): Segment[] {
 // ── ToolCallBlock ─────────────────────────────────────────────────────────────
 
 function ToolCallBlock({ content, streaming }: { content: string; streaming?: boolean }): React.ReactElement {
-  const [open, setOpen] = useState(false)
+  // streaming=true means the tag is still open — always show content live
+  // user can collapse after streaming ends
+  const [collapsed, setCollapsed] = useState(false)
+  const open = streaming ? true : !collapsed
 
   const nameMatch = content.match(/"name"\s*:\s*"([^"]+)"/)
   let toolName = nameMatch ? nameMatch[1] : ''
@@ -181,7 +184,7 @@ function ToolCallBlock({ content, streaming }: { content: string; streaming?: bo
   return (
     <div className="mb-3 rounded-xl border border-yellow-500/20 bg-yellow-500/5 overflow-hidden">
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={() => !streaming && setCollapsed(c => !c)}
         className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-yellow-500/10 transition-colors cursor-pointer"
       >
         {streaming ? (
@@ -203,12 +206,14 @@ function ToolCallBlock({ content, streaming }: { content: string; streaming?: bo
         <span className="text-xs text-yellow-400/60 ml-auto">
           {streaming ? 'running' : 'done'}
         </span>
-        <svg
-          className={`w-3.5 h-3.5 text-yellow-400 transition-transform ${open ? 'rotate-180' : ''}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
+        {!streaming && (
+          <svg
+            className={`w-3.5 h-3.5 text-yellow-400 transition-transform ${open ? 'rotate-180' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        )}
       </button>
       <AnimatePresence>
         {open && (
