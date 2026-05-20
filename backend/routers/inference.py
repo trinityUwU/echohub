@@ -356,7 +356,7 @@ async def tool_chat(req: ToolChatRequest):
         raise HTTPException(status_code=404, detail="No model loaded.")
 
     tools = get_tools()
-    MAX_ITERATIONS = 6
+    MAX_ITERATIONS = 40  # generous — model decides when it's done; we warn at threshold
 
     async def _event_stream():
         import re as _re
@@ -419,8 +419,27 @@ async def tool_chat(req: ToolChatRequest):
         _TC_JSON_RE = _re.compile(r"\{.*\}", _re.DOTALL)
 
         total_tool_calls = 0
-        MAX_TOOL_CALLS = MAX_ITERATIONS * 4  # per-turn cap
+        MAX_TOOL_CALLS = 60  # absolute safety cap
+        WARN_THRESHOLD = 2   # inject reminder when this many calls remain before hard stop
         _total_text_len = 0
+        _cap_warning_injected = False
+
+        def _maybe_inject_cap_warning() -> None:
+            """When 2 calls remain before cap, inject a system message reminding the model
+            it can continue — so it wraps up gracefully rather than being cut off."""
+            nonlocal _cap_warning_injected
+            remaining = MAX_TOOL_CALLS - total_tool_calls
+            if remaining <= WARN_THRESHOLD and not _cap_warning_injected:
+                _cap_warning_injected = True
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        f"[System] You have used {total_tool_calls} tool calls. "
+                        f"You have {remaining} tool call(s) left before the session limit. "
+                        "If you need more, wrap up the current task cleanly. "
+                        "The user can raise the limit by adjusting MAX_TOOL_CALLS in Settings > Dev mode."
+                    ),
+                })
 
         # Track the current turn's full assistant text for history injection
         turn_assistant_text = ""
@@ -456,7 +475,8 @@ async def tool_chat(req: ToolChatRequest):
                         if tool_calls_native and not tool_executed_this_pass:
                             for tc in tool_calls_native:
                                 total_tool_calls += 1
-                                if total_tool_calls > MAX_TOOL_CALLS:
+                                _maybe_inject_cap_warning()
+                                if total_tool_calls >= MAX_TOOL_CALLS:
                                     break
                                 func = tc.get("function", {})
                                 tool_name = func.get("name", "")
@@ -534,8 +554,9 @@ async def tool_chat(req: ToolChatRequest):
                                     tool_args = _json.loads(raw_args) if isinstance(raw_args, str) else raw_args
 
                                     total_tool_calls += 1
-                                    if total_tool_calls > MAX_TOOL_CALLS:
-                                        _cap = _json.dumps({"type": "text_chunk", "content": "\n\n[Max tool calls reached.]"})
+                                    _maybe_inject_cap_warning()
+                                    if total_tool_calls >= MAX_TOOL_CALLS:
+                                        _cap = _json.dumps({"type": "text_chunk", "content": "\n\n[Tool call limit reached. Resume in a new message.]"})
                                         yield f"data: {_cap}\n\n"
                                         stop_event.set()
                                         break
@@ -592,7 +613,7 @@ async def tool_chat(req: ToolChatRequest):
             break
 
         else:
-            _cap2 = _json.dumps({"type": "text_chunk", "content": "\n\n[Max iterations reached.]"})
+            _cap2 = _json.dumps({"type": "text_chunk", "content": "\n\n[Tool call limit reached. Resume in a new message.]"})
             yield f"data: {_cap2}\n\n"
 
         # Always emit done with workspace file list — even after errors/loops
