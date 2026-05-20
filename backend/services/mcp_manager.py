@@ -57,6 +57,59 @@ def detect_mcp_server(skill_path: Path) -> dict[str, Any] | None:
     transport: str = "http"
 
     # -----------------------------------------------------------------------
+    # 0. smithery.yaml — Smithery / public MCP registries format
+    # -----------------------------------------------------------------------
+    smithery_yaml = skill_path / "smithery.yaml"
+    if smithery_yaml.exists():
+        try:
+            raw = smithery_yaml.read_text(errors="ignore")
+            # Minimal regex-based YAML parser — no external deps
+            cmd_match = re.search(r'^\s*command\s*:\s*(.+)$', raw, re.MULTILINE)
+            transport_match = re.search(r'^\s*transport\s*:\s*(.+)$', raw, re.MULTILINE)
+            # args: supports inline sequence "args: [a, b]" or block list "- item"
+            args_inline = re.search(r'^\s*args\s*:\s*\[([^\]]*)\]', raw, re.MULTILINE)
+            args_block = re.findall(r'^\s+-\s+(.+)$', raw, re.MULTILINE)
+
+            if cmd_match:
+                smithery_cmd = cmd_match.group(1).strip().strip('"\'')
+                smithery_transport = (
+                    transport_match.group(1).strip().strip('"\'').lower()
+                    if transport_match else ""
+                )
+                if args_inline:
+                    raw_args = [a.strip().strip('"\'') for a in args_inline.group(1).split(",") if a.strip()]
+                elif args_block:
+                    raw_args = [a.strip().strip('"\'') for a in args_block]
+                else:
+                    raw_args = []
+
+                _STDIO_LAUNCHERS = ("uvx", "npx", "node", "python", "python3")
+                base_cmd = smithery_cmd.split()[0] if smithery_cmd else ""
+                if smithery_transport == "stdio" or (
+                    base_cmd in _STDIO_LAUNCHERS and "--port" not in " ".join(raw_args)
+                ):
+                    full_cmd = smithery_cmd
+                    if raw_args:
+                        full_cmd = smithery_cmd + " " + " ".join(raw_args)
+                    return {
+                        "start_command": full_cmd,
+                        "port_hint": None,
+                        "transport": "stdio",
+                    }
+                elif smithery_transport == "http":
+                    full_cmd = smithery_cmd
+                    if raw_args:
+                        full_cmd = smithery_cmd + " " + " ".join(raw_args)
+                    port = _extract_port(full_cmd)
+                    return {
+                        "start_command": full_cmd,
+                        "port_hint": port,
+                        "transport": "http",
+                    }
+        except Exception:
+            pass
+
+    # -----------------------------------------------------------------------
     # 1. Claude Code / mcp.json
     # -----------------------------------------------------------------------
     for mcp_cfg_name in ("mcp.json", ".mcp.json"):
@@ -65,6 +118,7 @@ def detect_mcp_server(skill_path: Path) -> dict[str, Any] | None:
             try:
                 data = json.loads(mcp_cfg.read_text())
                 cmd = data.get("command") or data.get("start")
+                cfg_type = data.get("type", "")
                 if cmd:
                     start_command = cmd
                     transport = data.get("transport", "http")
@@ -74,6 +128,9 @@ def detect_mcp_server(skill_path: Path) -> dict[str, Any] | None:
                         "port_hint": port_hint,
                         "transport": transport,
                     }
+                # mcp.json with "type": "stdio" but no explicit command — mark transport
+                if cfg_type == "stdio":
+                    transport = "stdio"
             except Exception:
                 pass
 
@@ -468,10 +525,19 @@ class McpManager:
         """
         import shlex
         command_parts = shlex.split(start_command)
-        # Replace generic "python"/"python3" with the backend venv interpreter
-        # so installed packages (e.g. httpx, mcp) are available.
+
+        # Resolve the Python interpreter: prefer the skill's own venv if it exists,
+        # fall back to the backend venv so installed packages are available.
+        skill_venv_python = skill_dir / ".venv" / "bin" / "python"
+        if skill_venv_python.exists():
+            effective_python = str(skill_venv_python)
+            logger.info("[stdio] using skill venv: {}", effective_python)
+        else:
+            effective_python = sys.executable
+            logger.info("[stdio] using backend venv: {}", effective_python)
+
         if command_parts and command_parts[0] in ("python", "python3"):
-            command_parts[0] = sys.executable
+            command_parts[0] = effective_python
 
         logger.info("Starting stdio MCP server '{}' — {}", skill_id, " ".join(command_parts))
         try:

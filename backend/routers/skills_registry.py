@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from backend.routers.skills_helpers import (
     NATIVE_SKILLS, SKILLS_DIR,
     _load_registry, _save_registry, _read_manifest, _detect_install_commands,
+    _patch_skill_registry_json,
 )
 
 router = APIRouter(prefix="/skills", tags=["skills"])
@@ -117,6 +118,12 @@ async def install_skill(req: InstallRequest) -> StreamingResponse:
                 entry["mcp_start_command"] = mcp_info.get("start_command")
                 entry["mcp_transport"] = mcp_info.get("transport")
                 entry["mcp_port_hint"] = mcp_info.get("port_hint")
+                _patch_skill_registry_json(target_dir, {
+                    "is_mcp": True,
+                    "mcp_start_command": mcp_info.get("start_command"),
+                    "mcp_transport": mcp_info.get("transport"),
+                    "mcp_port_hint": mcp_info.get("port_hint"),
+                })
                 yield sse(f"Detected as MCP server ({mcp_info.get('transport', 'http')}) ✓")
             else:
                 entry["is_mcp"] = False

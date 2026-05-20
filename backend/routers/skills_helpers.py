@@ -63,6 +63,20 @@ def _save_registry(entries: list[dict[str, Any]]) -> None:
     REGISTRY_FILE.write_text(json.dumps(entries, indent=2))
 
 
+def _patch_skill_registry_json(skill_path: Path, fields: dict[str, Any]) -> None:
+    """
+    Merge `fields` into the skill-local registry.json (skill_path/registry.json).
+    Creates the file if it doesn't exist. No-ops silently on any error.
+    """
+    local_reg = skill_path / "registry.json"
+    try:
+        data: dict[str, Any] = json.loads(local_reg.read_text()) if local_reg.exists() else {}
+        data.update(fields)
+        local_reg.write_text(json.dumps(data, indent=2))
+    except Exception:
+        pass
+
+
 def _extract_author(raw: Any) -> str:
     if isinstance(raw, str):
         return raw
@@ -132,9 +146,18 @@ def _detect_install_commands(skill_dir: Path) -> list[str]:
             pass
         return cmds
     if (skill_dir / "pyproject.toml").exists() or (skill_dir / "setup.py").exists():
-        return [f"{sys.executable} -m pip install -e . --quiet"]
+        cmds = [
+            "python3 -m venv .venv",
+            ".venv/bin/pip install -e . --quiet",
+        ]
+        if (skill_dir / "requirements.txt").exists():
+            cmds.append(".venv/bin/pip install -r requirements.txt --quiet")
+        return cmds
     if (skill_dir / "requirements.txt").exists():
-        return [f"{sys.executable} -m pip install -r requirements.txt --quiet"]
+        return [
+            "python3 -m venv .venv",
+            ".venv/bin/pip install -r requirements.txt --quiet",
+        ]
     for sh in sorted(skill_dir.glob("install*.sh")):
         return [f"bash {sh.name}"]
     return cmds

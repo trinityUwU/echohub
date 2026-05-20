@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 
-from backend.routers.skills_helpers import _load_registry, _save_registry
+from backend.routers.skills_helpers import _load_registry, _save_registry, _patch_skill_registry_json
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 
@@ -103,15 +103,28 @@ async def start_mcp_server(skill_id: str) -> dict[str, Any]:
     if not entry:
         raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
 
-    # Auto-detect if is_mcp not yet set
-    if "is_mcp" not in entry:
-        skill_path = Path(entry["path"])
+    skill_path = Path(entry["path"])
+
+    # Auto-detect if is_mcp not yet set, or if transport is missing despite is_mcp=true
+    needs_detect = "is_mcp" not in entry or (
+        entry.get("is_mcp") and not entry.get("mcp_transport")
+    )
+    if needs_detect:
         detected = detect_mcp_server(skill_path)
         entry["is_mcp"] = detected is not None
         if detected:
             entry["mcp_start_command"] = detected.get("start_command")
             entry["mcp_transport"] = detected.get("transport")
             entry["mcp_port_hint"] = detected.get("port_hint")
+            logger.info(
+                f"[mcp] mcp_transport missing for {skill_id}, re-detected: {detected.get('transport')}"
+            )
+            _patch_skill_registry_json(skill_path, {
+                "mcp_transport": detected.get("transport"),
+                "mcp_start_command": detected.get("start_command"),
+                "mcp_port_hint": detected.get("port_hint"),
+                "is_mcp": True,
+            })
         registry = [r if r["id"] != skill_id else entry for r in registry]
         _save_registry(registry)
 
@@ -179,8 +192,11 @@ async def start_mcp_server_stream(skill_id: str) -> StreamingResponse:
 
         skill_path = Path(entry["path"])
 
-        # Auto-detect MCP if not yet done
-        if not entry.get("is_mcp"):
+        # Auto-detect MCP if not yet done, or if transport is missing despite is_mcp=true
+        needs_detect = not entry.get("is_mcp") or (
+            entry.get("is_mcp") and not entry.get("mcp_transport")
+        )
+        if needs_detect:
             yield sse({"type":"log","msg":"Detecting MCP server..."})
             detected = detect_mcp_server(skill_path)
             if not detected:
@@ -190,6 +206,15 @@ async def start_mcp_server_stream(skill_id: str) -> StreamingResponse:
             entry["mcp_start_command"] = detected.get("start_command")
             entry["mcp_transport"] = detected.get("transport")
             entry["mcp_port_hint"] = detected.get("port_hint")
+            logger.info(
+                f"[mcp] mcp_transport missing for {skill_id}, re-detected: {detected.get('transport')}"
+            )
+            _patch_skill_registry_json(skill_path, {
+                "mcp_transport": detected.get("transport"),
+                "mcp_start_command": detected.get("start_command"),
+                "mcp_port_hint": detected.get("port_hint"),
+                "is_mcp": True,
+            })
             reg = _load_registry()
             _save_registry([r if r["id"] != skill_id else entry for r in reg])
             yield sse({"type":"log","msg":f"Detected: {detected.get('start_command')} ({detected.get('transport')})"})
