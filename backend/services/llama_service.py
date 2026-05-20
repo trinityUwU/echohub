@@ -474,43 +474,103 @@ async def generate_with_tools(
     **_ignored,
 ) -> AsyncGenerator:
     """
-    Non-streaming tool use call via llama-cpp-python.
-    Yields a single dict — either containing tool_calls or a text message.
-    The caller (agentic loop) handles the iteration.
+    Streaming tool use via llama-cpp-python.
+
+    Yields dicts with two possible shapes:
+    - {"type": "text_delta", "content": "..."} — streaming text token
+    - {"type": "response", "choices": [...]} — full response dict at end (may contain tool_calls)
+
+    The caller uses text_delta for live streaming and response for tool_calls detection.
     """
     if _llm is None:
         raise RuntimeError("No model loaded")
 
     loop = asyncio.get_event_loop()
+    queue: asyncio.Queue = asyncio.Queue()
 
-    def _sync() -> dict:
+    def _stream_sync() -> None:
         has_user = any(m.get("role") == "user" for m in messages)
         if not has_user:
-            raise ValueError("No user message in conversation")
-        try:
-            return _llm.create_chat_completion(
-                messages=messages,
-                tools=tools,
-                tool_choice="auto",
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=False,
+            asyncio.run_coroutine_threadsafe(
+                queue.put({"type": "error", "error": "No user message in conversation"}), loop
             )
-        except Exception as tools_err:
-            logger.warning(f"[llama] tools call failed ({tools_err}), falling back to plain generate")
-            return _llm.create_chat_completion(
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=False,
+            asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+            return
+
+        accumulated_text = ""
+        accumulated_tool_calls: list = []
+
+        try:
+            try:
+                chunks = _llm.create_chat_completion(
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto",
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=True,
+                )
+            except Exception as tools_err:
+                logger.warning(f"[llama] tools streaming failed ({tools_err}), falling back to plain stream")
+                chunks = _llm.create_chat_completion(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=True,
+                )
+
+            for chunk in chunks:
+                if _eject_requested:
+                    break
+                choice = chunk.get("choices", [{}])[0]
+                delta = choice.get("delta", {})
+
+                # Stream text content live
+                content = delta.get("content") or ""
+                if content:
+                    accumulated_text += content
+                    asyncio.run_coroutine_threadsafe(
+                        queue.put({"type": "text_delta", "content": content}), loop
+                    )
+
+                # Accumulate tool_calls deltas
+                tc_deltas = delta.get("tool_calls")
+                if tc_deltas:
+                    for tc_delta in tc_deltas:
+                        idx = tc_delta.get("index", 0)
+                        while len(accumulated_tool_calls) <= idx:
+                            accumulated_tool_calls.append(
+                                {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+                            )
+                        if tc_delta.get("id"):
+                            accumulated_tool_calls[idx]["id"] = tc_delta["id"]
+                        func = tc_delta.get("function", {})
+                        if func.get("name"):
+                            accumulated_tool_calls[idx]["function"]["name"] += func["name"]
+                        if func.get("arguments"):
+                            accumulated_tool_calls[idx]["function"]["arguments"] += func["arguments"]
+
+            # Emit final response dict
+            final_message: dict = {"role": "assistant", "content": accumulated_text or None}
+            if accumulated_tool_calls:
+                final_message["tool_calls"] = accumulated_tool_calls
+            asyncio.run_coroutine_threadsafe(
+                queue.put({"type": "response", "choices": [{"message": final_message}]}), loop
             )
 
-    try:
-        result = await loop.run_in_executor(None, _sync)
-        yield result
-    except Exception as e:
-        logger.error(f"[llama] generate_with_tools error: {e}")
-        raise
+        except Exception as e:
+            logger.error(f"[llama] generate_with_tools streaming error: {e}")
+            asyncio.run_coroutine_threadsafe(queue.put({"type": "error", "error": str(e)}), loop)
+        finally:
+            asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+
+    threading.Thread(target=_stream_sync, daemon=True).start()
+
+    while True:
+        item = await queue.get()
+        if item is None:
+            break
+        yield item
 
 
 # ──────────────────────────────────────────────────────────────────────────────

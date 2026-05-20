@@ -389,24 +389,37 @@ async def tool_chat(req: ToolChatRequest):
             return
 
         for iteration in range(MAX_ITERATIONS):
-            # First: try tool calling (non-streaming, needed for tool_calls detection)
+            # Streaming tool use: text deltas arrive live, tool_calls accumulated
             response_dict: dict | None = None
             try:
-                async for result in engine_router.generate_with_tools(
+                async for event in engine_router.generate_with_tools(
                     messages=messages,
                     tools=tools,
                     temperature=req.temperature,
                     max_tokens=req.max_tokens,
                 ):
-                    response_dict = result
+                    event_type = event.get("type") if isinstance(event, dict) else None
+                    if event_type == "text_delta":
+                        # Stream text tokens live as they arrive
+                        content = event.get("content", "")
+                        if content:
+                            yield f"data: {_json.dumps({'type': 'text_chunk', 'content': content})}\n\n"
+                    elif event_type == "response":
+                        response_dict = event
+                    elif event_type == "error":
+                        yield f"data: {_json.dumps({'type': 'error', 'error': event.get('error', 'Unknown error')})}\n\n"
+                        return
+                    elif isinstance(event, dict) and "choices" in event:
+                        # Legacy non-streaming response (vLLM fallback)
+                        response_dict = event
             except Exception as e:
                 logger.error(f"[tool-chat] generate_with_tools error: {e}")
                 yield f"data: {_json.dumps({'type': 'error', 'error': str(e)})}\n\n"
                 return
 
             if response_dict is None:
-                yield f"data: {_json.dumps({'type': 'error', 'error': 'No response from model'})}\n\n"
-                return
+                # Text was streamed via text_delta, no response dict — done
+                break
 
             choice = response_dict.get("choices", [{}])[0]
             message = choice.get("message", {})
@@ -450,34 +463,7 @@ async def tool_chat(req: ToolChatRequest):
                 # Continue loop — model may want to call more tools
                 continue
 
-            # No tool_calls → stream final answer via generate() for real token-by-token streaming
-            # generate_with_tools is non-streaming (needed for tool detection) but for plain text
-            # we re-run with streaming=True so the user sees tokens as they arrive.
-            try:
-                async for chunk in engine_router.generate(
-                    messages=messages,
-                    stream=True,
-                    temperature=req.temperature,
-                    max_tokens=req.max_tokens,
-                ):
-                    if not chunk:
-                        continue
-                    content = ""
-                    if isinstance(chunk, str) and '"content"' in chunk:
-                        import re as _re
-                        m = _re.search(r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"', chunk)
-                        content = m.group(1) if m else ""
-                    elif isinstance(chunk, dict):
-                        content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "") or ""
-                    if content:
-                        yield f"data: {_json.dumps({'type': 'text_chunk', 'content': content})}\n\n"
-            except Exception as e:
-                logger.error(f"[tool-chat] streaming fallback error: {e}")
-                # Fallback: send the already-generated text from generate_with_tools
-                final_text: str = message.get("content") or ""
-                if final_text:
-                    yield f"data: {_json.dumps({'type': 'text_chunk', 'content': final_text})}\n\n"
-
+            # No tool_calls — text was already streamed via text_delta events above
             break  # done
 
         else:
