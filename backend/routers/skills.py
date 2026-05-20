@@ -375,13 +375,12 @@ def search_skills(q: str = "", force_refresh: bool = False) -> dict[str, Any]:
                 "authenticated": bool(os.getenv("GITHUB_TOKEN")),
             }
 
-    # Build GitHub query
-    # Search for well-rated MCP servers, LLM tools, CLI integrations — no custom topic required.
-    # Empty query: browse top repos across all relevant categories.
+    # Build GitHub query — GitHub API only supports OR between full qualifier expressions,
+    # mixing stars: with OR-ed topics causes 422. Use plain keyword search instead.
     if not q:
-        github_query = "topic:mcp-server OR topic:mcp OR topic:llm-tools OR topic:ai-tools stars:>10"
+        github_query = "topic:mcp-server stars:>5 fork:false"
     else:
-        github_query = f"{q} topic:mcp-server OR {q} topic:mcp OR {q} topic:ai-tools OR {q} topic:llm-tools"
+        github_query = f"{q} topic:mcp-server fork:false"
 
     headers: dict[str, str] = {"Accept": "application/vnd.github+json"}
     token = os.getenv("GITHUB_TOKEN", "")
