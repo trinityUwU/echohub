@@ -52,7 +52,7 @@ export function RightPanel({ params, onChange, profiles, loadedModel }: RightPan
       </Accordion>
       <Accordion title="Parameters">
         <Slider label="Temperature"  value={params.temperature}     min={0}   max={2}     step={0.01} onChange={v => set('temperature', v)} />
-        <Slider label="Max Tokens"   value={params.maxTokens}       min={256} max={16384} step={256}  onChange={v => set('maxTokens', v)} formatValue={v => v.toLocaleString('en')} />
+        <Slider label="Max Tokens"   value={params.maxTokens}       min={256} max={loadedModel?.max_context_window ?? 131072} step={256}  onChange={v => set('maxTokens', v)} formatValue={v => v.toLocaleString('en')} />
         <Slider label="Top P"        value={params.topP}            min={0}   max={1}     step={0.01} onChange={v => set('topP', v)} />
         <Slider label="Top K"        value={params.topK < 0 ? 40 : params.topK} min={1} max={100} step={1} onChange={v => set('topK', v)} />
         <Slider label="Rep. Penalty" value={params.repetitionPenalty} min={1} max={2}     step={0.01} onChange={v => set('repetitionPenalty', v)} />
