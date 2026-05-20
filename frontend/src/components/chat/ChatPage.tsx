@@ -17,6 +17,7 @@ import { ProjectsHub } from './ProjectsHub'
 import { useChatMode } from '@/hooks/useChatMode'
 import { useProjects } from '@/hooks/useProjects'
 import { clearMessages, deleteMessage } from '@/api/client'
+import { useContextMenu } from '@/components/shared/useContextMenu'
 
 interface ChatPageProps {
   loadedModel: ModelInfo | null
@@ -188,6 +189,7 @@ export function ChatPage({
         loading={loading}
         loadingPct={loadingPct}
         hasCuda={hasCuda}
+        gpu={gpu}
         activeMessages={activeMessages}
         setActiveMessages={setActiveMessages}
         onOpenPicker={onOpenPicker}
@@ -451,6 +453,7 @@ interface ProjectWorkspaceProps {
   loading: boolean
   loadingPct: number
   hasCuda: boolean
+  gpu: GpuStats | null
   activeMessages: ChatMessage[]
   setActiveMessages: (msgs: ChatMessage[]) => void
   onOpenPicker: () => void
@@ -465,7 +468,7 @@ interface ProjectWorkspaceProps {
 }
 
 function ProjectWorkspace({
-  project, loadedModel, loading, loadingPct, hasCuda,
+  project, loadedModel, loading, loadingPct, hasCuda, gpu,
   activeMessages, setActiveMessages,
   onOpenPicker, onEject, onGoToSettings, onBackToHub, onLoadModel,
   view, mode, onViewChange, onModeChange,
@@ -627,9 +630,8 @@ function ProjectWorkspace({
             <ProjectConvSidebar
               conversations={convHook.conversations}
               activeId={convHook.activeId}
-              onSelect={id => {
-                convHook.selectConversation(id)
-              }}
+              gpu={gpu}
+              onSelect={id => { convHook.selectConversation(id) }}
               onNew={() => { void convHook.createConversation() }}
               onDelete={id => { void convHook.deleteConversation(id) }}
               onRename={convHook.renameConversation}
@@ -675,6 +677,7 @@ function ProjectWorkspace({
 interface ProjectConvSidebarProps {
   conversations: ProjectConversation[]
   activeId: string | null
+  gpu: GpuStats | null
   onSelect: (id: string) => void
   onNew: () => void
   onDelete: (id: string) => void
@@ -682,97 +685,153 @@ interface ProjectConvSidebarProps {
 }
 
 function ProjectConvSidebar({
-  conversations, activeId, onSelect, onNew, onDelete, onRename,
+  conversations, activeId, gpu, onSelect, onNew, onDelete, onRename,
 }: ProjectConvSidebarProps): React.ReactElement {
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editValue, setEditValue] = useState('')
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const { open: openCtx } = useContextMenu()
 
-  const startEdit = (conv: ProjectConversation, e: React.MouseEvent): void => {
-    e.stopPropagation()
-    setEditingId(conv.id)
-    setEditValue(conv.title)
-  }
-
-  const commitEdit = (id: string): void => {
-    if (editValue.trim()) void onRename(id, editValue.trim())
-    setEditingId(null)
+  const handleContextMenu = (e: React.MouseEvent, conv: ProjectConversation): void => {
+    const RenameIcon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    const DeleteIcon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/></svg>
+    openCtx(e, [
+      { label: 'Rename', icon: RenameIcon, onClick: () => setRenamingId(conv.id) },
+      { label: '', separator: true, onClick: () => {} },
+      { label: 'Delete', icon: DeleteIcon, danger: true, onClick: () => onDelete(conv.id) },
+    ])
   }
 
   return (
-    <div className="w-[200px] flex flex-col h-full bg-surface py-2">
-      <div className="flex items-center justify-between px-3 pb-2 border-b border-border">
-        <span className="text-xs font-medium text-text-muted uppercase tracking-wider">Conversations</span>
-        <button
-          onClick={onNew}
-          title="New conversation"
-          className="w-6 h-6 flex items-center justify-center rounded text-text-muted hover:text-text-primary hover:bg-overlay transition-colors cursor-pointer"
-        >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <aside className="w-[240px] h-full bg-surface border-r border-border flex flex-col flex-shrink-0 overflow-hidden">
+      <div className="flex items-center gap-2 px-3.5 py-3 border-b border-border">
+        <h2 className="flex-1 text-xs font-semibold uppercase tracking-widest text-text-muted">Chats</h2>
+        <button onClick={onNew}
+          className="w-[26px] h-[26px] flex items-center justify-center rounded-sm hover:bg-overlay text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+          title="New chat">
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto py-1">
-        <AnimatePresence initial={false}>
-          {conversations.map(conv => (
-            <motion.div
-              key={conv.id}
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.15 }}
-              className={`group relative flex items-center mx-1 mb-0.5 rounded-md cursor-pointer transition-colors ${
-                conv.id === activeId
-                  ? 'bg-accent/15 text-text-primary'
-                  : 'text-text-secondary hover:bg-overlay hover:text-text-primary'
-              }`}
-              onClick={() => onSelect(conv.id)}
-            >
-              {editingId === conv.id ? (
-                <input
-                  autoFocus
-                  className="flex-1 px-2 py-1.5 text-xs bg-transparent outline-none"
-                  value={editValue}
-                  onChange={e => setEditValue(e.target.value)}
-                  onBlur={() => commitEdit(conv.id)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') commitEdit(conv.id)
-                    if (e.key === 'Escape') setEditingId(null)
-                  }}
-                  onClick={e => e.stopPropagation()}
-                />
-              ) : (
-                <>
-                  <span className="flex-1 px-2 py-1.5 text-xs truncate">{conv.title}</span>
-                  <div className="hidden group-hover:flex items-center gap-0.5 pr-1 flex-shrink-0">
-                    <button
-                      title="Rename"
-                      className="w-5 h-5 flex items-center justify-center rounded hover:bg-overlay text-text-muted hover:text-text-secondary cursor-pointer"
-                      onClick={e => startEdit(conv, e)}
-                    >
-                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                      </svg>
-                    </button>
-                    <button
-                      title="Delete"
-                      className="w-5 h-5 flex items-center justify-center rounded hover:bg-red/20 text-text-muted hover:text-red cursor-pointer"
-                      onClick={e => { e.stopPropagation(); onDelete(conv.id) }}
-                    >
-                      <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
-                      </svg>
-                    </button>
-                  </div>
-                </>
-              )}
-            </motion.div>
-          ))}
-        </AnimatePresence>
+
+      <div className="flex-1 overflow-y-auto p-2">
         {conversations.length === 0 && (
-          <p className="px-3 py-2 text-xs text-text-muted italic">No conversations yet</p>
+          <div className="text-xs text-text-muted text-center py-8 px-2">No conversations yet.<br/>Click + to start.</div>
         )}
+        {conversations.map(conv => (
+          <ProjConvItem
+            key={conv.id}
+            conv={conv}
+            active={conv.id === activeId}
+            renaming={renamingId === conv.id}
+            onClick={() => { if (renamingId !== conv.id) onSelect(conv.id) }}
+            onContextMenu={e => handleContextMenu(e, conv)}
+            onDelete={() => onDelete(conv.id)}
+            onRenameStart={() => setRenamingId(conv.id)}
+            onRenameSubmit={title => { setRenamingId(null); void onRename(conv.id, title) }}
+            onRenameCancel={() => setRenamingId(null)}
+          />
+        ))}
       </div>
+
+      {gpu && <ProjGpuSection gpu={gpu} />}
+    </aside>
+  )
+}
+
+function ProjConvItem({ conv, active, renaming, onClick, onContextMenu, onDelete, onRenameStart, onRenameSubmit, onRenameCancel }: {
+  conv: ProjectConversation; active: boolean; renaming: boolean
+  onClick: () => void; onContextMenu: (e: React.MouseEvent) => void
+  onDelete: () => void; onRenameStart: () => void
+  onRenameSubmit: (t: string) => void; onRenameCancel: () => void
+}): React.ReactElement {
+  const [val, setVal] = useState(conv.title)
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (renaming) { setVal(conv.title); setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select() }, 0) }
+  }, [renaming, conv.title])
+  const submit = (): void => { const v = val.trim(); if (v && v !== conv.title) onRenameSubmit(v); else onRenameCancel() }
+
+  return (
+    <div
+      className={`group flex items-center rounded-sm mb-0.5 cursor-pointer transition-colors ${active ? 'bg-accent/15 text-accent' : 'text-text-secondary hover:bg-overlay hover:text-text-primary'}`}
+      onClick={onClick}
+      onContextMenu={onContextMenu}
+    >
+      {renaming ? (
+        <input
+          ref={inputRef}
+          className="flex-1 px-2.5 py-1.5 text-sm bg-transparent outline-none"
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          onBlur={submit}
+          onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onRenameCancel() }}
+          onClick={e => e.stopPropagation()}
+        />
+      ) : (
+        <>
+          <span className="flex-1 px-2.5 py-1.5 text-sm truncate">{conv.title}</span>
+          <div className="hidden group-hover:flex items-center gap-0.5 pr-1">
+            <button title="Rename" onClick={e => { e.stopPropagation(); onRenameStart() }}
+              className="w-5 h-5 flex items-center justify-center rounded hover:bg-overlay text-text-muted hover:text-text-secondary cursor-pointer">
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
+            <button title="Delete" onClick={e => { e.stopPropagation(); onDelete() }}
+              className="w-5 h-5 flex items-center justify-center rounded hover:bg-red/20 text-text-muted hover:text-red cursor-pointer">
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/>
+              </svg>
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function ProjGpuSection({ gpu }: { gpu: GpuStats }): React.ReactElement {
+  const [open, setOpen] = useState(false)
+  const vramPct = gpu.vram_total_mb > 0 ? gpu.vram_used_mb / gpu.vram_total_mb : 0
+  const gpuPct  = gpu.gpu_utilization_pct ?? 0
+  const usedGb  = (gpu.vram_used_mb / 1024).toFixed(1)
+  const totalGb = (gpu.vram_total_mb / 1024).toFixed(0)
+  const shortName = gpu.name.replace('NVIDIA GeForce ', '').replace('AMD Radeon ', '').replace('Apple ', '')
+  return (
+    <div className="border-t border-border mt-auto">
+      <button onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-overlay transition-colors cursor-pointer">
+        <div className="flex items-center gap-2 text-xs font-medium text-text-secondary">
+          <span className="w-1.5 h-1.5 rounded-full bg-green flex-shrink-0" />
+          GPUs (1)
+        </div>
+        <svg className={`w-3 h-3 stroke-text-muted transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+          viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+      {open && (
+        <div className="px-3 pb-3 flex flex-col gap-2.5">
+          <div className="text-xs font-medium text-text-primary truncate">{shortName}</div>
+          {[
+            { label: 'VRAM', value: `${usedGb}/${totalGb} GB`, pct: vramPct, color: vramPct > 0.9 ? 'bg-red' : vramPct > 0.75 ? 'bg-yellow' : 'bg-accent' },
+            ...(gpu.vram_total_mb > 0 ? [{ label: 'GPU', value: `${gpuPct}%`, pct: gpuPct / 100, color: gpuPct > 90 ? 'bg-red' : gpuPct > 70 ? 'bg-yellow' : 'bg-green' }] : []),
+          ].map(b => (
+            <div key={b.label}>
+              <div className="flex justify-between text-2xs text-text-muted mb-1"><span>{b.label}</span><span className="font-mono">{b.value}</span></div>
+              <div className="h-1.5 bg-overlay rounded-sm overflow-hidden">
+                <div className={`h-full rounded-sm transition-all duration-500 ${b.color}`} style={{ width: `${Math.min(b.pct * 100, 100)}%` }} />
+              </div>
+            </div>
+          ))}
+          {gpu.temperature_c != null && (
+            <div className="flex justify-between text-2xs">
+              <span className="text-text-muted">Temp</span>
+              <span className={`font-mono ${gpu.temperature_c > 80 ? 'text-red' : gpu.temperature_c > 70 ? 'text-yellow' : 'text-text-muted'}`}>{gpu.temperature_c}°C</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
