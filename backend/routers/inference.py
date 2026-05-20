@@ -342,6 +342,8 @@ class ToolChatRequest(BaseModel):
     temperature: float = 0.2
     max_tokens: int = 8192
     stream: bool = True
+    enabled_tools: list[str] | None = None
+    awareness_block: str | None = None
 
 
 @router.post("/tool-chat")
@@ -356,7 +358,7 @@ async def tool_chat(req: ToolChatRequest):
     if engine_router.get_status() is None:
         raise HTTPException(status_code=404, detail="No model loaded.")
 
-    tools = get_tools()
+    tools = get_tools(req.enabled_tools)
     MAX_ITERATIONS = 40  # generous — model decides when it's done; we warn at threshold
 
     async def _event_stream():
@@ -387,8 +389,11 @@ async def tool_chat(req: ToolChatRequest):
             "- After all tool calls, write a brief 1-2 sentence summary of what was done. No code blocks in the summary."
         )
         user_system = (req.system_prompt or "").strip()
+        awareness = (req.awareness_block or "").strip()
         # _DEV_SYSTEM_PROMPT is always prepended — user system prompt appended after, never replacing it
         combined_system = _DEV_SYSTEM_PROMPT
+        if awareness:
+            combined_system += f"\n\n---\nACTIVE SKILLS:\n{awareness}"
         if user_system:
             combined_system += f"\n\n---\nADDITIONAL INSTRUCTIONS:\n{user_system}"
         messages.append({"role": "system", "content": combined_system})

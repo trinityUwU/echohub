@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toolChat, summarizeMessages } from '@/api/client'
-import type { ChatMessage, GenerationStats, ToolCall, WorkspaceFile } from '@/types'
+import type { ChatMessage, GenerationStats, SkillsConfig, ToolCall, WorkspaceFile } from '@/types'
 
 // ── SSE event shapes ──────────────────────────────────────────────────────────
 
@@ -55,12 +55,12 @@ export interface UseToolChatReturn {
   streaming: boolean
   genStats: GenerationStats | null
   usedTokens: number
-  send: (text: string, systemPrompt?: string) => Promise<void>
+  send: (text: string, systemPrompt?: string, skills?: SkillsConfig) => Promise<void>
   stop: () => void
   clear: () => void
   compact: () => Promise<void>
   loadHistory: (msgs: Array<{ role: string; content: string }>) => void
-  clearAndResend: (history: ChatMessage[], newText: string, systemPrompt?: string) => void
+  clearAndResend: (history: ChatMessage[], newText: string, systemPrompt?: string, skills?: SkillsConfig) => void
 }
 
 interface UseToolChatOptions {
@@ -167,7 +167,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     }
   }, [])
 
-  const send = useCallback(async (text: string, systemPrompt?: string): Promise<void> => {
+  const send = useCallback(async (text: string, systemPrompt?: string, skills?: SkillsConfig): Promise<void> => {
     // Auto-compact at 98% of context window before sending
     // Use usedTokensRef (synced with the displayed token counter) as the source of truth
     const { maxContextTokens } = optionsRef.current
@@ -229,6 +229,8 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
       messages: historyToSend,
       project_id: projectId,
       system_prompt: systemPrompt,
+      enabled_tools: skills?.enabledTools,
+      awareness_block: skills?.awarenessBlock,
     }
 
     ;(async (): Promise<void> => {
@@ -344,12 +346,12 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     })()
   }, [projectId])
 
-  const clearAndResend = useCallback((history: ChatMessage[], newText: string, systemPrompt?: string): void => {
+  const clearAndResend = useCallback((history: ChatMessage[], newText: string, systemPrompt?: string, skills?: SkillsConfig): void => {
     abortRef.current?.abort()
     messagesRef.current = history
     setMessages(history)
     setToolCalls([])
-    send(newText, systemPrompt)
+    send(newText, systemPrompt, skills)
   }, [send])
 
   return { messages, toolCalls, workspaceFiles, streaming, genStats, usedTokens, send, stop, clear, compact, loadHistory, clearAndResend }

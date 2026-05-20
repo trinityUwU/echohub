@@ -373,6 +373,14 @@ export interface ToolChatRequest {
   system_prompt?: string
   temperature?: number
   max_tokens?: number
+  enabled_tools?: string[]
+  awareness_block?: string
+}
+
+export interface SkillsConfig {
+  enabledTools: string[]
+  awarenessBlock: string
+  hasToolSkills: boolean
 }
 
 export interface DownloadHistoryEntry {

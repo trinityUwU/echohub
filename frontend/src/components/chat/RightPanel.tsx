@@ -6,15 +6,17 @@ import { Toggle } from '@/components/shared/Toggle'
 import type { ChatParams, ModelInfo } from '@/types'
 import type { useProfiles } from '@/hooks/useProfiles'
 import { isThinkingControllable } from '@/api/client'
+import { SKILLS, type SkillId, type UseSkillsReturn } from '@/hooks/useSkills'
 
 interface RightPanelProps {
   params: ChatParams
   onChange: (p: ChatParams) => void
   profiles: ReturnType<typeof useProfiles>
   loadedModel?: ModelInfo | null
+  skills?: UseSkillsReturn
 }
 
-export function RightPanel({ params, onChange, profiles, loadedModel }: RightPanelProps): React.ReactElement {
+export function RightPanel({ params, onChange, profiles, loadedModel, skills }: RightPanelProps): React.ReactElement {
   const thinkControllable = isThinkingControllable(loadedModel?.id)
   const modelHasThinking = loadedModel?.capabilities?.thinking ?? false
   const set = <K extends keyof ChatParams>(k: K, v: ChatParams[K]): void => onChange({ ...params, [k]: v })
@@ -57,6 +59,11 @@ export function RightPanel({ params, onChange, profiles, loadedModel }: RightPan
         <Slider label="Top K"        value={params.topK < 0 ? 40 : params.topK} min={1} max={100} step={1} onChange={v => set('topK', v)} />
         <Slider label="Rep. Penalty" value={params.repetitionPenalty} min={1} max={2}     step={0.01} onChange={v => set('repetitionPenalty', v)} />
       </Accordion>
+      {skills && (
+        <Accordion title="Skills">
+          <SkillsSection skills={skills} />
+        </Accordion>
+      )}
       <Accordion title="Features">
         {modelHasThinking && !thinkControllable ? (
           <div className="flex items-start justify-between py-1.5 gap-2">
@@ -242,6 +249,28 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
     <div className="flex justify-between items-center py-1.5 text-sm text-text-secondary">
       <span>{label}</span>
       <Toggle on={value} onChange={onChange} />
+    </div>
+  )
+}
+
+function SkillsSection({ skills }: { skills: UseSkillsReturn }): React.ReactElement {
+  return (
+    <div className="flex flex-col gap-1">
+      {SKILLS.map(skill => {
+        const active = skills.activeIds.has(skill.id as SkillId)
+        return (
+          <div key={skill.id} className="flex items-center justify-between py-1.5 gap-2">
+            <div className="flex flex-col">
+              <span className={`text-sm ${active ? 'text-text-primary' : 'text-text-secondary'}`}>{skill.name}</span>
+              <span className="text-2xs text-text-muted leading-tight">{skill.description}</span>
+            </div>
+            <Toggle on={active} onChange={() => skills.toggle(skill.id as SkillId)} />
+          </div>
+        )
+      })}
+      {skills.hasToolSkills && (
+        <p className="text-2xs text-accent mt-1">Tool use actif — le chat utilise /tool-chat</p>
+      )}
     </div>
   )
 }

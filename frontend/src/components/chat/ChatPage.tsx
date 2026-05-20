@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useChat } from '@/hooks/useChat'
 import { useToolChat } from '@/hooks/useToolChat'
 import { useProfiles } from '@/hooks/useProfiles'
+import { useSkills } from '@/hooks/useSkills'
 import type { ConversationSummary, ModelInfo, GpuStats, ChatMessage, LoadConfig, ChatParams, GenerationStats, Attachment, ToolCall, WorkspaceFile } from '@/types'
 import type { ChatView, ProjectMode } from '@/hooks/useChatMode'
 import { ConvSidebar } from '@/components/nav/ConvSidebar'
@@ -42,6 +43,15 @@ interface ChatPageProps {
   onLoadModel?: (config: LoadConfig) => void
 }
 
+function buildChatSystemPrompt(params: ChatParams): string | undefined {
+  const base = params.systemPrompt?.trim() ?? ''
+  const rules = params.permanentRules?.trim() ?? ''
+  return [
+    base,
+    rules ? `\n\n---\nPERMANENT RULES (always apply, never ignore):\n${rules}` : '',
+  ].join('').trim() || undefined
+}
+
 export function ChatPage({
   loadedModel, loading, loadingPct, gpu, hasCuda,
   conversations, archivedConversations, activeId, activeMessages,
@@ -53,6 +63,7 @@ export function ChatPage({
   const { view, mode, activeProject, setView, setMode, openProject, closeProject } = useChatMode()
   const projectsHook = useProjects()
   const profilesHook = useProfiles() // chat-scoped only — project workspace has its own
+  const skillsHook = useSkills()
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [rightCollapsed, setRightCollapsed] = useState(false)
   const [showLogs, setShowLogs] = useState(false)
@@ -74,7 +85,7 @@ export function ChatPage({
   const activeConv = conversations.find(cv => cv.id === activeId)
   const activeModelName = loadedModel?.name ?? activeConv?.model_id?.split('/').pop() ?? null
 
-  const { messages, streaming, stats, send, sendFromHistory, stop, setMessages, usedTokens, isTokensExact, oomError } = useChat(
+  const chatHookBase = useChat(
     params,
     activeMessages,
     setActiveMessages,
@@ -83,6 +94,29 @@ export function ChatPage({
     activeId ?? undefined,
     activeModelName,
   )
+
+  // When tool skills are active, normal chat routes through useToolChat (skill mode, no project)
+  const skillChatHook = useToolChat('__skills__', {
+    conversationId: activeId ?? null,
+    maxContextTokens: loadedModel?.max_context_window ?? undefined,
+  })
+
+  const useSkillMode = skillsHook.hasToolSkills
+  const { messages, streaming, stats, send, sendFromHistory, stop, setMessages, usedTokens, isTokensExact, oomError } = useSkillMode
+    ? {
+        messages: skillChatHook.messages,
+        streaming: skillChatHook.streaming,
+        stats: skillChatHook.genStats,
+        send: (text: string, _loaded: boolean, _attachments?: Attachment[]) =>
+          skillChatHook.send(text, buildChatSystemPrompt(params), skillsHook),
+        sendFromHistory: (_history: ChatMessage[]) => {},
+        stop: skillChatHook.stop,
+        setMessages: (msgs: ChatMessage[]) => { skillChatHook.loadHistory(msgs.map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content : '' }))) },
+        usedTokens: skillChatHook.usedTokens,
+        isTokensExact: false,
+        oomError: false,
+      }
+    : chatHookBase
 
   // Sync messages when conversation changes OR when activeMessages loads from DB
   // streaming flag prevents reset mid-generation
@@ -310,7 +344,7 @@ export function ChatPage({
           isDevMode={false}
         />
         <PanelWrapper side="right" collapsed={rightCollapsed} onToggle={toggleRight}>
-          <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />
+          <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} skills={skillsHook} />
         </PanelWrapper>
       </div>
     </div>
@@ -534,6 +568,7 @@ function ProjectWorkspace({
     maxContextTokens: loadedModel?.max_context_window ?? undefined,
   })
 
+  const projectSkillsHook = useSkills()
   const isDevMode = project.mode === 'dev'
 
   // Load history when active conversation changes
@@ -580,6 +615,7 @@ function ProjectWorkspace({
         history.filter(m => m.role === 'user' && !String(m.content).startsWith('[tool:')),
         typeof lastUser.content === 'string' ? lastUser.content : '',
         _devSys,
+        projectSkillsHook,
       )
     } else {
       chatHook.sendFromHistory(history)
@@ -590,7 +626,7 @@ function ProjectWorkspace({
     if (!loadedModel) return
     if (isDevMode) {
       const prevUserMessages = messages.slice(0, index).filter(m => m.role === 'user' && !String(m.content).startsWith('[tool:'))
-      toolChatHook.clearAndResend(prevUserMessages, newText, buildDevSystemPrompt(params))
+      toolChatHook.clearAndResend(prevUserMessages, newText, buildDevSystemPrompt(params), projectSkillsHook)
     } else {
       const updated = { ...messages[index], content: newText }
       chatHook.sendFromHistory([...messages.slice(0, index), updated])
@@ -630,7 +666,8 @@ function ProjectWorkspace({
       // Inject a message to the model asking it to call set_tool_limit
       void toolChatHook.send(
         `Call set_tool_limit with new_limit=${cmd.value} and reason="User requested limit increase via /limit command."`,
-        buildDevSystemPrompt(params)
+        buildDevSystemPrompt(params),
+        projectSkillsHook,
       )
       return
     }
@@ -719,7 +756,7 @@ function ProjectWorkspace({
           onRegenerate={handleRegenerate}
           onEditUser={handleEditUser}
           onSend={isDevMode
-            ? (text) => toolChatHook.send(text, buildDevSystemPrompt(params))
+            ? (text) => toolChatHook.send(text, buildDevSystemPrompt(params), projectSkillsHook)
             : (text, attachments) => chatHook.send(text, !!loadedModel, attachments)
           }
           onStop={stop}
@@ -729,7 +766,7 @@ function ProjectWorkspace({
           isDevMode={isDevMode}
         />
         <PanelWrapper side="right" collapsed={rightCollapsed} onToggle={() => setRightCollapsed(v => !v)}>
-          <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />
+          <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} skills={projectSkillsHook} />
         </PanelWrapper>
       </div>
     </div>

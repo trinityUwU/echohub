@@ -240,9 +240,11 @@ def _safe_path(workspace: Path, relative: str) -> Path:
 # Public API
 # ──────────────────────────────────────────────────────────────────────────────
 
-def get_tools() -> list[dict[str, Any]]:
-    """Return the TOOLS list for use as tool_choice param."""
-    return TOOLS
+def get_tools(enabled: list[str] | None = None) -> list[dict[str, Any]]:
+    """Return tools, optionally filtered to the enabled set."""
+    if enabled is None:
+        return TOOLS
+    return [t for t in TOOLS if t["function"]["name"] in enabled]
 
 
 def execute_tool(name: str, arguments: dict[str, Any], project_id: str) -> str:
