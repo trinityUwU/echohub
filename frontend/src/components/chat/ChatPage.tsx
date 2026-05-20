@@ -447,6 +447,15 @@ import type { Project } from '@/hooks/useProjects'
 import { useProjectConversations } from '@/hooks/useProjectConversations'
 import type { ProjectConversation } from '@/hooks/useProjectConversations'
 
+function buildDevSystemPrompt(params: ChatParams): string | undefined {
+  const base = params.systemPrompt?.trim() ?? ''
+  const rules = params.permanentRules?.trim() ?? ''
+  return [
+    base,
+    rules ? `\n\n---\nPERMANENT RULES (always apply, never ignore):\n${rules}` : '',
+  ].join('').trim() || undefined
+}
+
 interface ProjectWorkspaceProps {
   project: Project
   loadedModel: ModelInfo | null
@@ -543,10 +552,11 @@ function ProjectWorkspace({
       const lastUser = [...history].reverse().find(m => m.role === 'user' && !String(m.content).startsWith('[tool:'))
       if (!lastUser) return
       // Clear state and resend only the user messages up to this point
+      const _devSys = buildDevSystemPrompt(params)
       toolChatHook.clearAndResend(
         history.filter(m => m.role === 'user' && !String(m.content).startsWith('[tool:')),
         typeof lastUser.content === 'string' ? lastUser.content : '',
-        params.systemPrompt || undefined,
+        _devSys,
       )
     } else {
       chatHook.sendFromHistory(history)
@@ -556,9 +566,8 @@ function ProjectWorkspace({
   const handleEditUser = (index: number, newText: string): void => {
     if (!loadedModel) return
     if (isDevMode) {
-      // Keep only user messages before this index, then resend with new text
       const prevUserMessages = messages.slice(0, index).filter(m => m.role === 'user' && !String(m.content).startsWith('[tool:'))
-      toolChatHook.clearAndResend(prevUserMessages, newText, params.systemPrompt || undefined)
+      toolChatHook.clearAndResend(prevUserMessages, newText, buildDevSystemPrompt(params))
     } else {
       const updated = { ...messages[index], content: newText }
       chatHook.sendFromHistory([...messages.slice(0, index), updated])
@@ -657,7 +666,7 @@ function ProjectWorkspace({
           onRegenerate={handleRegenerate}
           onEditUser={handleEditUser}
           onSend={isDevMode
-            ? (text) => toolChatHook.send(text, params.systemPrompt || undefined)
+            ? (text) => toolChatHook.send(text, buildDevSystemPrompt(params))
             : (text, attachments) => chatHook.send(text, !!loadedModel, attachments)
           }
           onStop={stop}

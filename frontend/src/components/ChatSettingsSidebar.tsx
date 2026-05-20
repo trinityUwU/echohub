@@ -292,6 +292,22 @@ export function ChatSettingsSidebar({ params, onChange, maxContextWindow }: Prop
         </div>
       </Section>
 
+      <Section title="Permanent Rules" defaultOpen={false}>
+        <div className="space-y-2">
+          <p className="text-xs text-muted leading-relaxed">
+            Always injected after the system prompt, every turn. Use this to enforce behaviors the model must never ignore.
+          </p>
+          <textarea
+            value={params.permanentRules}
+            onChange={(e) => set('permanentRules', e.target.value)}
+            placeholder={"Example:\n- Always use tools to write files\n- Never output code in markdown"}
+            rows={5}
+            className="w-full bg-surface-2 border border-border rounded-lg px-3 py-2 text-xs text-white placeholder-muted resize-none focus:outline-none focus:border-accent/60 font-mono"
+          />
+          <p className="text-xs text-muted text-right">~{Math.round(params.permanentRules.length / 4)} tokens</p>
+        </div>
+      </Section>
+
       <Section title="Profiles">
         <div className="space-y-2">
           <select
