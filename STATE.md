@@ -1,96 +1,101 @@
 # STATE — EchoHub
-*Dernière mise à jour : 2026-05-20 (session 18)*
+*Dernière mise à jour : 2026-05-20 (session 19)*
 
 ## Résumé de l'état actuel
 
-Application Tauri v2 native complète. Session 18 = Projects system complet (hub, workspaces, profils scopés), Dev mode avec tool use filesystem, conversations projets persistées SQLite, KV cache sélectionnable dans LoadModal, streaming tool calls réel. Bugs actifs : raw `<tool_call>` visible dans le chat, loop list_files après create_file, footer stats absent en Dev mode.
+Application Tauri v2 native stable. Session 19 = refonte complète du streaming Dev mode (interleaved tool execution, think/tool parser, live JSON streaming), auto-compact 98%, slash commands input, Skills/Awareness system décidé et prêt à implémenter, web search via Scrapling intégré. Application en état stable.
 
-## Ce qui a été fait — session 18 (2026-05-20)
+## Ce qui a été fait — session 19 (2026-05-20)
 
-### Projects system
-- `useChatMode` : ChatView/ProjectMode, activeProject, openProject/closeProject
-- `useProjects` : CRUD projets localStorage (name, mode, description, archived)
-- `ProjectsHub` : grille, filtres All/Dev/Docs/Research/Archived, create inline, context menu, search
-- `ProjectsPanel` : panneau gauche 260px collapsible, animé
-- `ProjectWorkspace` : composant isolé `key={project.id}`, useProfiles scopé par projet
-- `useProfiles` scope : builtins Dev (Dev/Debug/Code Review), Docs (Writer/Summarizer/Translator), Research (Analyst/Brainstorm/Fact-check)
-- Topbar full-width, sidebars dessous, PanelWrapper collapsible gauche+droite
-- GPU section pinned bottom ConvSidebar (h-full fix)
+### Streaming interleaved tool execution
+- Backend : détection `</tool_call>` token-par-token, stop_event threading → exécution outil immédiate mid-stream, reprise génération
+- `llama_service.generate_with_tools` : paramètre `stop_event: threading.Event` pour interruption propre
+- Plus de GIF pendant tool use — tout stream en live
+- `tool_call_streaming` SSE event : JSON généré token par token visible dans ToolCallBlock
 
-### Dev mode — Tool use
-- `tool_service.py` : create_file, read_file, list_files, delete_file, edit_file (run_command supprimé)
-- `llama_service.generate_with_tools` : streaming réel (stream=True), accumulation tool_calls deltas
-- `/inference/tool-chat` : boucle agentique SSE, parse `<tool_call>` texte, anti-loop, done toujours émis
-- `useToolChat` : hook + tool calls + workspace files + persistence + clearAndResend
-- `DevPanel` : arborescence, tool calls section, file viewer modal (eye+delete au hover, copy)
-- GET/DELETE `/projects/{id}/workspace-files/{path}` + poll 2s temps réel
-- `MessageRow.ToolCallRow` : bloc animé spinner/checkmark, jaune/vert
+### Parser MessageContent à état
+- Parser complet `<think>/<tool_call>/<tool_result>` avec tracking `inThink` context
+- Texte inter-tools dans `<think>` = thinking (pas texte visible)
+- Orphan `</think>` (Qwen3) → tout le préfixe = thinking
+- `ToolCallBlock` toujours ouvert pendant streaming (force open = streaming)
+- Style identique ThinkingBlock : jaune pour tool_call, vert pour tool_result
 
-### Conversations projets
-- DB tables `project_conversations` + `project_messages` (migration auto)
-- Router `/projects/{id}/conversations` CRUD + messages
-- `useProjectConversations` + `ProjectConvSidebar` (identique ConvSidebar : 240px, GPU, context menu)
+### Auto-compact 98%
+- `useToolChat` : compaction déclenchée via `usedTokensRef` (source de vérité) à 98% du contexte
+- Animation inline "Compacting…" → "Context compacted" sans modifier messages visibles
+- `compactedSummaryRef` injecté dans `historyToSend` seulement, display intact
+- `compact()` exposé dans UseToolChatReturn, accessible via /compact
 
-### KV cache
-- LoadModal : sélecteur Q8_0/Q4_0/BF16, VRAM preview temps réel
-- `llama_service` : type_k/type_v dynamique
-- Résultat validé : Qwen3.5-9B à 131K ctx en 9.4GB VRAM avec Q4_0 ✅
+### Cap tool calls dynamique
+- `set_tool_limit(new_limit, reason)` : modèle peut lever sa propre limite (max 300)
+- Warning injecté à J-2 avant cap, reset à chaque nouvelle limite
+- Cap initial 60 (était 6), MAX_ITERATIONS 40
 
-### Autres fixes session 18
-- GGUF detection LoadModal élargie (Q4/Q5/Q6/Q8/IQ/i1/i2 dans name+id+arch_tag)
-- Tools detection : familles qwen2.5/qwen3/llama-3.1+/mistral/mixtral tool-capable
-- Discover filtre Tools : 3 passes HF (tool-calling/function-calling/tool-use)
-- Badge tools dans ModelCard + ModelPickerModal
-- max_tokens slider scale avec max_context_window
-- MoE VRAM guard : GGML_CUDA_ENABLE_UNIFIED_MEMORY + split_mode=LAYER + n_gpu_layers dynamique
-- KV Q8_0 par défaut
-- Logs panel dans projets (œil toggle)
-- Regen/edit Dev mode : clearAndResend (plus d'empilement)
-- Arrow-up send icon
-- docs/v0.7-projects-workspace.md + README mis à jour
+### Tools Dev mode enrichis
+- `run_command` whitelist : node, python3, tsc, eslint, jshint, deno
+- `get_workspace_info` : path absolu + métadonnées
+- `set_tool_limit` : modèle lève sa propre limite
+- `fetch_url` + `web_search` via Scrapling (backend venv, testés OK)
+- `read_file` : numéros de ligne + plage start_line/end_line
+- `edit_file` : mode ligne (start_line/end_line/new_content) + diagnostic échec
+
+### UX/Input
+- Slash commands : /clear /compact /tokens /model /files /limit — menu popup animé
+- Auto-focus textarea sur keypress global
+- Permanent Rules UI dans ChatSettingsSidebar
+- Placeholder : "Message… · type / for commands"
+
+### Fixes
+- `capabilities` détectées au load modèle (llama_service → _detect_capabilities)
+- `projectId=""` hardcodé dans DevPanel → fix lecture/suppression fichiers
+- Context bar sync en temps réel (text_chunk ET tool_call_streaming)
+- Dev system prompt toujours préfixé, inviolable
+- Auto-compact trigger via usedTokensRef (messagesRef manquait les tool_results inline)
 
 ## Décisions prises
 
 | Décision | Raison | Date |
 |----------|--------|------|
-| run_command supprimé Dev mode | Modèles locaux instables → risque destruction données | 2026-05-20 |
-| KV Q8_0 par défaut | Standard LM Studio/Ollama, 50% VRAM KV | 2026-05-20 |
-| stream=True pour generate_with_tools | Streaming natif disponible llama-cpp-python | 2026-05-20 |
-| Tool calls texte streamés sans filtrage | Chris veut tout voir en live | 2026-05-20 |
-| Anti-loop tool calls | Modèle boucle sur list_files après create_file | 2026-05-20 |
+| Skills/Awareness system | Trop de tools surchargent un 9B — awareness court (≤100 tokens) par skill activé | 2026-05-20 |
+| fetch_url + web_search via Scrapling | Lib déjà clonée /mnt/projects, anti-bot, testée OK venv backend | 2026-05-20 |
+| set_tool_limit côté modèle | Boucle légitime ≠ boucle erreur — modèle lève = intention valide | 2026-05-20 |
+| read_file numéros de ligne | edit_file échouait sur whitespace — numéros = édition fiable | 2026-05-20 |
+| display/historyToSend séparés dans compact | Messages visibles ne doivent jamais disparaître | 2026-05-20 |
+| usedTokensRef pour trigger compact | messagesRef sous-estime (manque tool_results inline) | 2026-05-20 |
 
 ## Contexte non-évident
 
-- Qwen3.5-9B-Claude-Opus émet tool calls en texte `<tool_call>{JSON}</tool_call>` (pas structured output natif) → parsing regex obligatoire dans le backend
-- Ce modèle refuse parfois des requêtes code complexe (héritage restrictions Claude)
-- Workspace projets : `~/.local/share/echohub/projects/{project_id}/workspace/`
-- Python 3.11 : f-string avec backslash interdit → variable intermédiaire obligatoire
-- GGML_CUDA_ENABLE_UNIFIED_MEMORY=1 = clé pour MoE 35B sur 12GB (experts spillent en RAM)
-- MoE lent sur 12GB : experts non actifs en RAM, fetched via PCIe à chaque token
-- Best choix code sur 12GB : Qwen2.5-Coder-14B Q4_K_M (~9.5GB avec KV Q8_0 32K)
+- Scrapling installé `backend/.venv` via `pip install scrapling[all]` — curl_cffi requis
+- `web_search` utilise DuckDuckGo HTML — pas d'API key, sélecteurs `.result` (brittle si DDG change)
+- `stop_event.set()` coupe le stream llama proprement après chunk en cours
+- System prompt Dev : `_DEV_SYSTEM_PROMPT` toujours préfixé, user en ADDITIONAL INSTRUCTIONS
+- Slash commands exécutées côté client, jamais envoyées au modèle
+- Auto-compact non testé en conditions réelles (session < 98% du contexte)
 
-## Bugs actifs (à corriger session 19)
+## Prochaines étapes (session 20)
 
-1. **Raw `<tool_call>` visible** : le JSON du tool call s'affiche en plain text dans le message assistant. Besoin d'un rendu inline formaté (pas suppression — Chris veut tout streamer)
-2. **list_files loop** : après create_file, modèle appelle list_files en boucle → anti-loop stoppe mais "Max iterations reached" ugly. Fix : injection système "summarize what you did" après tool results
-3. **Footer stats absent Dev mode** : pas de tok/s dans les messages, `useToolChat` ne retourne pas `stats`
-4. **Context bar statique Dev mode** : `usedTokens = 0` hardcodé pour isDevMode
+1. **Skills/Awareness system** (priorité absolue)
+   - Skills : Web Search, Code Runner, File System, Calculator
+   - Toggles panneau droit — activables partout (chat normal + projets)
+   - Awareness ≤ 100 tokens par skill injecté dynamiquement dans system prompt
+   - Seuls les tools des skills actifs exposés au modèle
+   - Chat normal bascule sur /tool-chat si skills tools activés
+   - Audit codebase préalable avec sous-agents
 
-## Prochaines étapes
+2. **Push + release notes**
 
-1. Fix loop list_files : prompt injection post-tools "now respond with a summary"
-2. Footer stats Dev mode : estimation tokens depuis len(content)/4
-3. Rendu tool calls inline : bloc formaté dans le flux (pas JSON brut)
-4. Tester Qwen2.5-Coder-14B Q4_K_M pour Dev mode
-5. Reddit karma : objectif 200 avant ~28 juin, 1-2/jour r/LocalLLaMA
+## Points en suspens
+
+- run_command timeout 10s peut être court pour tsc sur gros projets
+- web_search DDG : sélecteurs CSS peuvent changer
 
 ## Historique
 
-### Session 17 (2026-05-19)
-MTP detection binaire GGUF, vision llama.cpp, badges capabilities, reload model footer, clipboard Wayland, vLLM fixes, lightbox, skills Claude Code.
+### Session 18 (2026-05-20 matin)
+Projects system complet, Dev mode tool use filesystem, conversations SQLite, KV cache sélectionnable, streaming tool calls réel.
 
-### Sessions 13-16 (2026-05-19)
-Fine-tuning Unsloth QLoRA end-to-end, pipeline resume-safe, export GGUF, eval before/after, MoE support, llama-cpp-python Settings/Engines.
+### Sessions 13-17 (2026-05-19)
+Fine-tune pipeline complet (Unsloth QLoRA), export GGUF, vision llama.cpp, MTP detection, reload model footer, Wayland clipboard.
 
-### Sessions 1-12 (2026-05-15 à 2026-05-17)
-Architecture dual-engine, multi-venv vLLM, benchmarks quality scoring, installer App, système MAJ, Discover multi-filtres, UX polish.
+### Sessions 1-12 (2026-05-15 à 2026-05-18)
+Foundation → multi-venv vLLM → UX polish → benchmarks → fresh install → installer Tauri → update system → context management.
