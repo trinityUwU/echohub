@@ -82,15 +82,25 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "edit_file",
-            "description": "Edit a file by replacing a specific string with a new string. Useful for targeted modifications without rewriting the entire file.",
+            "description": (
+                "Edit a file. Two modes:\n"
+                "1. String replacement (old_string + new_string): replaces the first exact occurrence. "
+                "IMPORTANT: old_string must match the file content character-for-character including whitespace. "
+                "If it fails with 'not found', use read_file first to get the exact content, then retry.\n"
+                "2. Line replacement (start_line + end_line + new_content): replaces lines start_line..end_line (1-indexed, inclusive) "
+                "with new_content. More reliable when the exact string is hard to reproduce."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Relative path from workspace root"},
-                    "old_string": {"type": "string", "description": "The exact string to find and replace"},
-                    "new_string": {"type": "string", "description": "The string to replace it with"},
+                    "old_string": {"type": "string", "description": "Exact string to replace (mode 1)"},
+                    "new_string": {"type": "string", "description": "Replacement string (mode 1)"},
+                    "start_line": {"type": "integer", "description": "First line to replace, 1-indexed (mode 2)"},
+                    "end_line": {"type": "integer", "description": "Last line to replace, 1-indexed inclusive (mode 2)"},
+                    "new_content": {"type": "string", "description": "New content for the replaced lines (mode 2)"},
                 },
-                "required": ["path", "old_string", "new_string"],
+                "required": ["path"],
             },
         },
     },
@@ -310,23 +320,51 @@ def _delete_file(workspace: Path, args: dict[str, Any]) -> str:
 
 def _edit_file(workspace: Path, args: dict[str, Any]) -> str:
     path_str: str = args.get("path", "")
-    old_string: str = args.get("old_string", "")
-    new_string: str = args.get("new_string", "")
     if not path_str:
         raise ValueError("path is required")
-    if not old_string:
-        raise ValueError("old_string is required")
     target = _safe_path(workspace, path_str)
     if not target.exists():
         raise FileNotFoundError(f"File not found: {path_str}")
     if not target.is_file():
         raise ValueError(f"Not a file: {path_str}")
+
     content = target.read_text(encoding="utf-8")
+
+    # Mode 2: line-range replacement
+    start_line: int | None = args.get("start_line")
+    end_line: int | None = args.get("end_line")
+    new_content: str | None = args.get("new_content")
+    if start_line is not None and new_content is not None:
+        lines = content.splitlines(keepends=True)
+        end = end_line if end_line is not None else start_line
+        s, e = start_line - 1, end  # convert to 0-indexed
+        if s < 0 or s >= len(lines) or e > len(lines):
+            raise ValueError(f"Line range {start_line}..{end} out of bounds (file has {len(lines)} lines)")
+        replacement = new_content if new_content.endswith("\n") else new_content + "\n"
+        updated = "".join(lines[:s]) + replacement + "".join(lines[e:])
+        target.write_text(updated, encoding="utf-8")
+        logger.info(f"[tool_service] edit_file {target} lines {start_line}..{end}")
+        return f"Edited: {path_str} (replaced lines {start_line}–{end})"
+
+    # Mode 1: exact string replacement
+    old_string: str = args.get("old_string", "")
+    new_string: str = args.get("new_string", "")
+    if not old_string:
+        raise ValueError("old_string is required (or use start_line+end_line+new_content for line-based edit)")
     if old_string not in content:
-        raise ValueError(f"old_string not found in {path_str}")
+        # Give a useful diagnostic: show lines that partially match
+        lines = content.splitlines()
+        first_word = old_string.strip().splitlines()[0][:40]
+        close = [f"  line {i+1}: {l.rstrip()}" for i, l in enumerate(lines) if first_word in l][:3]
+        hint = ("Closest matches:\n" + "\n".join(close)) if close else "No partial match found."
+        raise ValueError(
+            f"old_string not found in {path_str}. {hint}\n"
+            "Tip: use read_file to get the exact content, then retry with the exact string. "
+            "Or use start_line+end_line+new_content for line-based editing."
+        )
     updated = content.replace(old_string, new_string, 1)
     target.write_text(updated, encoding="utf-8")
-    logger.info(f"[tool_service] edit_file {target} (replaced {len(old_string)} chars)")
+    logger.info(f"[tool_service] edit_file {target} (string replacement, {len(old_string)} chars)")
     return f"Edited: {path_str} (replaced {len(old_string)} chars)"
 
 
