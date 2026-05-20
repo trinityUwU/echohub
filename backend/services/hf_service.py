@@ -449,11 +449,16 @@ def search_models(
         _QUANT_TAGS = {"awq", "gptq", "gguf", "fp8", "exl2"}
         _CAP_FILTERS = {"vision", "thinking", "tools"}
         _FINETUNE_FILTER = "safetensors"
+        # HF tags to pass directly to the API when the tools cap filter is active.
+        # These are the actual tag values used by tool-calling models on HuggingFace.
+        _TOOLS_HF_TAGS = ["tool-calling", "function-calling", "tool-use"]
 
         active_filters = [f.lower() for f in (filters or ["awq", "gptq", "gguf"])]
         finetune_mode = _FINETUNE_FILTER in active_filters
         quant_filters = [f for f in active_filters if f in _QUANT_TAGS] or ([] if finetune_mode else ["awq", "gptq", "gguf"])
         cap_filters = {f for f in active_filters if f in _CAP_FILTERS}
+        # When tools filter is active, search HF directly by tool-calling tags
+        tools_only_mode = cap_filters == {"tools"} and not quant_filters and not finetune_mode
 
         hf_sort = sort if sort in ("downloads", "likes", "created_at") else "downloads"
         direction = "asc" if sort_dir == "asc" else "desc"
@@ -461,11 +466,62 @@ def search_models(
 
         results: list[ModelInfo] = []
 
+        # Tools-only mode: search HF directly by tool-calling tags, no quant filter
+        if tools_only_mode:
+            for hf_tag in _TOOLS_HF_TAGS:
+                list_kwargs: dict = dict(
+                    search=query,
+                    filter=hf_tag,
+                    limit=fetch_limit,
+                    sort=hf_sort,
+                    full=True,
+                    token=_get_hf_token(),
+                )
+                try:
+                    import inspect as _inspect
+                    if "direction" in _inspect.signature(_api.list_models).parameters:
+                        list_kwargs["direction"] = -1 if direction == "desc" else 1
+                except Exception:
+                    pass
+                for m in _api.list_models(**list_kwargs):
+                    tags = list(m.tags or [])
+                    caps = _detect_capabilities(tags, m.modelId)
+                    if not caps.tools:
+                        continue
+                    params_b = _extract_params_billion(m.modelId, tags)
+                    quant_type = _detect_quantization(tags, m.modelId)
+                    vram_est = _estimate_vram_gb(params_b, quant_type or "bf16") if params_b else None
+                    ctx = _extract_context_window(m.modelId, tags)
+                    results.append(ModelInfo(
+                        id=m.modelId,
+                        name=m.modelId.split("/")[-1],
+                        author=m.modelId.split("/")[0] if "/" in m.modelId else None,
+                        quantization=quant_type,
+                        capabilities=caps,
+                        params_billion=params_b,
+                        vram_estimate_gb=vram_est,
+                        max_context_window=ctx,
+                        downloads=m.downloads,
+                        likes=m.likes,
+                        last_modified=str(m.lastModified)[:10] if m.lastModified else None,
+                        pipeline_tag=m.pipeline_tag,
+                        is_moe=_is_moe(m.modelId, tags),
+                        has_mtp=_has_mtp_heuristic(m.modelId, tags),
+                        active_params_billion=_extract_active_params_billion(m.modelId),
+                    ))
+            seen: set[str] = set()
+            unique = [r for r in results if not (r.id in seen or seen.add(r.id))]  # type: ignore
+            start = page * page_size
+            return unique[start:start + page_size]
+
         # Finetuneable mode — search safetensors models (no quant filter), exclude quantized
         if finetune_mode:
+            ft_filter: str | list[str] = "safetensors"
+            if "tools" in cap_filters:
+                ft_filter = ["safetensors", "tool-calling"]
             list_kwargs: dict = dict(
                 search=query,
-                filter="safetensors",
+                filter=ft_filter,
                 limit=fetch_limit,
                 sort=hf_sort,
                 full=True,
@@ -521,10 +577,19 @@ def search_models(
             start = page * page_size
             return unique[start:start + page_size]
 
-        for quant in quant_filters:
+        # Build search passes: if tools filter is active, combine each quant with each HF tool tag
+        search_passes: list[str | list[str]] = []
+        if "tools" in cap_filters:
+            for quant in quant_filters:
+                for tool_tag in _TOOLS_HF_TAGS:
+                    search_passes.append([quant, tool_tag])
+        else:
+            search_passes = list(quant_filters)  # type: ignore[assignment]
+
+        for pass_filter in search_passes:
             list_kwargs: dict = dict(
                 search=query,
-                filter=quant,
+                filter=pass_filter,
                 limit=fetch_limit,
                 sort=hf_sort,
                 full=True,
