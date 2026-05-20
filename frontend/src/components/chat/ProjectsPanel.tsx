@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion'
+import { useState } from 'react'
 import type { ProjectMode } from '@/hooks/useChatMode'
 
 interface ProjectsPanelProps {
@@ -8,20 +9,59 @@ interface ProjectsPanelProps {
 }
 
 export function ProjectsPanel({ mode, loadedModelHasTools, children }: ProjectsPanelProps): React.ReactElement {
+  const [collapsed, setCollapsed] = useState(false)
+
   return (
     <div className="flex flex-1 overflow-hidden">
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={mode}
-          initial={{ opacity: 0, x: -12 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -12 }}
-          transition={{ duration: 0.18, ease: 'easeOut' }}
-          className="w-[260px] flex-shrink-0 bg-elevated border-r border-border flex flex-col overflow-hidden"
+      <div className="relative flex flex-shrink-0 border-r border-border">
+        <AnimatePresence initial={false}>
+          {!collapsed && (
+            <motion.div
+              key="left-panel"
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 260, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ duration: 0.2, ease: 'easeInOut' }}
+              className="overflow-hidden"
+            >
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={mode}
+                  initial={{ opacity: 0, x: -12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -12 }}
+                  transition={{ duration: 0.18, ease: 'easeOut' }}
+                  className="w-[260px] flex-shrink-0 bg-elevated flex flex-col overflow-hidden h-full"
+                >
+                  <LeftPanel mode={mode} loadedModelHasTools={loadedModelHasTools} />
+                </motion.div>
+              </AnimatePresence>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Toggle button */}
+        <button
+          onClick={() => setCollapsed(v => !v)}
+          title={collapsed ? 'Expand' : 'Collapse'}
+          className="absolute top-1/2 -translate-y-1/2 -right-4 z-10 w-4 h-10 flex items-center justify-center bg-elevated hover:bg-overlay border border-border text-text-muted hover:text-text-secondary transition-colors cursor-pointer rounded-sm rounded-l-none"
         >
-          <LeftPanel mode={mode} loadedModelHasTools={loadedModelHasTools} />
-        </motion.div>
-      </AnimatePresence>
+          <motion.svg
+            className="w-3 h-3"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            animate={{ rotate: collapsed ? 0 : 180 }}
+            transition={{ duration: 0.2 }}
+          >
+            <polyline points="15 18 9 12 15 6"/>
+          </motion.svg>
+        </button>
+      </div>
+
       <div className="flex flex-col flex-1 overflow-hidden">
         {children}
       </div>
