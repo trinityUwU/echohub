@@ -477,7 +477,8 @@ async def tool_chat(req: ToolChatRequest):
                     total_tool_calls += 1
                     if total_tool_calls > MAX_ITERATIONS:
                         logger.warning(f"[tool-chat] hard tool call cap reached ({total_tool_calls})")
-                        yield f"data: {_json.dumps({'type': 'text_chunk', 'content': '\n\n[Max tool calls reached.]'})}\n\n"
+                        _cap_msg = _json.dumps({'type': 'text_chunk', 'content': '\n\n[Max tool calls reached.]'})
+                        yield f"data: {_cap_msg}\n\n"
                         break
 
                     tc_id: str = tc.get("id", f"call_{iteration}")
@@ -520,7 +521,8 @@ async def tool_chat(req: ToolChatRequest):
 
         else:
             # Hit max iterations
-            yield f"data: {_json.dumps({'type': 'text_chunk', 'content': '\n\n[Max tool calls reached.]'})}\n\n"
+            _cap_msg2 = _json.dumps({'type': 'text_chunk', 'content': '\n\n[Max tool calls reached.]'})
+            yield f"data: {_cap_msg2}\n\n"
 
         # Always emit done with workspace file list — even after errors/loops
         try:
