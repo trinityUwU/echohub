@@ -181,7 +181,17 @@ function PickerItem({ model, isLoaded, isSelected, onClick }: {
           {model.author}{model.params_billion ? ` · ${model.params_billion}B` : ''}
         </div>
         <div className="flex flex-wrap gap-1 mt-1.5">
-          {model.quantization && <Badge variant="quant">{model.quantization.split('/')[0]}</Badge>}
+          {model.quantization && (() => {
+            const parts = model.quantization.split('/')
+            const format = parts[0]   // GGUF, AWQ, GPTQ…
+            const variant = parts[1]  // Q4_K_M, Q5_K_M…
+            return (
+              <>
+                <Badge variant="quant">{format}</Badge>
+                {variant && <Badge variant="quant">{variant}</Badge>}
+              </>
+            )
+          })()}
           {model.is_moe && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 font-medium">
               MoE{model.active_params_billion ? ` A${model.active_params_billion}B` : ''}
