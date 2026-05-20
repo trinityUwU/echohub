@@ -171,8 +171,13 @@ def detect_mcp_server(skill_path: Path) -> dict[str, Any] | None:
                         pass
 
             if is_mcp_dep or is_mcp_source:
+                # Monorepos (workspaces field) don't have a single runnable server at root
+                if pkg.get("workspaces"):
+                    return None
                 scripts = pkg.get("scripts", {})
-                raw_cmd = scripts.get("start") or scripts.get("dev") or "bun run start"
+                if not scripts.get("start") and not scripts.get("dev"):
+                    return None
+                raw_cmd = scripts.get("start") or scripts.get("dev") or ""
                 runner = "bun run start" if scripts.get("start") else "bun run dev"
                 start_command = runner
                 port_hint = _extract_port(raw_cmd) or 3000

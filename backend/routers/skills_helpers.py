@@ -136,12 +136,18 @@ def _detect_install_commands(skill_dir: Path) -> list[str]:
                 return override
             if isinstance(override, str):
                 return [override]
-            cmds.append("bun install")
+            # Monorepo workspaces: skip build — targeting root of a monorepo won't work
+            is_monorepo = bool(pkg.get("workspaces"))
             scripts = pkg.get("scripts") or {}
-            if "build" in scripts:
-                cmds.append("bun run build")
-            elif "prepare" in scripts:
-                cmds.append("bun run prepare")
+            build_script = scripts.get("build", "")
+            build_uses_workspaces = "--workspaces" in build_script or "--workspace" in build_script
+
+            cmds.append("bun install")
+            if not is_monorepo and not build_uses_workspaces:
+                if "build" in scripts:
+                    cmds.append("bun run build")
+                elif "prepare" in scripts:
+                    cmds.append("bun run prepare")
         except Exception:
             pass
         return cmds
