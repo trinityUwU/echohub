@@ -780,6 +780,7 @@ Respond ONLY with this exact JSON, no explanation, no markdown:
 
         messages = [{"role": "user", "content": prompt}]
         accumulated = ""
+        _in_think = False  # suppress <think>...</think> blocks from token display
 
         # ── Stream model tokens ───────────────────────────────────────────────
         try:
@@ -798,8 +799,16 @@ Respond ONLY with this exact JSON, no explanation, no markdown:
                     try:
                         parsed = json.loads(raw)
                         delta = parsed.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                        if delta:
-                            accumulated += delta
+                        if not delta:
+                            continue
+                        accumulated += delta
+                        # Track think blocks — don't stream them to frontend
+                        if "<think>" in delta:
+                            _in_think = True
+                        if "</think>" in delta:
+                            _in_think = False
+                            continue
+                        if not _in_think:
                             yield sse({"type":"token","content":delta})
                     except (json.JSONDecodeError, IndexError, KeyError):
                         pass

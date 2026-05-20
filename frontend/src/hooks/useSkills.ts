@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { listSkills, listMcpServers } from '@/api/client'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { listSkills, listMcpServers, startMcp, stopMcp } from '@/api/client'
 import type { CommunitySkill, McpStatus } from '@/api/client'
 
 export interface Skill {
@@ -74,6 +74,8 @@ function communityToSkill(c: CommunitySkill): Skill {
 export function useSkills() {
   const [activeIds, setActiveIds] = useState<Set<string>>(loadActiveIds)
   const [communitySkills, setCommunitySkills] = useState<Skill[]>([])
+  const [_rawCommunity, setRawCommunity] = useState<CommunitySkill[]>([])
+  const rawCommunityRef = useRef<CommunitySkill[]>([])
   const [mcpStatuses, setMcpStatuses] = useState<Record<string, McpStatus>>({})
 
   const fetchMcpStatuses = useCallback((): void => {
@@ -87,30 +89,42 @@ export function useSkills() {
   }, [])
 
   useEffect(() => {
-    listSkills()
-      .then(data => setCommunitySkills(data.community.map(communityToSkill)))
-      .catch(() => {})
+    listSkills().then(data => {
+      rawCommunityRef.current = data.community
+      setRawCommunity(data.community)
+      setCommunitySkills(data.community.map(communityToSkill))
+    }).catch(() => {})
     fetchMcpStatuses()
   }, [fetchMcpStatuses])
 
   const refresh = useCallback((): void => {
-    listSkills()
-      .then(data => setCommunitySkills(data.community.map(communityToSkill)))
-      .catch(() => {})
+    listSkills().then(data => {
+      rawCommunityRef.current = data.community
+      setRawCommunity(data.community)
+      setCommunitySkills(data.community.map(communityToSkill))
+    }).catch(() => {})
     fetchMcpStatuses()
   }, [fetchMcpStatuses])
 
   const allSkills: Skill[] = [...NATIVE_SKILLS, ...communitySkills]
 
   const toggle = useCallback((id: string): void => {
+    let enabling = false
     setActiveIds(prev => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      enabling = !next.has(id)
+      if (enabling) next.add(id)
+      else next.delete(id)
       saveActiveIds(next)
       return next
     })
-  }, [])
+    // Auto-start/stop MCP server when toggling a community MCP skill
+    const skill = rawCommunityRef.current.find(s => s.id === id)
+    if (skill?.is_mcp) {
+      if (enabling) startMcp(id).then(() => fetchMcpStatuses()).catch(() => {})
+      else stopMcp(id).then(() => fetchMcpStatuses()).catch(() => {})
+    }
+  }, [fetchMcpStatuses])
 
   const activeSkills = allSkills.filter(s => activeIds.has(s.id))
   const enabledTools = [...new Set(activeSkills.flatMap(s => s.tools))]
