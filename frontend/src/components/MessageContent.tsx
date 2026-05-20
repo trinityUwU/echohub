@@ -163,9 +163,8 @@ function parseSegments(raw: string): Segment[] {
 // ── ToolCallBlock ─────────────────────────────────────────────────────────────
 
 function ToolCallBlock({ content, streaming }: { content: string; streaming?: boolean }): React.ReactElement {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
 
-  // Extract tool name even from partial JSON during streaming
   const nameMatch = content.match(/"name"\s*:\s*"([^"]+)"/)
   let toolName = nameMatch ? nameMatch[1] : ''
   let argsDisplay = content.trim()
@@ -180,63 +179,53 @@ function ToolCallBlock({ content, streaming }: { content: string; streaming?: bo
   }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.15 }}
-      className="my-1.5 rounded-md border border-yellow-500/20 bg-yellow-500/5 overflow-hidden"
-    >
+    <div className="mb-3 rounded-xl border border-yellow-500/20 bg-yellow-500/5 overflow-hidden">
       <button
-        onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-white/[0.03] transition-colors text-left"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-yellow-500/10 transition-colors cursor-pointer"
       >
         {streaming ? (
           <motion.svg
-            className="w-3 h-3 flex-shrink-0 text-yellow-400"
+            className="w-3.5 h-3.5 flex-shrink-0 text-yellow-400"
             viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
             animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
           >
             <path d="M21 12a9 9 0 1 1-6.22-8.56"/>
           </motion.svg>
         ) : (
-          <svg className="w-3 h-3 flex-shrink-0 text-yellow-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg className="w-3.5 h-3.5 flex-shrink-0 text-yellow-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
           </svg>
         )}
-        <span className="text-2xs font-mono font-medium text-yellow-300">
-          {toolName || 'tool_call'}
+        <span className={`text-xs ${streaming ? 'text-yellow-400 animate-pulse' : 'text-yellow-300'}`}>
+          {streaming ? `⚙ ${toolName || 'tool_call'}…` : `⚙ ${toolName || 'tool_call'}`}
         </span>
-        {streaming && (
-          <span className="text-2xs text-yellow-400/60 ml-1 flex items-center gap-1">
-            <span className="animate-pulse">generating</span>
-            <span className="inline-block w-1 h-2.5 bg-yellow-400/60 animate-pulse rounded-sm" />
-          </span>
-        )}
-        <motion.svg
-          className="w-3 h-3 ml-auto flex-shrink-0 opacity-50 text-yellow-400"
-          viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-          animate={{ rotate: open ? 90 : 0 }} transition={{ duration: 0.15 }}
+        <span className="text-xs text-yellow-400/60 ml-auto">
+          {streaming ? 'running' : 'done'}
+        </span>
+        <svg
+          className={`w-3.5 h-3.5 text-yellow-400 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor"
         >
-          <polyline points="9 18 15 12 9 6"/>
-        </motion.svg>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
       </button>
-      <AnimatePresence initial={false}>
-        {open && (argsDisplay || streaming) && (
+      <AnimatePresence>
+        {open && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            className="overflow-hidden border-t border-yellow-500/10"
+            transition={{ duration: 0.2 }}
           >
-            <pre className="text-2xs font-mono leading-relaxed px-3 py-2 text-yellow-200/60 overflow-x-auto max-h-48 whitespace-pre-wrap break-all">
+            <pre className="px-3 pb-3 pt-2 text-xs text-yellow-200/70 leading-relaxed whitespace-pre-wrap border-t border-yellow-500/10 font-mono max-h-64 overflow-y-auto">
               {argsDisplay}
               {streaming && <span className="inline-block w-1 h-3 bg-yellow-400/60 animate-pulse rounded-sm ml-0.5 align-middle" />}
             </pre>
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+    </div>
   )
 }
 
@@ -244,48 +233,41 @@ function ToolCallBlock({ content, streaming }: { content: string; streaming?: bo
 
 function ToolResultBlock({ tool, content }: { tool: string; content: string }): React.ReactElement {
   const [open, setOpen] = useState(false)
-  const preview = content.length > 80 ? content.slice(0, 80) + '…' : content
+  const words = content.trim().split(/\s+/).length
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.15 }}
-      className="my-1.5 rounded-md border border-green-500/20 bg-green-500/5 overflow-hidden"
-    >
+    <div className="mb-3 rounded-xl border border-green-500/20 bg-green-500/5 overflow-hidden">
       <button
-        onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-white/[0.03] transition-colors text-left"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-green-500/10 transition-colors cursor-pointer"
       >
-        <svg className="w-3 h-3 flex-shrink-0 text-green-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <svg className="w-3.5 h-3.5 flex-shrink-0 text-green-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="20 6 9 17 4 12"/>
         </svg>
-        <span className="text-2xs font-mono font-medium text-green-300">{tool}</span>
-        {!open && <span className="text-2xs text-green-400/50 truncate max-w-[240px] ml-1">{preview}</span>}
-        <motion.svg
-          className="w-3 h-3 ml-auto flex-shrink-0 opacity-50 text-green-400"
-          viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-          animate={{ rotate: open ? 90 : 0 }} transition={{ duration: 0.15 }}
+        <span className="text-xs text-green-300">↩ {tool}</span>
+        <span className="text-xs text-green-400/60 ml-auto">{words} words</span>
+        <svg
+          className={`w-3.5 h-3.5 text-green-400 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor"
         >
-          <polyline points="9 18 15 12 9 6"/>
-        </motion.svg>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
       </button>
-      <AnimatePresence initial={false}>
+      <AnimatePresence>
         {open && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            className="overflow-hidden border-t border-green-500/10"
+            transition={{ duration: 0.2 }}
           >
-            <pre className="text-2xs font-mono leading-relaxed px-3 py-2 text-green-200/60 overflow-x-auto max-h-48 whitespace-pre-wrap break-all">
+            <div className="px-3 pb-3 pt-2 text-xs text-green-200/70 leading-relaxed whitespace-pre-wrap border-t border-green-500/10 font-mono max-h-64 overflow-y-auto">
               {content}
-            </pre>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+    </div>
   )
 }
 
