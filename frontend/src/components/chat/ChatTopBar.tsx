@@ -12,14 +12,16 @@ interface ChatTopBarProps {
   onExport: () => void
   view: ChatView
   mode: ProjectMode
+  activeProjectName?: string | null
   onViewChange: (v: ChatView) => void
   onModeChange: (m: ProjectMode) => void
+  onBackToHub?: () => void
   loadedModelHasTools: boolean
 }
 
 export function ChatTopBar({
   loadedModel, loading, loadingPct, onOpenPicker, onClear, onEject, onExport,
-  view, mode, onViewChange, onModeChange, loadedModelHasTools,
+  view, mode, activeProjectName, onViewChange, onModeChange, onBackToHub, loadedModelHasTools,
 }: ChatTopBarProps): React.ReactElement {
   if (loading) return <LoadingBar pct={loadingPct} modelName={loadedModel?.name ?? '…'} onEject={onEject} />
   return (
@@ -31,8 +33,10 @@ export function ChatTopBar({
       onExport={onExport}
       view={view}
       mode={mode}
+      activeProjectName={activeProjectName ?? null}
       onViewChange={onViewChange}
       onModeChange={onModeChange}
+      onBackToHub={onBackToHub ?? null}
       loadedModelHasTools={loadedModelHasTools}
     />
   )
@@ -46,8 +50,10 @@ interface NormalBarProps {
   onExport: () => void
   view: ChatView
   mode: ProjectMode
+  activeProjectName: string | null
   onViewChange: (v: ChatView) => void
   onModeChange: (m: ProjectMode) => void
+  onBackToHub: (() => void) | null
   loadedModelHasTools: boolean
 }
 
@@ -90,11 +96,23 @@ const MODES: { id: ProjectMode; label: string; icon: React.ReactElement }[] = [
 
 function NormalBar({
   loadedModel, onOpenPicker, onClear, onEject, onExport,
-  view, mode, onViewChange, onModeChange, loadedModelHasTools,
+  view, mode, activeProjectName, onViewChange, onModeChange, onBackToHub, loadedModelHasTools,
 }: NormalBarProps): React.ReactElement {
   return (
     <div className="bg-surface border-b border-border flex-shrink-0">
       <div className="h-[50px] flex items-center px-4 gap-2.5">
+        {/* Back to hub button when inside a project workspace */}
+        {view === 'projects' && activeProjectName && onBackToHub && (
+          <button
+            onClick={onBackToHub}
+            className="flex items-center gap-1.5 text-text-muted hover:text-text-secondary transition-colors cursor-pointer mr-1"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+            <span className="text-xs font-medium truncate max-w-[120px]">{activeProjectName}</span>
+          </button>
+        )}
         {/* Model selector */}
         <button
           onClick={onOpenPicker}

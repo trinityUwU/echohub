@@ -11,7 +11,9 @@ import { MessageRow } from './MessageRow'
 import { InputBar } from './InputBar'
 import { RightPanel } from './RightPanel'
 import { ProjectsPanel } from './ProjectsPanel'
+import { ProjectsHub } from './ProjectsHub'
 import { useChatMode } from '@/hooks/useChatMode'
+import { useProjects } from '@/hooks/useProjects'
 import { clearMessages, deleteMessage } from '@/api/client'
 
 interface ChatPageProps {
@@ -45,7 +47,8 @@ export function ChatPage({
   onOpenPicker, onEject, onGoToSettings,
   setActiveMessages, onLoadModel,
 }: ChatPageProps): React.ReactElement {
-  const { view, mode, setView, setMode } = useChatMode()
+  const { view, mode, activeProject, setView, setMode, openProject, closeProject } = useChatMode()
+  const projectsHook = useProjects()
   const profilesHook = useProfiles()
   // Local params state — syncs from profile on profile switch, edited freely by sliders
   const [params, setParams] = useState(profilesHook.activeProfile.params)
@@ -133,6 +136,40 @@ export function ChatPage({
     URL.revokeObjectURL(url)
   }
 
+  // Projects hub: no active project selected yet
+  if (view === 'projects' && !activeProject) {
+    return (
+      <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <ChatTopBar
+            loadedModel={loadedModel}
+            loading={loading}
+            loadingPct={loadingPct}
+            onOpenPicker={onOpenPicker}
+            onClear={handleClear}
+            onEject={onEject}
+            onExport={handleExport}
+            view={view}
+            mode={mode}
+            onViewChange={setView}
+            onModeChange={setMode}
+            loadedModelHasTools={!!loadedModel?.capabilities?.tools}
+          />
+          <ProjectsHub
+            projects={projectsHook.projects}
+            activeMode={mode}
+            onSelectProject={openProject}
+            onCreateProject={projectsHook.createProject}
+            onArchiveProject={projectsHook.archiveProject}
+            onUnarchiveProject={projectsHook.unarchiveProject}
+            onDeleteProject={projectsHook.deleteProject}
+            onRenameProject={projectsHook.renameProject}
+          />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-1 overflow-hidden">
       {view === 'chat' && (
@@ -160,8 +197,10 @@ export function ChatPage({
           onExport={handleExport}
           view={view}
           mode={mode}
+          activeProjectName={activeProject?.name ?? null}
           onViewChange={setView}
           onModeChange={setMode}
+          onBackToHub={closeProject}
           loadedModelHasTools={!!loadedModel?.capabilities?.tools}
         />
         {!hasCuda && <CpuBanner onGoToSettings={onGoToSettings} />}
