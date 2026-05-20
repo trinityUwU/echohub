@@ -50,11 +50,7 @@ export function ChatPage({
 }: ChatPageProps): React.ReactElement {
   const { view, mode, activeProject, setView, setMode, openProject, closeProject } = useChatMode()
   const projectsHook = useProjects()
-  const chatProfilesHook = useProfiles()
-  const projectProfilesHook = useProfiles(
-    activeProject ? { mode: activeProject.mode, projectId: activeProject.id } : undefined
-  )
-  const profilesHook = activeProject ? projectProfilesHook : chatProfilesHook
+  const profilesHook = useProfiles() // chat-scoped only — project workspace has its own
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [rightCollapsed, setRightCollapsed] = useState(false)
   const toggleLeft = useCallback(() => setLeftCollapsed(v => !v), [])
@@ -179,12 +175,34 @@ export function ChatPage({
     )
   }
 
-  const showLeft = view === 'chat'
-  const showRight = view === 'chat' || !!activeProject
+  // Project workspace — isolated component with its own useProfiles scoped to the project
+  if (view === 'projects' && activeProject) {
+    return (
+      <ProjectWorkspace
+        key={activeProject.id}
+        project={activeProject}
+        loadedModel={loadedModel}
+        loading={loading}
+        loadingPct={loadingPct}
+        hasCuda={hasCuda}
+        activeMessages={activeMessages}
+        setActiveMessages={setActiveMessages}
+        onOpenPicker={onOpenPicker}
+        onEject={onEject}
+        onGoToSettings={onGoToSettings}
+        onBackToHub={closeProject}
+        onLoadModel={onLoadModel}
+        view={view}
+        mode={mode}
+        onViewChange={setView}
+        onModeChange={setMode}
+      />
+    )
+  }
 
+  // Chat workspace
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-      {/* Topbar spans full width */}
       <ChatTopBar
         loadedModel={loadedModel}
         loading={loading}
@@ -195,10 +213,8 @@ export function ChatPage({
         onExport={handleExport}
         view={view}
         mode={mode}
-        activeProjectName={activeProject?.name ?? null}
         onViewChange={setView}
         onModeChange={setMode}
-        onBackToHub={closeProject}
         loadedModelHasTools={!!loadedModel?.capabilities?.tools}
       />
       {!hasCuda && <CpuBanner onGoToSettings={onGoToSettings} />}
@@ -211,24 +227,21 @@ export function ChatPage({
           Out of memory — VRAM insuffisante pour cette génération. Réduis le contexte ou recharge le modèle.
         </div>
       )}
-      {/* Body: left sidebar + content + right panel */}
       <div className="flex flex-1 overflow-hidden relative">
-        {showLeft && (
-          <PanelWrapper side="left" collapsed={leftCollapsed} onToggle={toggleLeft}>
-            <ConvSidebar
-              conversations={conversations}
-              archivedConversations={archivedConversations}
-              activeId={activeId}
-              onSelect={onSelectConversation}
-              onNew={onNewConversation}
-              onDelete={onDeleteConversation}
-              onArchive={onArchiveConversation}
-              onUnarchive={onUnarchiveConversation}
-              onRename={onRenameConversation}
-              gpu={gpu}
-            />
-          </PanelWrapper>
-        )}
+        <PanelWrapper side="left" collapsed={leftCollapsed} onToggle={toggleLeft}>
+          <ConvSidebar
+            conversations={conversations}
+            archivedConversations={archivedConversations}
+            activeId={activeId}
+            onSelect={onSelectConversation}
+            onNew={onNewConversation}
+            onDelete={onDeleteConversation}
+            onArchive={onArchiveConversation}
+            onUnarchive={onUnarchiveConversation}
+            onRename={onRenameConversation}
+            gpu={gpu}
+          />
+        </PanelWrapper>
         <ChatContent
           view={view}
           mode={mode}
@@ -248,11 +261,9 @@ export function ChatPage({
           onStop={stop}
           onLoadModel={onLoadModel}
         />
-        {showRight && (
-          <PanelWrapper side="right" collapsed={rightCollapsed} onToggle={toggleRight}>
-            <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />
-          </PanelWrapper>
-        )}
+        <PanelWrapper side="right" collapsed={rightCollapsed} onToggle={toggleRight}>
+          <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />
+        </PanelWrapper>
       </div>
     </div>
   )
@@ -379,6 +390,132 @@ function PanelWrapper({ side, collapsed, onToggle, children }: PanelWrapperProps
           <polyline points="15 18 9 12 15 6"/>
         </motion.svg>
       </button>
+    </div>
+  )
+}
+
+// ── Project Workspace ──────────────────────────────────────────────────────────
+// Isolated component: key={project.id} ensures fresh mount per project,
+// so useProfiles initialises with the correct project scope from the start.
+
+import type { Project } from '@/hooks/useProjects'
+
+interface ProjectWorkspaceProps {
+  project: Project
+  loadedModel: ModelInfo | null
+  loading: boolean
+  loadingPct: number
+  hasCuda: boolean
+  activeMessages: ChatMessage[]
+  setActiveMessages: (msgs: ChatMessage[]) => void
+  onOpenPicker: () => void
+  onEject: () => void
+  onGoToSettings: () => void
+  onBackToHub: () => void
+  onLoadModel?: (config: LoadConfig) => void
+  view: ChatView
+  mode: ProjectMode
+  onViewChange: (v: ChatView) => void
+  onModeChange: (m: ProjectMode) => void
+}
+
+function ProjectWorkspace({
+  project, loadedModel, loading, loadingPct, hasCuda,
+  activeMessages, setActiveMessages,
+  onOpenPicker, onEject, onGoToSettings, onBackToHub, onLoadModel,
+  view, mode, onViewChange, onModeChange,
+}: ProjectWorkspaceProps): React.ReactElement {
+  const profilesHook = useProfiles({ mode: project.mode, projectId: project.id })
+  const [rightCollapsed, setRightCollapsed] = useState(false)
+  const [params, setParams] = useState(profilesHook.activeProfile.params)
+  const prevProfileId = useRef(profilesHook.activeId)
+
+  useEffect(() => {
+    if (profilesHook.activeId !== prevProfileId.current) {
+      setParams(profilesHook.activeProfile.params)
+      prevProfileId.current = profilesHook.activeId
+    }
+  }, [profilesHook.activeId, profilesHook.activeProfile.params])
+
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  const { messages, streaming, stats, send, sendFromHistory, stop, setMessages, usedTokens, isTokensExact, oomError } = useChat(
+    params, activeMessages, setActiveMessages,
+    loadedModel?.max_context_window ?? undefined,
+    loadedModel?.id, undefined, loadedModel?.name ?? null,
+  )
+
+  useEffect(() => {
+    if (!streaming) setMessages(activeMessages)
+  }, [activeMessages]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  const handleRegenerate = (): void => {
+    const lastIdx = [...messages].reverse().findIndex(m => m.role === 'assistant')
+    if (lastIdx === -1 || !loadedModel) return
+    sendFromHistory(messages.slice(0, messages.length - 1 - lastIdx))
+  }
+
+  const handleEditUser = (index: number, newText: string): void => {
+    if (!loadedModel) return
+    const updated = { ...messages[index], content: newText }
+    sendFromHistory([...messages.slice(0, index), updated])
+  }
+
+  return (
+    <div className="flex flex-col flex-1 overflow-hidden">
+      <ChatTopBar
+        loadedModel={loadedModel}
+        loading={loading}
+        loadingPct={loadingPct}
+        onOpenPicker={onOpenPicker}
+        onClear={() => { setMessages([]); setActiveMessages([]) }}
+        onEject={onEject}
+        onExport={() => {}}
+        view={view}
+        mode={mode}
+        activeProjectName={project.name}
+        onViewChange={onViewChange}
+        onModeChange={onModeChange}
+        onBackToHub={onBackToHub}
+        loadedModelHasTools={!!loadedModel?.capabilities?.tools}
+      />
+      {!hasCuda && <CpuBanner onGoToSettings={onGoToSettings} />}
+      {oomError && (
+        <div className="mx-4 mt-2 px-3 py-2 bg-red/10 border border-red/30 rounded-md flex items-center gap-2 text-sm text-red flex-shrink-0">
+          <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          Out of memory — VRAM insuffisante.
+        </div>
+      )}
+      <div className="flex flex-1 overflow-hidden">
+        <ChatContent
+          view={view}
+          mode={mode}
+          loadedModelHasTools={!!loadedModel?.capabilities?.tools}
+          messages={messages}
+          streaming={streaming}
+          stats={stats}
+          activeModelName={loadedModel?.name ?? null}
+          loadedModel={loadedModel}
+          params={params}
+          usedTokens={usedTokens}
+          isTokensExact={isTokensExact}
+          bottomRef={bottomRef}
+          onRegenerate={handleRegenerate}
+          onEditUser={handleEditUser}
+          onSend={(text, attachments) => send(text, !!loadedModel, attachments)}
+          onStop={stop}
+          onLoadModel={onLoadModel}
+        />
+        <PanelWrapper side="right" collapsed={rightCollapsed} onToggle={() => setRightCollapsed(v => !v)}>
+          <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />
+        </PanelWrapper>
+      </div>
     </div>
   )
 }
