@@ -481,7 +481,14 @@ async def tool_chat(req: ToolChatRequest):
                 is_mcp, skill_id = is_mcp_tool(tool_name, req.project_id)
                 if is_mcp and skill_id:
                     logger.info(f"[tool-chat] routing {tool_name!r} → MCP server {skill_id!r}")
-                    return await call_mcp_tool(skill_id, tool_name, tool_args)
+                    import asyncio as _asyncio
+                    try:
+                        return await _asyncio.wait_for(
+                            call_mcp_tool(skill_id, tool_name, tool_args),
+                            timeout=60.0,
+                        )
+                    except _asyncio.TimeoutError:
+                        return f"Error: MCP tool '{tool_name}' timed out after 60s"
             except ImportError:
                 pass
             except Exception as e:
