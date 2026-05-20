@@ -67,7 +67,16 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
   }, [model.id, model.is_moe, vramTotalGb])
 
   useEffect(() => {
-    const isGguf = model.quantization?.toLowerCase().includes('gguf') || model.arch_tag?.toLowerCase().includes('gguf')
+    // Check all available fields — quantization, name, id, arch_tag
+    const haystack = [
+      model.quantization ?? '',
+      model.name ?? '',
+      model.id ?? '',
+      model.arch_tag ?? '',
+    ].join(' ').toLowerCase()
+    const isGguf = haystack.includes('gguf') ||
+      /[-_.]q[3-8][-_.]/.test(haystack) || /[-_]iq[2-4][-_]/.test(haystack) ||
+      /[-_]i[1-4][-_.]/.test(haystack)
     setCheck({ engine: isGguf ? 'llama' : 'vllm', format: isGguf ? 'gguf' : 'vllm',
                feasible: true, reason: null, vram_estimate_gb: model.vram_estimate_gb,
                gpu_type: 'nvidia', vllm_available: true })
