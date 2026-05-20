@@ -1,81 +1,95 @@
 # TODO — EchoHub
-*Dernière mise à jour : 2026-05-20 (session 19)*
+*Dernière mise à jour : 2026-05-20 (session 21)*
 
 ## En cours
 - [ ] Construction karma Reddit (r/LocalLLaMA) — 1-2 commentaires/jour, sujets perfs/vLLM/GGUF/CUDA
-- [ ] Rédiger post Reddit/HN avec Chris (matériel prêt — démo 100K ctx + Projects mode + agent Dev)
+- [ ] Rédiger post Reddit/HN avec Chris (matériel prêt — démo Skills/MCP + Projects + agent)
 
 ## À faire (priorité)
 
-### Skills/Awareness system (P0 — prochaine session)
-- [ ] Audit codebase : identifier points d'entrée system prompt chat normal + projets (sous-agents)
-- [ ] Définir structure Skills : Web Search, Code Runner, File System, Calculator
-- [ ] Toggles dans ChatSettingsSidebar + RightPanel — activables partout
-- [ ] Awareness block ≤ 100 tokens par skill, injecté dynamiquement
-- [ ] Chat normal bascule sur /tool-chat si skills tools activés
-- [ ] Skills actifs = seuls tools exposés au modèle
+### P0 — Prochaine session
 
-### Lancement (P1)
-- [ ] Finaliser posts avec Chris — /humanizer obligatoire
-- [ ] Préparer Show HN (mardi-jeudi 14h-16h Paris)
-- [ ] Objectif karma Reddit : 200 commentaires (~28 juin 2026)
+- [ ] **Types de projets Dev/Docs/Research** — layouts fonctionnels, pas stubs
+  - Dev : arborescence fichiers réelle + IDE-like (file tree, tabs)
+  - Docs : injection contexte fichiers drag & drop
+  - Research : gestion sources URL/documents
+- [ ] **RAG natif dans les projets**
+  - PDF (pdfplumber), DOCX (python-docx), PPTX, XLSX, MD, CSV, JSON
+  - ChromaDB par projet, retrieval injecté dans contexte à chaque message
+  - Chat normal = pas de RAG
 
-### Dev mode — améliorations (P1)
-- [ ] Tester Qwen2.5-Coder-14B Q4_K_M pour Dev mode (tool calling natif probable)
-- [ ] Scoring qualité Dev mode : compilation OK, présence éléments attendus
+### P1 — Session suivante
 
-### Fine-tuning (P2)
-- [ ] Upgrader llama-cpp-python → tester chargement GGUFs fine-tunés dans Chat
-- [ ] Vérifier eval after persiste bien en DB après restart
+- [ ] **Logs MCP** dans la card skill — last session logs, endpoint GET /skills/{id}/mcp/logs?lines=50
+- [ ] **Scoring qualité benchmarks** — algo sans LLM juge, score 0-100 dans leaderboard
+  - Code : compilation OK, présence éléments attendus
+  - Raisonnement : réponse correcte
+  - Instruction : format
+  - Résumé : couverture mots-clés
+- [ ] **Profils benchmark conversation** — minimal/medium/long context avec scoring auto
 
-### Vision / MTP (P2)
-- [ ] Valider gain MTP mesuré dans EchoHub
-- [ ] Tester vision GGUF complet (bartowski/Qwen2-VL-7B-Instruct-GGUF avec mmproj)
-- [ ] Téléchargement auto mmproj si modèle vision détecté
+### P2 — Backlog actif
 
-### Bugs (P2)
+- [ ] MTP — détection GGUF + badge Discover + export fine-tune préservant tenseurs MTP
 - [ ] Fix indicateur `~` après fin de stream (race condition liveTokens/streaming)
+- [ ] web_search DDG sélecteurs brittle — fallback si DDG change layout
 - [ ] OOM kernel SIGKILL non détectable — watchdog process
-- [ ] web_search DDG sélecteurs brittle — fallback si change
-
-### Nettoyage (P2)
-- [ ] Supprimer vieux composants héritage (ChatPanel.tsx, LoadConfigModal.tsx, etc.)
+- [ ] Tester Qwen2.5-Coder-14B Q4_K_M pour Dev mode (tool calling natif probable)
 - [ ] run_command timeout configurable (tsc sur gros projets peut dépasser 10s)
 
-### Packaging (P2)
-- [ ] Valider .AppImage (linuxdeploy requis)
-- [ ] Valider .deb
+### Lancement
+
+- [ ] Objectif karma Reddit : 200 commentaires avant ~28 juin 2026
+- [ ] Finaliser posts avec Chris — /humanizer obligatoire avant publication
+- [ ] Préparer Show HN (mardi-jeudi 14h-16h Paris)
 
 ## Backlog
-- [ ] MCP server EchoHub → Claude Code pilote modèles locaux (Phase 2)
-- [ ] EchoForge ↔ EchoHub API locale (Phase 3)
-- [ ] Modèle juge fiable (après fine-tuning + évaluation itérative)
-- [ ] Automatisation fine-tuning (boucle finetune→test→finetune)
-- [ ] Multi-GPU support vLLM
-- [ ] Docs mode : drag & drop fichiers pour injection contexte
-- [ ] Research mode : ajout sources URL
+
 - [ ] Tool calling natif vLLM dans generate_with_tools
 - [ ] Scrapling MCP server natif (alternative aux tools custom)
+- [ ] MCP server EchoHub → Claude Code pilote modèles locaux (Phase 2)
+- [ ] EchoForge ↔ EchoHub API locale (Phase 3)
+- [ ] Automatisation fine-tuning (boucle finetune→test→finetune)
+- [ ] Modèle juge fiable (après fine-tuning + évaluation itérative)
+- [ ] Multi-GPU support vLLM
+- [ ] Valider .AppImage + .deb
+- [ ] Supprimer vieux composants héritage (ChatPanel.tsx, LoadConfigModal.tsx)
+
+## Terminé ✅ (session 21 — 2026-05-20)
+
+- [x] MCP stdio transport — McpStdioClient, pool, JSON-RPC 2.0 over stdin/stdout
+- [x] Venv isolé par skill Python (plus de contamination du backend venv)
+- [x] detect_mcp_server : smithery.yaml, StdioServerTransport Node, monorepos exclus
+- [x] Auto-redetect transport manquant au start + patch registry.json
+- [x] Context budget awareness dans tool results (75% warn, 92% hard stop)
+- [x] Synthesis on tool cap (plus de coupure mid-response)
+- [x] Cap warning → set_tool_limit explicite
+- [x] Timeout 60s call_mcp_tool (plus de deadlock LLM)
+- [x] Persistance messages MCP (onSaveMessage sur skillChatHook)
+- [x] Context bar projets (usedTokens depuis historique)
+- [x] Déduplication messages (deduplicateMessages)
+- [x] Tool call blocks animés (Framer Motion, ouvert pendant exec, fermé done)
+- [x] 5 profils chat avec vrais system prompts + permanent rules + langue mirroring
+- [x] Testé end-to-end : paper-search-mcp (57 tools) + mcp-fetch-server (6 tools)
+
+## Terminé ✅ (session 20 — 2026-05-20)
+
+- [x] Native skills : Web Search, Code Runner, File System, Calculator
+- [x] Community skills installables depuis GitHub (clone + install + toggle)
+- [x] Awareness blocks injectés dans system prompt selon skills actifs
+- [x] MCP HTTP servers fonctionnels
+- [x] Notifications SSE (toasts temps réel)
+- [x] Modularisation backend routers/services
 
 ## Terminé ✅ (session 19 — 2026-05-20)
 - [x] Streaming interleaved tool execution (stop_event, mid-stream tool call)
 - [x] Parser MessageContent à état (think/tool_call/tool_result imbriqués)
-- [x] ToolCallBlock streaming live JSON + style ThinkingBlock
-- [x] Auto-compact 98% (usedTokensRef source de vérité, display séparé historyToSend)
-- [x] set_tool_limit tool (modèle lève sa propre limite)
-- [x] run_command + get_workspace_info + fetch_url + web_search
-- [x] read_file numéros de ligne + plage
-- [x] edit_file mode ligne + diagnostic échec
+- [x] Auto-compact 98% + set_tool_limit
+- [x] fetch_url + web_search via Scrapling
 - [x] Slash commands /clear /compact /tokens /model /files /limit
-- [x] Auto-focus textarea sur keypress global
-- [x] Permanent Rules UI
-- [x] capabilities détectées au load modèle
-- [x] projectId fix DevPanel
-- [x] Context bar sync tool_call_streaming
+- [x] Capabilities détectées au load modèle
 
-## Terminé ✅ (session 18 — 2026-05-20 matin)
-- [x] Projects system complet : hub, workspaces, profils scopés, sidebar conversations
-- [x] Dev mode tool use : create_file, read_file, list_files, delete_file, edit_file
-- [x] generate_with_tools streaming réel (stream=True)
-- [x] KV cache sélectionnable LoadModal (Q8_0/Q4_0/BF16)
-- [x] MoE VRAM guard + GGML_CUDA_ENABLE_UNIFIED_MEMORY
+## Terminé ✅ (sessions 1-18)
+- [x] Dual-engine inference (llama.cpp + vLLM), VRAM management, model discovery
+- [x] Multi-vLLM versions, benchmark suite, fine-tuning QLoRA complet
+- [x] MTP support, vision GGUF, Projects workspace + tool calling

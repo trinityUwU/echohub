@@ -28,6 +28,8 @@ cd echohub
 - Pick the variant that fits your GPU memory and download it in the background
 - Load a model with one click — there's a live VRAM preview before you commit
 - Chat with streaming responses, conversation history, and image attachments for vision models
+- Install any MCP server from GitHub in one click — Python and Node, stdio and HTTP, auto-detected
+- Agent mode with tool use: web search, file system, code execution, and any installed MCP tools
 - Collect training pairs from real conversations, fine-tune locally with QLoRA, evaluate before and after, and export as GGUF
 - Detects and preserves MTP (Multi-Token Prediction) — models like Qwen3 get 1.5–2x faster generation automatically, with a badge in Discover and Library
 - Export any conversation as Markdown
@@ -88,6 +90,7 @@ Full technical breakdown:
 - [v0.5 — MTP support](docs/v0.5-mtp.md)
 - [v0.6 — Vision, MTP, UX polish](docs/v0.6-vision-mtp-ux.md)
 - [v0.7 — Projects workspace & tool calling](docs/v0.7-projects-workspace.md)
+- [v0.8 — MCP Skills Intelligence & Agent Polish](docs/v0.8-mcp-skills-intelligence.md)
 
 ---
 
@@ -101,7 +104,8 @@ Full technical breakdown:
 | [v0.4 — Fine-tuning](docs/v0.4-finetune.md) | 🚧 In progress | QLoRA fine-tuning, RLHF pairs, eval before/after, GGUF export, download history |
 | [v0.5 — MTP support](docs/v0.5-mtp.md) | ✅ Stable | MTP detection, badge in Discover/Library, fine-tune export preserves MTP tensors |
 | [v0.6 — Vision, MTP, UX polish](docs/v0.6-vision-mtp-ux.md) | ✅ Stable | Vision for GGUF (mmproj auto-detect), capability badges everywhere, reload model from footer, image lightbox, Wayland clipboard paste, vLLM fixes |
-| [v0.7 — Projects workspace](docs/v0.7-projects-workspace.md) | 🚧 In progress | Projects hub (Dev/Docs/Research), per-project profiles, tool calling detection & filter, collapsible panels |
+| [v0.7 — Projects workspace](docs/v0.7-projects-workspace.md) | ✅ Stable | Projects hub (Dev/Docs/Research), per-project profiles, tool calling detection & filter, collapsible panels |
+| [v0.8 — MCP Skills Intelligence](docs/v0.8-mcp-skills-intelligence.md) | ✅ Stable | stdio MCP transport (Python + Node), auto-install from GitHub, isolated venvs, context budget, synthesis on cap, 5 built-in chat profiles |
 
 ---
 
