@@ -6,7 +6,7 @@ import { Toggle } from '@/components/shared/Toggle'
 import type { ChatParams, ModelInfo } from '@/types'
 import type { useProfiles } from '@/hooks/useProfiles'
 import { isThinkingControllable } from '@/api/client'
-import { SKILLS, type SkillId, type UseSkillsReturn } from '@/hooks/useSkills'
+import { NATIVE_SKILLS, type UseSkillsReturn } from '@/hooks/useSkills'
 
 interface RightPanelProps {
   params: ChatParams
@@ -255,18 +255,47 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
 function SkillsSection({ skills }: { skills: UseSkillsReturn }): React.ReactElement {
   return (
     <div className="flex flex-col gap-1">
-      {SKILLS.map(skill => {
-        const active = skills.activeIds.has(skill.id as SkillId)
+      {/* Native skills */}
+      {NATIVE_SKILLS.map(skill => {
+        const active = skills.activeIds.has(skill.id)
         return (
           <div key={skill.id} className="flex items-center justify-between py-1.5 gap-2">
-            <div className="flex flex-col">
-              <span className={`text-sm ${active ? 'text-text-primary' : 'text-text-secondary'}`}>{skill.name}</span>
-              <span className="text-2xs text-text-muted leading-tight">{skill.description}</span>
+            <div className="flex flex-col min-w-0">
+              <span className={`text-sm truncate ${active ? 'text-text-primary' : 'text-text-secondary'}`}>{skill.name}</span>
+              <span className="text-2xs text-text-muted leading-tight truncate">{skill.description}</span>
             </div>
-            <Toggle on={active} onChange={() => skills.toggle(skill.id as SkillId)} />
+            <Toggle on={active} onChange={() => skills.toggle(skill.id)} />
           </div>
         )
       })}
+
+      {/* Community skills */}
+      {skills.communitySkills.length > 0 && (
+        <>
+          <div className="border-t border-border my-1" />
+          {skills.communitySkills.map(skill => {
+            const active = skills.activeIds.has(skill.id)
+            const hasTools = skill.tools.length > 0
+            return (
+              <div key={skill.id} className="flex items-center justify-between py-1.5 gap-2">
+                <div className="flex flex-col min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-sm truncate ${active ? 'text-text-primary' : 'text-text-secondary'}`}>{skill.name}</span>
+                    {!hasTools && (
+                      <span className="text-2xs text-yellow/70 flex-shrink-0" title="No tools declared — add an 'echohub' key to package.json">
+                        ⚠
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-2xs text-text-muted leading-tight truncate">{skill.description || 'Community skill'}</span>
+                </div>
+                <Toggle on={active} onChange={() => skills.toggle(skill.id)} />
+              </div>
+            )
+          })}
+        </>
+      )}
+
       {skills.hasToolSkills && (
         <p className="text-2xs text-accent mt-1">Tool use actif — le chat utilise /tool-chat</p>
       )}
