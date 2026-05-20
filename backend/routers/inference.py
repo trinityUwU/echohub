@@ -391,6 +391,9 @@ async def tool_chat(req: ToolChatRequest):
         for iteration in range(MAX_ITERATIONS):
             # Streaming tool use: text deltas arrive live, tool_calls accumulated
             response_dict: dict | None = None
+            accumulated_text_buf = ""
+            # Whether we already emitted text tokens to the client this iteration
+            streamed_text = False
             try:
                 async for event in engine_router.generate_with_tools(
                     messages=messages,
@@ -400,30 +403,56 @@ async def tool_chat(req: ToolChatRequest):
                 ):
                     event_type = event.get("type") if isinstance(event, dict) else None
                     if event_type == "text_delta":
-                        # Stream text tokens live as they arrive
                         content = event.get("content", "")
                         if content:
-                            yield f"data: {_json.dumps({'type': 'text_chunk', 'content': content})}\n\n"
+                            accumulated_text_buf += content
+                            # Suppress streaming if it looks like a tool call response forming
+                            if not accumulated_text_buf.lstrip().startswith("<tool_call>"):
+                                streamed_text = True
+                                yield f"data: {_json.dumps({'type': 'text_chunk', 'content': content})}\n\n"
                     elif event_type == "response":
                         response_dict = event
                     elif event_type == "error":
                         yield f"data: {_json.dumps({'type': 'error', 'error': event.get('error', 'Unknown error')})}\n\n"
                         return
                     elif isinstance(event, dict) and "choices" in event:
-                        # Legacy non-streaming response (vLLM fallback)
                         response_dict = event
             except Exception as e:
                 logger.error(f"[tool-chat] generate_with_tools error: {e}")
                 yield f"data: {_json.dumps({'type': 'error', 'error': str(e)})}\n\n"
                 return
 
-            if response_dict is None:
-                # Text was streamed via text_delta, no response dict — done
+            if response_dict is None and not accumulated_text_buf.lstrip().startswith("<tool_call>"):
+                # Plain text streamed, no tool calls — done
                 break
 
-            choice = response_dict.get("choices", [{}])[0]
+            choice = response_dict.get("choices", [{}])[0] if response_dict else {}
             message = choice.get("message", {})
             tool_calls = message.get("tool_calls")
+
+            # Fallback: model emitted tool call as text (e.g. <tool_call>{...}</tool_call>)
+            if not tool_calls and accumulated_text_buf.lstrip().startswith("<tool_call>"):
+                import re as _re
+                # Parse one or more <tool_call>JSON</tool_call> blocks
+                tc_matches = _re.findall(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", accumulated_text_buf, _re.DOTALL)
+                if tc_matches:
+                    tool_calls = []
+                    for i, tc_json in enumerate(tc_matches):
+                        try:
+                            tc_data = _json.loads(tc_json)
+                            args = tc_data.get("arguments", tc_data.get("args", {}))
+                            tool_calls.append({
+                                "id": f"text_tc_{iteration}_{i}",
+                                "type": "function",
+                                "function": {
+                                    "name": tc_data.get("name", ""),
+                                    "arguments": _json.dumps(args) if not isinstance(args, str) else args,
+                                },
+                            })
+                        except _json.JSONDecodeError:
+                            logger.warning(f"[tool-chat] failed to parse text tool_call: {tc_json[:100]}")
+                    # Inject assistant message with original text into history
+                    messages.append({"role": "assistant", "content": accumulated_text_buf})
 
             if tool_calls:
                 # Append assistant message with tool_calls for context continuity
