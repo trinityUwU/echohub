@@ -6,7 +6,7 @@ import { useProfiles } from '@/hooks/useProfiles'
 import type { ConversationSummary, ModelInfo, GpuStats, ChatMessage, LoadConfig, ChatParams, GenerationStats, Attachment, ToolCall, WorkspaceFile } from '@/types'
 import type { ChatView, ProjectMode } from '@/hooks/useChatMode'
 import { ConvSidebar } from '@/components/nav/ConvSidebar'
-import { ChatTopBar } from './ChatTopBar'
+import { ChatTopBar, LogsPanel } from './ChatTopBar'
 import { CpuBanner } from './CpuBanner'
 import { MigrationBanner } from '@/components/shared/MigrationBanner'
 import { MessageRow } from './MessageRow'
@@ -54,8 +54,10 @@ export function ChatPage({
   const profilesHook = useProfiles() // chat-scoped only — project workspace has its own
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [rightCollapsed, setRightCollapsed] = useState(false)
+  const [showLogs, setShowLogs] = useState(false)
   const toggleLeft = useCallback(() => setLeftCollapsed(v => !v), [])
   const toggleRight = useCallback(() => setRightCollapsed(v => !v), [])
+  const toggleLogs = useCallback(() => setShowLogs(v => !v), [])
   // Local params state — syncs from profile on profile switch, edited freely by sliders
   const [params, setParams] = useState(profilesHook.activeProfile.params)
   const prevProfileId = useRef(profilesHook.activeId)
@@ -217,6 +219,8 @@ export function ChatPage({
         onViewChange={setView}
         onModeChange={setMode}
         loadedModelHasTools={!!loadedModel?.capabilities?.tools}
+        showLogs={showLogs}
+        onToggleLogs={toggleLogs}
       />
       {!hasCuda && <CpuBanner onGoToSettings={onGoToSettings} />}
       <MigrationBanner onGoToSettings={onGoToSettings} />
@@ -264,6 +268,7 @@ export function ChatPage({
           onSend={(text, attachments) => send(text, !!loadedModel, attachments)}
           onStop={stop}
           onLoadModel={onLoadModel}
+          showLogs={showLogs}
         />
         <PanelWrapper side="right" collapsed={rightCollapsed} onToggle={toggleRight}>
           <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />
@@ -289,6 +294,7 @@ interface ChatContentProps {
   toolCalls: ToolCall[]
   workspaceFiles: WorkspaceFile[]
   onRefreshFiles: () => void
+  showLogs?: boolean
   onRegenerate: () => void
   onEditUser: (index: number, newText: string) => void
   onSend: (text: string, attachments?: Attachment[]) => void
@@ -301,10 +307,11 @@ function ChatContent({
   messages, streaming, stats, activeModelName, loadedModel,
   params, usedTokens, isTokensExact, bottomRef,
   toolCalls, workspaceFiles, onRefreshFiles,
-  onRegenerate, onEditUser, onSend, onStop, onLoadModel,
+  onRegenerate, onEditUser, onSend, onStop, onLoadModel, showLogs,
 }: ChatContentProps): React.ReactElement {
   const inner = (
     <>
+      <LogsPanel active={showLogs ?? false} />
       <div className="flex-1 overflow-y-auto py-6">
         {messages.map((msg, i) => (
           <MessageRow

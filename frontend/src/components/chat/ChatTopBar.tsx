@@ -18,13 +18,24 @@ interface ChatTopBarProps {
   onModeChange: (m: ProjectMode) => void
   onBackToHub?: () => void
   loadedModelHasTools: boolean
+  showLogs?: boolean
+  onToggleLogs?: () => void
 }
 
 export function ChatTopBar({
   loadedModel, loading, loadingPct, onOpenPicker, onClear, onEject, onExport,
   view, mode, activeProjectName, onViewChange, onModeChange, onBackToHub, loadedModelHasTools,
+  showLogs, onToggleLogs,
 }: ChatTopBarProps): React.ReactElement {
-  if (loading) return <LoadingBar pct={loadingPct} modelName={loadedModel?.name ?? '…'} onEject={onEject} />
+  if (loading) return (
+    <LoadingBar
+      pct={loadingPct}
+      modelName={loadedModel?.name ?? '…'}
+      onEject={onEject}
+      showLogs={showLogs ?? false}
+      onToggleLogs={onToggleLogs ?? (() => {})}
+    />
+  )
   return (
     <NormalBar
       loadedModel={loadedModel}
@@ -102,7 +113,6 @@ function NormalBar({
   return (
     <div className="bg-surface border-b border-border flex-shrink-0">
       <div className="h-[50px] flex items-center px-4 gap-2.5">
-        {/* Back to hub button when inside a project workspace */}
         {view === 'projects' && activeProjectName && onBackToHub && (
           <button
             onClick={onBackToHub}
@@ -114,7 +124,6 @@ function NormalBar({
             <span className="text-xs font-medium truncate max-w-[120px]">{activeProjectName}</span>
           </button>
         )}
-        {/* Model selector */}
         <button
           onClick={onOpenPicker}
           className="flex items-center gap-2 bg-elevated border border-border hover:border-border-hover rounded-sm px-2.5 py-1.5 cursor-pointer transition-colors"
@@ -122,13 +131,9 @@ function NormalBar({
           <span className="text-sm font-medium text-text-primary max-w-[180px] truncate">
             {loadedModel?.name ?? 'No model loaded'}
           </span>
-          {loadedModel && (
-            <span className="text-2xs bg-green/15 text-green rounded px-1.5 py-px">loaded</span>
-          )}
+          {loadedModel && <span className="text-2xs bg-green/15 text-green rounded px-1.5 py-px">loaded</span>}
           {loadedModel?.engine && (
-            <span className={`text-2xs rounded px-1.5 py-px ${
-              loadedModel.engine === 'vllm' ? 'bg-blue/15 text-blue' : 'bg-accent/15 text-accent'
-            }`}>
+            <span className={`text-2xs rounded px-1.5 py-px ${loadedModel.engine === 'vllm' ? 'bg-blue/15 text-blue' : 'bg-accent/15 text-accent'}`}>
               {loadedModel.engine === 'vllm' ? 'vLLM' : 'llama.cpp'}
             </span>
           )}
@@ -137,15 +142,12 @@ function NormalBar({
               {loadedModel.quantization.split('/')[0]}
             </span>
           )}
-          {loadedModel?.has_mtp && (
-            <span className="text-2xs bg-cyan-500/15 text-cyan-400 rounded px-1.5 py-px">MTP</span>
-          )}
+          {loadedModel?.has_mtp && <span className="text-2xs bg-cyan-500/15 text-cyan-400 rounded px-1.5 py-px">MTP</span>}
           <svg className="w-3.5 h-3.5 stroke-text-muted" viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="6 9 12 15 18 9"/>
           </svg>
         </button>
 
-        {/* View switcher: Chat | Projects */}
         <div className="relative flex items-center bg-elevated border border-border rounded-md p-0.5 ml-3">
           {VIEWS.map(v => (
             <button
@@ -167,7 +169,6 @@ function NormalBar({
           ))}
         </div>
 
-        {/* Mode selector — never shown in projects view (hub has its own filters, workspace has fixed mode) */}
         <AnimatePresence>
           {false && view === 'projects' && !activeProjectName && (
             <motion.div
@@ -205,7 +206,6 @@ function NormalBar({
           )}
         </AnimatePresence>
 
-        {/* Right-side actions */}
         <div className="flex items-center gap-1.5 ml-auto">
           <TopBarBtn onClick={onExport}>
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
@@ -233,102 +233,100 @@ function NormalBar({
   )
 }
 
-function LoadingBar({ pct, modelName, onEject }: { pct: number; modelName: string; onEject: () => void }): React.ReactElement {
-  const [showLogs, setShowLogs] = React.useState(false)
+function LoadingBar({ pct, modelName, onEject, showLogs, onToggleLogs }: {
+  pct: number
+  modelName: string
+  onEject: () => void
+  showLogs: boolean
+  onToggleLogs: () => void
+}): React.ReactElement {
+  return (
+    <div className="h-[50px] bg-surface border-b border-border flex items-center px-4 gap-3 flex-shrink-0">
+      <div className="flex-1 flex flex-col gap-1">
+        <div className="flex justify-between text-xs">
+          <span className="text-accent">Loading {modelName}…</span>
+          <span className="font-mono text-text-muted">~{pct}%</span>
+        </div>
+        <div className="h-[3px] bg-overlay rounded-sm overflow-hidden">
+          <div className="h-full bg-accent rounded-sm transition-all duration-300" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+
+      {/* Eye — opens logs panel in the content area */}
+      <button
+        onClick={onToggleLogs}
+        title={showLogs ? 'Hide logs' : 'Show live logs'}
+        className={`w-7 h-7 flex items-center justify-center rounded-sm border transition-colors cursor-pointer ${
+          showLogs ? 'border-accent/40 bg-accent/15 text-accent' : 'border-border hover:bg-overlay text-text-muted hover:text-text-secondary'
+        }`}
+      >
+        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          {showLogs ? (
+            <><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></>
+          ) : (
+            <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>
+          )}
+        </svg>
+      </button>
+
+      <TopBarBtn onClick={onEject}>
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        Eject
+      </TopBarBtn>
+    </div>
+  )
+}
+
+/** Logs panel — rendered in the content area, between left/right sidebars */
+export function LogsPanel({ active }: { active: boolean }): React.ReactElement {
   const [logs, setLogs] = React.useState<string>('')
-  const logsEndRef = React.useRef<HTMLDivElement>(null)
+  const endRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
-    if (!showLogs) return
-    let active = true
+    if (!active) return
+    let alive = true
     const poll = async (): Promise<void> => {
       try {
         const res = await fetch('/api/system/engine-log')
-        if (res.ok && active) setLogs(await res.text())
+        if (res.ok && alive) setLogs(await res.text())
       } catch { /* ignore */ }
     }
     poll()
     const id = setInterval(poll, 1500)
-    return () => { active = false; clearInterval(id) }
-  }, [showLogs])
+    return () => { alive = false; clearInterval(id) }
+  }, [active])
 
   React.useEffect(() => {
-    if (showLogs) logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [logs, showLogs])
+    if (active) endRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [logs, active])
 
   return (
-    <div className="flex flex-col flex-shrink-0">
-      <div className="h-[50px] bg-surface border-b border-border flex items-center px-4 gap-3">
-        <div className="flex-1 flex flex-col gap-1">
-          <div className="flex justify-between text-xs">
-            <span className="text-accent">Loading {modelName}…</span>
-            <span className="font-mono text-text-muted">~{pct}%</span>
-          </div>
-          <div className="h-[3px] bg-overlay rounded-sm overflow-hidden">
-            <div className="h-full bg-accent rounded-sm transition-all duration-300" style={{ width: `${pct}%` }} />
-          </div>
-        </div>
-
-        {/* Eye button — toggle live logs */}
-        <button
-          onClick={() => setShowLogs(v => !v)}
-          title={showLogs ? 'Hide logs' : 'Show live logs'}
-          className={`w-7 h-7 flex items-center justify-center rounded-sm border transition-colors cursor-pointer ${
-            showLogs
-              ? 'border-accent/40 bg-accent/15 text-accent'
-              : 'border-border hover:bg-overlay text-text-muted hover:text-text-secondary'
-          }`}
+    <AnimatePresence initial={false}>
+      {active && (
+        <motion.div
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: 220, opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={{ duration: 0.2, ease: 'easeInOut' }}
+          className="overflow-hidden bg-[#0a0a0c] border-b border-border flex-shrink-0"
         >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            {showLogs ? (
-              <>
-                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-                <line x1="1" y1="1" x2="23" y2="23"/>
-              </>
-            ) : (
-              <>
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                <circle cx="12" cy="12" r="3"/>
-              </>
-            )}
-          </svg>
-        </button>
-
-        <TopBarBtn onClick={onEject}>
-          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-          Eject
-        </TopBarBtn>
-      </div>
-
-      {/* Live logs panel */}
-      <AnimatePresence initial={false}>
-        {showLogs && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 220, opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: 'easeInOut' }}
-            className="overflow-hidden bg-[#0d0d0f] border-b border-border"
-          >
-            <div className="h-full overflow-y-auto p-3 font-mono text-[11px] leading-relaxed text-text-muted">
-              {logs
-                ? logs.split('\n').map((line, i) => (
-                    <div key={i} className={
-                      line.includes('error') || line.includes('Error') ? 'text-red' :
-                      line.includes('warn') || line.includes('Warn') ? 'text-yellow' :
-                      line.includes('loaded') || line.includes('success') || line.includes('OK') ? 'text-green' :
-                      ''
-                    }>{line || ' '}</div>
-                  ))
-                : <span className="animate-pulse text-text-muted/50">Waiting for log output…</span>
-              }
-              <div ref={logsEndRef} />
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+          <div className="h-full overflow-y-auto p-3 font-mono text-[11px] leading-relaxed">
+            {logs
+              ? logs.split('\n').map((line, i) => (
+                  <div key={i} className={
+                    /error/i.test(line) ? 'text-red' :
+                    /warn/i.test(line) ? 'text-yellow' :
+                    /loaded|success|\bOK\b/i.test(line) ? 'text-green' :
+                    'text-text-muted'
+                  }>{line || ' '}</div>
+                ))
+              : <span className="animate-pulse text-text-muted/50">Waiting for log output…</span>
+            }
+            <div ref={endRef} />
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   )
 }
 
