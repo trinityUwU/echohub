@@ -13,7 +13,7 @@ const FORMAT_FILTERS = [
   { value: 'EXL2', label: 'EXL2' },
   { value: 'safetensors', label: 'FT-ready' },
 ]
-const CAP_FILTERS    = ['Vision', 'Thinking']
+const CAP_FILTERS    = ['Vision', 'Thinking', 'Tools']
 const PAGE_SIZE      = 20
 
 type SortKey = 'downloads' | 'likes' | 'created_at'

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useChat } from '@/hooks/useChat'
 import { useProfiles } from '@/hooks/useProfiles'
-import type { ConversationSummary, ModelInfo, GpuStats, ChatMessage, LoadConfig } from '@/types'
+import type { ConversationSummary, ModelInfo, GpuStats, ChatMessage, LoadConfig, ChatParams, GenerationStats, Attachment } from '@/types'
+import type { ChatView, ProjectMode } from '@/hooks/useChatMode'
 import { ConvSidebar } from '@/components/nav/ConvSidebar'
 import { ChatTopBar } from './ChatTopBar'
 import { CpuBanner } from './CpuBanner'
@@ -9,6 +10,8 @@ import { MigrationBanner } from '@/components/shared/MigrationBanner'
 import { MessageRow } from './MessageRow'
 import { InputBar } from './InputBar'
 import { RightPanel } from './RightPanel'
+import { ProjectsPanel } from './ProjectsPanel'
+import { useChatMode } from '@/hooks/useChatMode'
 import { clearMessages, deleteMessage } from '@/api/client'
 
 interface ChatPageProps {
@@ -42,6 +45,7 @@ export function ChatPage({
   onOpenPicker, onEject, onGoToSettings,
   setActiveMessages, onLoadModel,
 }: ChatPageProps): React.ReactElement {
+  const { view, mode, setView, setMode } = useChatMode()
   const profilesHook = useProfiles()
   // Local params state — syncs from profile on profile switch, edited freely by sliders
   const [params, setParams] = useState(profilesHook.activeProfile.params)
@@ -152,6 +156,11 @@ export function ChatPage({
           onClear={handleClear}
           onEject={onEject}
           onExport={handleExport}
+          view={view}
+          mode={mode}
+          onViewChange={setView}
+          onModeChange={setMode}
+          loadedModelHasTools={!!loadedModel?.capabilities?.tools}
         />
         {!hasCuda && <CpuBanner onGoToSettings={onGoToSettings} />}
         <MigrationBanner onGoToSettings={onGoToSettings} />
@@ -163,36 +172,97 @@ export function ChatPage({
             Out of memory — VRAM insuffisante pour cette génération. Réduis le contexte ou recharge le modèle.
           </div>
         )}
-        <div className="flex-1 overflow-y-auto py-6">
-          {messages.map((msg, i) => (
-            <MessageRow
-              key={msg.id ?? i}
-              message={msg}
-              isLast={i === messages.length - 1}
-              genStats={i === messages.length - 1 && msg.role === 'assistant' ? stats : undefined}
-              modelName={activeModelName}
-              streaming={streaming}
-              onRegenerate={msg.role === 'assistant' && i === messages.length - 1 ? handleRegenerate : undefined}
-              onEditUser={msg.role === 'user' ? (text: string) => handleEditUser(i, text) : undefined}
-              loadedModelId={loadedModel?.id ?? null}
-              onReload={onLoadModel}
-            />
-          ))}
-          <div ref={bottomRef} />
-        </div>
-        <InputBar
-          modelLoaded={!!loadedModel}
-          visionEnabled={!!loadedModel?.capabilities?.vision}
+        <ChatContent
+          view={view}
+          mode={mode}
+          loadedModelHasTools={!!loadedModel?.capabilities?.tools}
+          messages={messages}
           streaming={streaming}
+          stats={stats}
+          activeModelName={activeModelName}
+          loadedModel={loadedModel}
           params={params}
           usedTokens={usedTokens}
-          maxTokens={loadedModel?.max_context_window ?? null}
-          tokensExact={isTokensExact}
+          isTokensExact={isTokensExact}
+          bottomRef={bottomRef}
+          onRegenerate={handleRegenerate}
+          onEditUser={handleEditUser}
           onSend={(text, attachments) => send(text, !!loadedModel, attachments)}
           onStop={stop}
+          onLoadModel={onLoadModel}
         />
       </div>
       <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />
     </div>
   )
+}
+
+interface ChatContentProps {
+  view: ChatView
+  mode: ProjectMode
+  loadedModelHasTools: boolean
+  messages: ChatMessage[]
+  streaming: boolean
+  stats: GenerationStats | null
+  activeModelName: string | null
+  loadedModel: ModelInfo | null
+  params: ChatParams
+  usedTokens: number
+  isTokensExact: boolean
+  bottomRef: React.RefObject<HTMLDivElement | null>
+  onRegenerate: () => void
+  onEditUser: (index: number, newText: string) => void
+  onSend: (text: string, attachments?: Attachment[]) => void
+  onStop: () => void
+  onLoadModel?: (config: LoadConfig) => void
+}
+
+function ChatContent({
+  view, mode, loadedModelHasTools,
+  messages, streaming, stats, activeModelName, loadedModel,
+  params, usedTokens, isTokensExact, bottomRef,
+  onRegenerate, onEditUser, onSend, onStop, onLoadModel,
+}: ChatContentProps): React.ReactElement {
+  const inner = (
+    <>
+      <div className="flex-1 overflow-y-auto py-6">
+        {messages.map((msg, i) => (
+          <MessageRow
+            key={msg.id ?? i}
+            message={msg}
+            isLast={i === messages.length - 1}
+            genStats={i === messages.length - 1 && msg.role === 'assistant' ? stats : undefined}
+            modelName={activeModelName}
+            streaming={streaming}
+            onRegenerate={msg.role === 'assistant' && i === messages.length - 1 ? onRegenerate : undefined}
+            onEditUser={msg.role === 'user' ? (text: string) => onEditUser(i, text) : undefined}
+            loadedModelId={loadedModel?.id ?? null}
+            onReload={onLoadModel}
+          />
+        ))}
+        <div ref={bottomRef as React.RefObject<HTMLDivElement>} />
+      </div>
+      <InputBar
+        modelLoaded={!!loadedModel}
+        visionEnabled={!!loadedModel?.capabilities?.vision}
+        streaming={streaming}
+        params={params}
+        usedTokens={usedTokens}
+        maxTokens={loadedModel?.max_context_window ?? null}
+        tokensExact={isTokensExact}
+        onSend={onSend}
+        onStop={onStop}
+      />
+    </>
+  )
+
+  if (view === 'projects') {
+    return (
+      <ProjectsPanel mode={mode} loadedModelHasTools={loadedModelHasTools}>
+        {inner}
+      </ProjectsPanel>
+    )
+  }
+
+  return <>{inner}</>
 }

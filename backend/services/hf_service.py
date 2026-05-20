@@ -24,6 +24,23 @@ def _get_hf_token() -> Optional[str]:
     return _os.getenv("HF_TOKEN") or None
 
 
+def _read_local_tools_support(model_id: str) -> bool:
+    """Check if downloaded model's tokenizer_config.json chat_template mentions tool/function_call."""
+    import json
+    tokenizer_path = _model_dir(model_id) / "tokenizer_config.json"
+    if not tokenizer_path.exists():
+        return False
+    try:
+        cfg = json.loads(tokenizer_path.read_text())
+        template = cfg.get("chat_template", "")
+        if not isinstance(template, str):
+            return False
+        template_lower = template.lower()
+        return any(marker in template_lower for marker in ("tool", "function_call", "<tool_call>"))
+    except Exception:
+        return False
+
+
 def _read_local_context_window(model_id: str) -> Optional[int]:
     """Read max_position_embeddings from downloaded model's config.json — ground truth."""
     import json
@@ -217,8 +234,19 @@ def _detect_capabilities(tags: list[str], model_id: str) -> ModelCapabilities:
     )
     code = "code" in tags_lower or any(k in name_lower for k in ("coder", "code", "-code"))
     multilingual = "multilingual" in tags_lower
-    tools = any(t in tags_lower for t in ("function-calling", "tool-use", "tools", "tool_use")) or \
-            any(k in name_lower for k in ("tool", "function-calling"))
+    # Check local tokenizer_config.json first — ground truth for downloaded models
+    local_tools = _read_local_tools_support(model_id)
+    tools = local_tools or \
+            any(t in tags_lower for t in (
+                "function-calling", "tool-use", "tools", "tool_use",
+                "tool-calls", "function_calling", "agent", "agentic",
+                "hermes", "nexusflow", "gorilla",
+            )) or \
+            any(k in name_lower for k in (
+                "hermes", "gorilla", "nexus", "functionary",
+                "xlam", "toolbench", "toolllm", "hammer", "meetkai",
+                "tool", "function-calling",
+            ))
 
     return ModelCapabilities(
         thinking=thinking,
@@ -405,7 +433,7 @@ def search_models(
     sort_dir: str = "desc",
 ) -> list[ModelInfo]:
     """Search HuggingFace Hub for models.
-    filters: list of awq, gptq, gguf, fp8, exl2, vision, thinking (multi-select).
+    filters: list of awq, gptq, gguf, fp8, exl2, vision, thinking, tools (multi-select).
     sort: downloads | likes | created_at. sort_dir: asc | desc.
     """
     try:
@@ -419,7 +447,7 @@ def search_models(
 
         # Separate quant filters from capability filters
         _QUANT_TAGS = {"awq", "gptq", "gguf", "fp8", "exl2"}
-        _CAP_FILTERS = {"vision", "thinking"}
+        _CAP_FILTERS = {"vision", "thinking", "tools"}
         _FINETUNE_FILTER = "safetensors"
 
         active_filters = [f.lower() for f in (filters or ["awq", "gptq", "gguf"])]
@@ -465,6 +493,8 @@ def search_models(
                 if "vision" in cap_filters and not caps.vision:
                     continue
                 if "thinking" in cap_filters and not caps.thinking:
+                    continue
+                if "tools" in cap_filters and not caps.tools:
                     continue
                 params_b = _extract_params_billion(m.modelId, tags)
                 vram_est = _estimate_vram_gb(params_b, "bf16") if params_b else None
@@ -518,6 +548,8 @@ def search_models(
                 if "vision" in cap_filters and not caps.vision:
                     continue
                 if "thinking" in cap_filters and not caps.thinking:
+                    continue
+                if "tools" in cap_filters and not caps.tools:
                     continue
                 params_b = _extract_params_billion(m.modelId, tags)
                 vram_est = _estimate_vram_gb(params_b, quant_type) if params_b else None
