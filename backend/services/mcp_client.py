@@ -1,6 +1,8 @@
 """
-mcp_client.py — Bridge between EchoHub tool execution and MCP HTTP servers.
-MCP servers expose tools via POST /api/mcp using JSON-RPC 2.0 or StreamableHTTP transport.
+mcp_client.py — Bridge between EchoHub tool execution and MCP servers.
+
+Routes calls to HTTP servers (JSON-RPC over HTTP) or stdio servers
+(JSON-RPC over stdin/stdout) based on the transport column in DB.
 """
 from __future__ import annotations
 
@@ -9,6 +11,8 @@ from typing import Any
 
 import httpx
 from loguru import logger
+
+from backend.services import mcp_stdio_client as _stdio
 
 # ──────────────────────────────────────────────────────────────────────────────
 # In-memory tool registry: skill_id → list of tool names
@@ -50,6 +54,7 @@ def _get_server(skill_id: str) -> dict | None:
 async def call_mcp_tool(skill_id: str, tool_name: str, arguments: dict) -> str:
     """
     Forward a tool call to a running MCP server.
+    Automatically routes to the correct transport (http or stdio).
     Returns a string result (or an error string).
     """
     server = _get_server(skill_id)
@@ -58,6 +63,32 @@ async def call_mcp_tool(skill_id: str, tool_name: str, arguments: dict) -> str:
     if server.get("status") != "running":
         return f"Error: MCP server '{skill_id}' is not running. Start it first."
 
+    transport = server.get("transport", "http")
+
+    if transport == "stdio":
+        return await _call_stdio_tool(skill_id, tool_name, arguments, server)
+
+    return await _call_http_tool(skill_id, tool_name, arguments, server)
+
+
+async def _call_stdio_tool(
+    skill_id: str, tool_name: str, arguments: dict, server: dict
+) -> str:
+    """Delegate tool call to a running stdio MCP client."""
+    client = _stdio.get_client(skill_id)
+    if client is None or not client.is_alive():
+        return f"Error: stdio MCP client for '{skill_id}' is not running."
+    try:
+        return await client.call_tool(tool_name, arguments)
+    except Exception as exc:
+        logger.error("[mcp_client] stdio call_tool {}/{}: {}", skill_id, tool_name, exc)
+        return f"Error: {exc}"
+
+
+async def _call_http_tool(
+    skill_id: str, tool_name: str, arguments: dict, server: dict
+) -> str:
+    """Forward a tool call via HTTP JSON-RPC."""
     port: int = server["port"]
     payload = {
         "jsonrpc": "2.0",
@@ -149,6 +180,7 @@ def _parse_sse_result(text: str) -> str:
 async def list_mcp_tools(skill_id: str) -> list[dict]:
     """
     Query the MCP server for its tool list, cache it, and return OpenAI-format defs.
+    Routes to stdio or HTTP based on server transport.
     """
     if skill_id in _tools_cache:
         return _tools_cache[skill_id]
@@ -157,6 +189,32 @@ async def list_mcp_tools(skill_id: str) -> list[dict]:
     if server is None or server.get("status") != "running":
         return []
 
+    transport = server.get("transport", "http")
+
+    if transport == "stdio":
+        return await _list_stdio_tools(skill_id)
+
+    return await _list_http_tools(skill_id, server)
+
+
+async def _list_stdio_tools(skill_id: str) -> list[dict]:
+    """Get tool list from a running stdio MCP client."""
+    client = _stdio.get_client(skill_id)
+    if client is None or not client.is_alive():
+        return []
+    try:
+        tools_raw = await client.list_tools()
+        openai_tools = [_mcp_tool_to_openai(t, skill_id) for t in tools_raw]
+        _tools_cache[skill_id] = openai_tools
+        _tool_registry[skill_id] = [t["function"]["name"] for t in openai_tools]
+        return openai_tools
+    except Exception as exc:
+        logger.warning("[mcp_client] list_stdio_tools {}: {}", skill_id, exc)
+        return []
+
+
+async def _list_http_tools(skill_id: str, server: dict) -> list[dict]:
+    """Get tool list via HTTP JSON-RPC."""
     port: int = server["port"]
     payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
 

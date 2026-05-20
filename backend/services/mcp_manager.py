@@ -14,6 +14,7 @@ import os
 import re
 import signal
 import socket
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ import psutil
 from loguru import logger
 
 from backend.services import db as _db
+from backend.services import mcp_stdio_client as _stdio
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -128,6 +130,12 @@ def detect_mcp_server(skill_path: Path) -> dict[str, Any] | None:
 
     # -----------------------------------------------------------------------
     # 3. pyproject.toml / setup.py — Python MCP servers
+    #
+    # Transport is "stdio" when:
+    #   a) pyproject.toml has [project.scripts] with an entry point → pure CLI
+    #   b) setup.py has entry_points console_scripts
+    #   c) start_command has no --port / PORT= → not an HTTP server
+    # Transport is "http" only when start_command explicitly binds a port.
     # -----------------------------------------------------------------------
     for pyproj in (skill_path / "pyproject.toml", skill_path / "setup.py"):
         if pyproj.exists():
@@ -136,31 +144,58 @@ def detect_mcp_server(skill_path: Path) -> dict[str, Any] | None:
                 # Use the backend venv Python so installed packages are available
                 python = sys.executable
 
-                # Prefer [project.scripts] entry point: module:func
-                script_match = re.search(r'\[project\.scripts\][^\[]*?\S+\s*=\s*"([^"]+):([^"]+)"', content, re.DOTALL)
-                if script_match:
-                    module = script_match.group(1)
-                    return {
-                        "start_command": f"{python} -m {module}",
-                        "port_hint": _extract_port(content),
-                        "transport": "stdio",
-                    }
+                # ── a) pyproject.toml [project.scripts] ─────────────────────
+                # Match section then first key = "module.path:func" entry
+                scripts_section = re.search(
+                    r'\[project\.scripts\](.*?)(?=\n\[|\Z)',
+                    content,
+                    re.DOTALL,
+                )
+                if scripts_section:
+                    ep_match = re.search(
+                        r'^\s*\S+\s*=\s*"([^"]+):([^"]+)"',
+                        scripts_section.group(1),
+                        re.MULTILINE,
+                    )
+                    if ep_match:
+                        module = ep_match.group(1)
+                        return {
+                            "start_command": f"{python} -m {module}",
+                            "port_hint": None,
+                            "transport": "stdio",
+                        }
 
-                # Fallback: find a Python file with MCP patterns
+                # ── b) setup.py console_scripts ──────────────────────────────
+                if pyproj.name == "setup.py":
+                    ep_match = re.search(
+                        r'console_scripts[^"\']*["\'][^\'"]*["\'][^"\']*["\']([^"\']+):([^"\']+)["\']',
+                        content,
+                    )
+                    if ep_match:
+                        module = ep_match.group(1)
+                        return {
+                            "start_command": f"{python} -m {module}",
+                            "port_hint": None,
+                            "transport": "stdio",
+                        }
+
+                # ── c) Fallback: find a Python file with MCP patterns ────────
+                port = _extract_port(content)
+                transport_fb = "http" if port else "stdio"
                 for fname in ("server.py", "mcp_server.py", "main.py", "app.py"):
                     if (skill_path / fname).exists():
                         return {
                             "start_command": f"{python} {fname}",
-                            "port_hint": _extract_port(content),
-                            "transport": "stdio",
+                            "port_hint": port,
+                            "transport": transport_fb,
                         }
                 for py in skill_path.glob("*.py"):
                     txt = py.read_text(errors="ignore")
                     if "FastMCP" in txt or "mcp.server" in txt or "Server(" in txt:
                         return {
                             "start_command": f"{python} {py.name}",
-                            "port_hint": _extract_port(content),
-                            "transport": "stdio",
+                            "port_hint": port,
+                            "transport": transport_fb,
                         }
 
     # -----------------------------------------------------------------------
@@ -182,10 +217,13 @@ def detect_mcp_server(skill_path: Path) -> dict[str, Any] | None:
                 if _MCP_PATTERNS.search(content):
                     if candidate_path.suffix == ".ts":
                         start_command = "bun run src/server.ts"
+                        port_hint = _extract_port(content)
+                        transport = "http"
                     else:
-                        start_command = f"python {candidate_path.name}"
-                    port_hint = _extract_port(content)
-                    transport = "http"
+                        start_command = f"{sys.executable} {candidate_path.name}"
+                        port_hint = _extract_port(content)
+                        # Python standalone files: stdio unless port found
+                        transport = "http" if port_hint else "stdio"
                     return {
                         "start_command": start_command,
                         "port_hint": port_hint,
@@ -381,7 +419,14 @@ class McpManager:
             if not ok:
                 return _db.get_mcp_server(skill_id)  # type: ignore[return-value]
 
+        transport = record.get("transport", "http")
         _db.update_mcp_status(skill_id, "starting", error=None)
+
+        # ── Stdio transport: delegate to mcp_stdio_client ─────────────────────
+        if transport == "stdio":
+            return await self._start_stdio(skill_id, start_command, skill_dir, env)
+
+        # ── HTTP transport: launch process + HTTP health check ─────────────────
         logger.info("Starting MCP server '{}' on port {} — {}", skill_id, port, start_command)
 
         try:
@@ -401,13 +446,11 @@ class McpManager:
         self._processes[skill_id] = proc
         _db.update_mcp_status(skill_id, "starting", pid=proc.pid)
 
-        # Health check
         healthy = await self._wait_healthy(port)
         if healthy:
             _db.update_mcp_status(skill_id, "running", pid=proc.pid, last_seen=time.time())
             logger.info("MCP server '{}' is running (pid={})", skill_id, proc.pid)
         else:
-            # Read last log lines for a useful error message
             try:
                 last_lines = log_file.read_text(errors="replace").splitlines()[-15:]
                 error_hint = "\n".join(last_lines).strip() or "health check timeout"
@@ -418,10 +461,55 @@ class McpManager:
 
         return _db.get_mcp_server(skill_id)  # type: ignore[return-value]
 
+    async def _start_stdio(self, skill_id: str, start_command: str, skill_dir: Path, env: dict) -> dict:
+        """
+        Start a stdio MCP server via mcp_stdio_client.
+        The client owns the process; we just record the PID in DB.
+        """
+        import shlex
+        command_parts = shlex.split(start_command)
+        # Replace generic "python"/"python3" with the backend venv interpreter
+        # so installed packages (e.g. httpx, mcp) are available.
+        if command_parts and command_parts[0] in ("python", "python3"):
+            command_parts[0] = sys.executable
+
+        logger.info("Starting stdio MCP server '{}' — {}", skill_id, " ".join(command_parts))
+        try:
+            # Temporarily patch env so subprocess inherits it
+            original_env = os.environ.copy()
+            os.environ.update(env)
+            client = await _stdio.get_or_create(
+                skill_id, command_parts, cwd=str(skill_dir)
+            )
+            os.environ.clear()
+            os.environ.update(original_env)
+        except Exception as exc:
+            _db.update_mcp_status(skill_id, "error", error=str(exc))
+            logger.error("[mcp] stdio start failed for '{}': {}", skill_id, exc)
+            return _db.get_mcp_server(skill_id)  # type: ignore[return-value]
+
+        # Store the process reference so _stop_locked can find it
+        if client.is_alive() and client._proc:
+            self._processes[skill_id] = client._proc
+            _db.update_mcp_status(
+                skill_id, "running", pid=client.pid, last_seen=time.time()
+            )
+            logger.info(
+                "MCP server '{}' (stdio) is running (pid={})", skill_id, client.pid
+            )
+        else:
+            _db.update_mcp_status(
+                skill_id, "error", error="stdio process exited immediately after initialize"
+            )
+            logger.warning("MCP server '{}' (stdio) failed to start", skill_id)
+
+        return _db.get_mcp_server(skill_id)  # type: ignore[return-value]
+
     async def _stop_locked(self, skill_id: str) -> dict:
         record = _db.get_mcp_server(skill_id)
         proc = self._processes.get(skill_id)
         pid = record.get("pid") if record else None
+        transport = record.get("transport", "http") if record else "http"
 
         async def _kill_pid(p: int) -> None:
             try:
@@ -432,7 +520,11 @@ class McpManager:
             except ProcessLookupError:
                 pass
 
-        if proc and proc.returncode is None:
+        # For stdio: send JSON-RPC shutdown via mcp_stdio_client (includes SIGTERM)
+        if transport == "stdio":
+            await _stdio.stop(skill_id)
+            self._processes.pop(skill_id, None)
+        elif proc and proc.returncode is None:
             try:
                 proc.terminate()
                 try:

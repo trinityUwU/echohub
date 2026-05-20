@@ -344,10 +344,11 @@ def init_db() -> None:
             conn.execute("""
                 CREATE TABLE mcp_servers (
                     skill_id TEXT PRIMARY KEY,
-                    port INTEGER NOT NULL,
+                    port INTEGER NOT NULL DEFAULT 0,
                     pid INTEGER,
                     status TEXT NOT NULL DEFAULT 'stopped',
                     start_command TEXT NOT NULL,
+                    transport TEXT NOT NULL DEFAULT 'http',
                     env_json TEXT,
                     error TEXT,
                     started_at REAL,
@@ -355,6 +356,16 @@ def init_db() -> None:
                 )
             """)
             conn.commit()
+        else:
+            # Migration: add transport column if missing (existing DBs)
+            existing_cols = {
+                row[1] for row in conn.execute("PRAGMA table_info(mcp_servers)").fetchall()
+            }
+            if "transport" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE mcp_servers ADD COLUMN transport TEXT NOT NULL DEFAULT 'http'"
+                )
+                conn.commit()
 
     logger.info("DB initialized at {}", get_db_path())
 
@@ -1345,26 +1356,51 @@ def get_mcp_server(skill_id: str) -> dict | None:
 
 def upsert_mcp_server(
     skill_id: str,
-    port: int,
-    start_command: str,
+    port: int = 0,
+    start_command: str = "",
+    transport: str = "http",
     env_json: str | None = None,
+    # Legacy aliases accepted from older callers
+    port_hint: int | None = None,
+    env: dict | None = None,
 ) -> dict:
+    """Insert or update an mcp_servers row.
+
+    ``transport`` must be "http" or "stdio".  For stdio servers pass ``port=0``
+    (or omit it) — the port column is irrelevant but NOT NULL in the schema.
+    """
+    effective_port = port_hint if port_hint is not None else port
+    effective_env = json.dumps(env) if env and env_json is None else env_json
     with _lock:
         conn = _get_conn()
         conn.execute(
-            """INSERT INTO mcp_servers (skill_id, port, start_command, env_json, status)
-               VALUES (?, ?, ?, ?, 'stopped')
+            """INSERT INTO mcp_servers (skill_id, port, start_command, transport, env_json, status)
+               VALUES (?, ?, ?, ?, ?, 'stopped')
                ON CONFLICT(skill_id) DO UPDATE SET
                    port=excluded.port,
                    start_command=excluded.start_command,
+                   transport=excluded.transport,
                    env_json=excluded.env_json""",
-            (skill_id, port, start_command, env_json),
+            (skill_id, effective_port or 0, start_command, transport, effective_env),
         )
         conn.commit()
         row = conn.execute(
             "SELECT * FROM mcp_servers WHERE skill_id=?", (skill_id,)
         ).fetchone()
     return _row_to_dict(row)
+
+
+def get_mcp_server_transport(skill_id: str) -> str:
+    """Return the transport type ('http' or 'stdio') for a registered MCP server.
+
+    Returns 'http' as default when the server is not found (safe fallback).
+    """
+    with _lock:
+        conn = _get_conn()
+        row = conn.execute(
+            "SELECT transport FROM mcp_servers WHERE skill_id=?", (skill_id,)
+        ).fetchone()
+    return row[0] if row else "http"
 
 
 def update_mcp_status(

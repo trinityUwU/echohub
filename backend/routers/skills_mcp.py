@@ -131,11 +131,13 @@ async def start_mcp_server(skill_id: str) -> dict[str, Any]:
     try:
         from backend.services.db import upsert_mcp_server, get_mcp_server
         if not get_mcp_server(skill_id):
-            port_hint = int(entry.get("mcp_port_hint") or 3000)
+            transport = entry.get("mcp_transport", "http")
+            port_hint = int(entry.get("mcp_port_hint") or 0) if transport == "http" else 0
             upsert_mcp_server(
                 skill_id=skill_id,
                 port=port_hint,
                 start_command=entry["mcp_start_command"],
+                transport=transport,
             )
     except Exception as e:
         logger.warning(f"[mcp] DB upsert failed for {skill_id}: {e}")
@@ -200,12 +202,19 @@ async def start_mcp_server_stream(skill_id: str) -> StreamingResponse:
         # Register in DB (upsert)
         from backend.services.db import upsert_mcp_server
         env_json = entry.get("env_json")
+        transport = entry.get("mcp_transport", "http")
         port_hint = entry.get("mcp_port_hint")
+        effective_port = int(port_hint or 0) if transport == "http" else 0
         upsert_mcp_server(
             skill_id=skill_id,
-            port=port_hint or 3000,
+            port=effective_port,
             start_command=start_cmd,
-            env_json=json.dumps({"PORT": str(port_hint or 3000)}) if not env_json else env_json,
+            transport=transport,
+            env_json=(
+                json.dumps({"PORT": str(effective_port)})
+                if not env_json and effective_port
+                else env_json
+            ),
         )
 
         # Check if build needed — stream build output
@@ -356,11 +365,13 @@ async def configure_mcp(skill_id: str, req: McpConfigureRequest | None = None) -
     # Upsert into mcp_servers DB table (best-effort — table may not exist yet)
     try:
         from backend.services.db import upsert_mcp_server
+        transport_val = entry.get("mcp_transport") or "http"
+        port_val = int(entry.get("mcp_port_hint") or 0) if transport_val == "http" else 0
         upsert_mcp_server(
             skill_id=skill_id,
-            start_command=entry.get("mcp_start_command"),
-            transport=entry.get("mcp_transport"),
-            port_hint=entry.get("mcp_port_hint"),
+            port=port_val,
+            start_command=entry.get("mcp_start_command") or "",
+            transport=transport_val,
             env=entry.get("mcp_env"),
         )
     except Exception as db_err:
