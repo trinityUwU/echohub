@@ -2,7 +2,7 @@ import { apiRequest, apiUrl } from './base'
 import type {
   ChatMessage, ChatParams, ChatRequest, ConversationSummary,
   DownloadJob, DownloadRequest, GenerationStats, GpuStats,
-  LoadRequest, MessageStats, ModelInfo, StoredMessage,
+  LoadRequest, MessageStats, ModelInfo, StoredMessage, ToolChatRequest,
 } from '@/types'
 
 // ── Conversations ──────────────────────────────────────────────────────────
@@ -269,6 +269,45 @@ export async function chatStream(
       return
     }
     onError(e instanceof Error ? e : new Error(String(e)))
+  }
+}
+
+// ── Tool chat (Dev mode) ───────────────────────────────────────────────────
+
+export async function* toolChat(req: ToolChatRequest): AsyncGenerator<unknown> {
+  const url = await apiUrl('/inference/tool-chat')
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok || !res.body) throw new Error(`Tool chat request failed: ${res.status}`)
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      // flush remaining buffer
+      for (const block of buf.split('\n\n')) {
+        if (!block.startsWith('data: ')) continue
+        const raw = block.slice(6).trim()
+        if (raw === '[DONE]') continue
+        try { yield JSON.parse(raw) } catch { /* skip malformed */ }
+      }
+      break
+    }
+    buf += decoder.decode(value, { stream: true })
+    const blocks = buf.split('\n\n')
+    buf = blocks.pop() ?? ''
+    for (const block of blocks) {
+      if (!block.startsWith('data: ')) continue
+      const raw = block.slice(6).trim()
+      if (raw === '[DONE]') continue
+      try { yield JSON.parse(raw) } catch { /* skip malformed */ }
+    }
   }
 }
 

@@ -1,14 +1,19 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useState } from 'react'
 import type { ProjectMode } from '@/hooks/useChatMode'
+import type { ToolCall, WorkspaceFile } from '@/types'
+import { DevPanel } from './DevPanel'
 
 interface ProjectsPanelProps {
   mode: ProjectMode
   loadedModelHasTools: boolean
+  toolCalls: ToolCall[]
+  workspaceFiles: WorkspaceFile[]
+  onRefreshFiles: () => void
   children: React.ReactNode
 }
 
-export function ProjectsPanel({ mode, loadedModelHasTools, children }: ProjectsPanelProps): React.ReactElement {
+export function ProjectsPanel({ mode, loadedModelHasTools, toolCalls, workspaceFiles, onRefreshFiles, children }: ProjectsPanelProps): React.ReactElement {
   const [collapsed, setCollapsed] = useState(false)
 
   return (
@@ -33,7 +38,7 @@ export function ProjectsPanel({ mode, loadedModelHasTools, children }: ProjectsP
                   transition={{ duration: 0.18, ease: 'easeOut' }}
                   className="w-[260px] flex-shrink-0 bg-elevated flex flex-col overflow-hidden h-full"
                 >
-                  <LeftPanel mode={mode} loadedModelHasTools={loadedModelHasTools} />
+                  <LeftPanel mode={mode} loadedModelHasTools={loadedModelHasTools} toolCalls={toolCalls} workspaceFiles={workspaceFiles} onRefreshFiles={onRefreshFiles} />
                 </motion.div>
               </AnimatePresence>
             </motion.div>
@@ -72,10 +77,21 @@ export function ProjectsPanel({ mode, loadedModelHasTools, children }: ProjectsP
 interface LeftPanelProps {
   mode: ProjectMode
   loadedModelHasTools: boolean
+  toolCalls: ToolCall[]
+  workspaceFiles: WorkspaceFile[]
+  onRefreshFiles: () => void
 }
 
-function LeftPanel({ mode, loadedModelHasTools }: LeftPanelProps): React.ReactElement {
-  if (mode === 'dev') return <DevPanel loadedModelHasTools={loadedModelHasTools} />
+function LeftPanel({ mode, loadedModelHasTools, toolCalls, workspaceFiles, onRefreshFiles }: LeftPanelProps): React.ReactElement {
+  if (mode === 'dev') return (
+    <DevPanel
+      projectId=""
+      loadedModelHasTools={loadedModelHasTools}
+      toolCalls={toolCalls}
+      workspaceFiles={workspaceFiles}
+      onRefresh={onRefreshFiles}
+    />
+  )
   if (mode === 'docs') return <DocsPanel />
   return <ResearchPanel />
 }
@@ -97,30 +113,6 @@ function PanelPlaceholder({ icon, label }: { icon: React.ReactNode; label: strin
   )
 }
 
-function DevPanel({ loadedModelHasTools }: { loadedModelHasTools: boolean }): React.ReactElement {
-  return (
-    <>
-      <PanelHeader>Project Files</PanelHeader>
-      {!loadedModelHasTools && (
-        <div className="mx-2 mt-2 px-2.5 py-2 bg-yellow-500/10 rounded-md flex items-start gap-2">
-          <svg className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
-          <span className="text-2xs text-yellow-300 leading-relaxed">Load a model with tool calling to use Dev mode</span>
-        </div>
-      )}
-      <PanelPlaceholder
-        icon={
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-full h-full">
-            <path d="M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h6v6h-6z"/>
-          </svg>
-        }
-        label="No project files yet"
-      />
-    </>
-  )
-}
 
 function DocsPanel(): React.ReactElement {
   return (

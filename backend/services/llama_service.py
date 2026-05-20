@@ -409,6 +409,45 @@ async def generate(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Tool use
+# ──────────────────────────────────────────────────────────────────────────────
+
+async def generate_with_tools(
+    messages: list[dict],
+    tools: list[dict],
+    temperature: float = 0.2,
+    max_tokens: int = 8192,
+    **_ignored,
+) -> AsyncGenerator:
+    """
+    Non-streaming tool use call via llama-cpp-python.
+    Yields a single dict — either containing tool_calls or a text message.
+    The caller (agentic loop) handles the iteration.
+    """
+    if _llm is None:
+        raise RuntimeError("No model loaded")
+
+    loop = asyncio.get_event_loop()
+
+    def _sync() -> dict:
+        return _llm.create_chat_completion(
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=False,
+        )
+
+    try:
+        result = await loop.run_in_executor(None, _sync)
+        yield result
+    except Exception as e:
+        logger.error(f"[llama] generate_with_tools error: {e}")
+        raise
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
 

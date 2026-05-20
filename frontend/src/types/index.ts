@@ -350,6 +350,30 @@ export interface GgufSearchResult {
   query_model: string
 }
 
+// ── Tool use / Dev mode ───────────────────────────────────────────────────────
+
+export interface WorkspaceFile {
+  path: string
+  size: number
+  modified: number
+}
+
+export interface ToolCall {
+  id: string
+  tool: string
+  args: Record<string, unknown>
+  result?: string
+  status: 'pending' | 'running' | 'done' | 'error'
+}
+
+export interface ToolChatRequest {
+  messages: Array<{ role: string; content: string }>
+  project_id: string
+  system_prompt?: string
+  temperature?: number
+  max_tokens?: number
+}
+
 export interface DownloadHistoryEntry {
   id: number
   model_id: string

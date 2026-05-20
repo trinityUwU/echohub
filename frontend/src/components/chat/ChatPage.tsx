@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useChat } from '@/hooks/useChat'
+import { useToolChat } from '@/hooks/useToolChat'
 import { useProfiles } from '@/hooks/useProfiles'
-import type { ConversationSummary, ModelInfo, GpuStats, ChatMessage, LoadConfig, ChatParams, GenerationStats, Attachment } from '@/types'
+import type { ConversationSummary, ModelInfo, GpuStats, ChatMessage, LoadConfig, ChatParams, GenerationStats, Attachment, ToolCall, WorkspaceFile } from '@/types'
 import type { ChatView, ProjectMode } from '@/hooks/useChatMode'
 import { ConvSidebar } from '@/components/nav/ConvSidebar'
 import { ChatTopBar } from './ChatTopBar'
@@ -255,6 +256,9 @@ export function ChatPage({
           usedTokens={usedTokens}
           isTokensExact={isTokensExact}
           bottomRef={bottomRef}
+          toolCalls={[]}
+          workspaceFiles={[]}
+          onRefreshFiles={() => {}}
           onRegenerate={handleRegenerate}
           onEditUser={handleEditUser}
           onSend={(text, attachments) => send(text, !!loadedModel, attachments)}
@@ -282,6 +286,9 @@ interface ChatContentProps {
   usedTokens: number
   isTokensExact: boolean
   bottomRef: React.RefObject<HTMLDivElement | null>
+  toolCalls: ToolCall[]
+  workspaceFiles: WorkspaceFile[]
+  onRefreshFiles: () => void
   onRegenerate: () => void
   onEditUser: (index: number, newText: string) => void
   onSend: (text: string, attachments?: Attachment[]) => void
@@ -293,6 +300,7 @@ function ChatContent({
   view, mode, loadedModelHasTools,
   messages, streaming, stats, activeModelName, loadedModel,
   params, usedTokens, isTokensExact, bottomRef,
+  toolCalls, workspaceFiles, onRefreshFiles,
   onRegenerate, onEditUser, onSend, onStop, onLoadModel,
 }: ChatContentProps): React.ReactElement {
   const inner = (
@@ -330,7 +338,13 @@ function ChatContent({
 
   if (view === 'projects') {
     return (
-      <ProjectsPanel mode={mode} loadedModelHasTools={loadedModelHasTools}>
+      <ProjectsPanel
+        mode={mode}
+        loadedModelHasTools={loadedModelHasTools}
+        toolCalls={toolCalls}
+        workspaceFiles={workspaceFiles}
+        onRefreshFiles={onRefreshFiles}
+      >
         <div className="flex flex-col flex-1 overflow-hidden">{inner}</div>
       </ProjectsPanel>
     )
@@ -439,14 +453,29 @@ function ProjectWorkspace({
 
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  const { messages, streaming, stats, send, sendFromHistory, stop, setMessages, usedTokens, isTokensExact, oomError } = useChat(
+  const chatHook = useChat(
     params, activeMessages, setActiveMessages,
     loadedModel?.max_context_window ?? undefined,
     loadedModel?.id, undefined, loadedModel?.name ?? null,
   )
 
+  const toolChatHook = useToolChat(project.id)
+
+  const isDevMode = project.mode === 'dev'
+
+  const messages = isDevMode ? toolChatHook.messages : chatHook.messages
+  const streaming = isDevMode ? toolChatHook.streaming : chatHook.streaming
+  const stats = isDevMode ? null : chatHook.stats
+  const oomError = isDevMode ? false : chatHook.oomError
+  const usedTokens = isDevMode ? 0 : chatHook.usedTokens
+  const isTokensExact = isDevMode ? false : chatHook.isTokensExact
+  const toolCalls = isDevMode ? toolChatHook.toolCalls : []
+  const workspaceFiles = isDevMode ? toolChatHook.workspaceFiles : []
+
+  const stop = isDevMode ? toolChatHook.stop : chatHook.stop
+
   useEffect(() => {
-    if (!streaming) setMessages(activeMessages)
+    if (!isDevMode && !chatHook.streaming) chatHook.setMessages(activeMessages)
   }, [activeMessages]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -454,15 +483,22 @@ function ProjectWorkspace({
   }, [messages])
 
   const handleRegenerate = (): void => {
+    if (isDevMode) return
     const lastIdx = [...messages].reverse().findIndex(m => m.role === 'assistant')
     if (lastIdx === -1 || !loadedModel) return
-    sendFromHistory(messages.slice(0, messages.length - 1 - lastIdx))
+    chatHook.sendFromHistory(messages.slice(0, messages.length - 1 - lastIdx))
   }
 
   const handleEditUser = (index: number, newText: string): void => {
-    if (!loadedModel) return
+    if (isDevMode || !loadedModel) return
     const updated = { ...messages[index], content: newText }
-    sendFromHistory([...messages.slice(0, index), updated])
+    chatHook.sendFromHistory([...messages.slice(0, index), updated])
+  }
+
+  const handleClear = (): void => {
+    if (isDevMode) { toolChatHook.clear(); return }
+    chatHook.setMessages([])
+    setActiveMessages([])
   }
 
   return (
@@ -472,7 +508,7 @@ function ProjectWorkspace({
         loading={loading}
         loadingPct={loadingPct}
         onOpenPicker={onOpenPicker}
-        onClear={() => { setMessages([]); setActiveMessages([]) }}
+        onClear={handleClear}
         onEject={onEject}
         onExport={() => {}}
         view={view}
@@ -506,9 +542,15 @@ function ProjectWorkspace({
           usedTokens={usedTokens}
           isTokensExact={isTokensExact}
           bottomRef={bottomRef}
+          toolCalls={toolCalls}
+          workspaceFiles={workspaceFiles}
+          onRefreshFiles={() => {}}
           onRegenerate={handleRegenerate}
           onEditUser={handleEditUser}
-          onSend={(text, attachments) => send(text, !!loadedModel, attachments)}
+          onSend={isDevMode
+            ? (text) => toolChatHook.send(text, params.systemPrompt || undefined)
+            : (text, attachments) => chatHook.send(text, !!loadedModel, attachments)
+          }
           onStop={stop}
           onLoadModel={onLoadModel}
         />

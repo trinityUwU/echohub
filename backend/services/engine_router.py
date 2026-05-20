@@ -284,6 +284,32 @@ async def generate(messages: list[dict], **kwargs):
         raise RuntimeError("No model loaded")
 
 
+async def generate_with_tools(
+    messages: list[dict],
+    tools: list[dict],
+    **kwargs,
+):
+    """Route tool use call to the active engine. Yields a single response dict."""
+    from backend.services import llama_service, vllm_service
+    if _active_engine == "llama":
+        async for result in llama_service.generate_with_tools(
+            messages=messages, tools=tools, **kwargs
+        ):
+            yield result
+    elif _active_engine == "vllm":
+        # vLLM tool use: delegate to vllm_service if it supports it,
+        # otherwise fall back to llama-style non-streaming call.
+        if hasattr(vllm_service, "generate_with_tools"):
+            async for result in vllm_service.generate_with_tools(
+                messages=messages, tools=tools, **kwargs
+            ):
+                yield result
+        else:
+            raise RuntimeError("vLLM engine does not support tool use in this build")
+    else:
+        raise RuntimeError("No model loaded")
+
+
 def get_engine_log(n_lines: int = 100) -> str:
     from backend.services import llama_service, vllm_service
     if _active_engine == "llama":

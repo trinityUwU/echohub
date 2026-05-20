@@ -6,8 +6,15 @@ from fastapi.responses import StreamingResponse
 from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
+from pydantic import BaseModel
+
 from backend.models.schemas import ChatRequest, LoadRequest, ModelInfo
 from backend.services import engine_router, hf_service
+from backend.services.tool_service import (
+    execute_tool,
+    get_tools,
+    list_workspace_files,
+)
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 
@@ -324,6 +331,129 @@ async def chat_ws(ws: WebSocket):
             await ws.send_json({"error": str(e)})
         except Exception:
             pass
+
+
+class ToolChatRequest(BaseModel):
+    messages: list[dict]
+    project_id: str
+    system_prompt: str = ""
+    temperature: float = 0.2
+    max_tokens: int = 8192
+    stream: bool = True
+
+
+@router.post("/tool-chat")
+async def tool_chat(req: ToolChatRequest):
+    """
+    Agentic tool-use loop with SSE.
+    Streams events: tool_call, tool_result, text chunks, done.
+    Max 10 iterations to prevent infinite loops.
+    """
+    import json as _json
+
+    if engine_router.get_status() is None:
+        raise HTTPException(status_code=404, detail="No model loaded.")
+
+    tools = get_tools()
+    MAX_ITERATIONS = 10
+
+    async def _event_stream():
+        messages: list[dict] = []
+        if req.system_prompt and req.system_prompt.strip():
+            messages.append({"role": "system", "content": req.system_prompt})
+        messages.extend(req.messages)
+
+        for iteration in range(MAX_ITERATIONS):
+            # Call the model with tools
+            response_dict: dict | None = None
+            try:
+                async for result in engine_router.generate_with_tools(
+                    messages=messages,
+                    tools=tools,
+                    temperature=req.temperature,
+                    max_tokens=req.max_tokens,
+                ):
+                    response_dict = result
+            except Exception as e:
+                logger.error(f"[tool-chat] generate_with_tools error: {e}")
+                yield f"data: {_json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+                return
+
+            if response_dict is None:
+                yield f"data: {_json.dumps({'type': 'error', 'error': 'No response from model'})}\n\n"
+                return
+
+            choice = response_dict.get("choices", [{}])[0]
+            message = choice.get("message", {})
+            tool_calls = message.get("tool_calls")
+
+            if tool_calls:
+                # Append assistant message with tool_calls for context continuity
+                messages.append({
+                    "role": "assistant",
+                    "content": message.get("content") or "",
+                    "tool_calls": tool_calls,
+                })
+
+                for tc in tool_calls:
+                    tc_id: str = tc.get("id", f"call_{iteration}")
+                    func = tc.get("function", {})
+                    tool_name: str = func.get("name", "")
+                    raw_args: str = func.get("arguments", "{}")
+
+                    try:
+                        tool_args: dict = _json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                    except _json.JSONDecodeError:
+                        tool_args = {}
+
+                    # Notify client of the tool call
+                    yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
+
+                    # Execute
+                    tool_result: str = execute_tool(tool_name, tool_args, req.project_id)
+
+                    # Notify client of the result
+                    yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
+
+                    # Inject tool result back into messages
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": tool_result,
+                    })
+
+                # Continue loop — model may want to call more tools
+                continue
+
+            # No tool_calls → final text answer
+            final_text: str = message.get("content") or ""
+            if final_text:
+                # Stream text as standard SSE content chunks
+                chunk_payload = _json.dumps({
+                    "choices": [{"delta": {"content": final_text}, "finish_reason": "stop"}]
+                })
+                yield f"data: {chunk_payload}\n\n"
+
+            break  # done
+
+        else:
+            # Hit max iterations without a final text answer
+            yield f"data: {_json.dumps({'type': 'error', 'error': 'Max iterations reached without final answer'})}\n\n"
+            return
+
+        # Final event with workspace file list
+        try:
+            files = list_workspace_files(req.project_id)
+        except Exception as e:
+            logger.warning(f"[tool-chat] list_workspace_files error: {e}")
+            files = []
+        yield f"data: {_json.dumps({'type': 'done', 'files': files})}\n\n"
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/benchmark")
