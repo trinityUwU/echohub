@@ -395,125 +395,202 @@ async def tool_chat(req: ToolChatRequest):
             yield f"data: {_json.dumps({'type': 'error', 'error': 'No user message in conversation'})}\n\n"
             return
 
-        _TC_RE = _re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", _re.DOTALL)
+        import threading as _threading
+
+        # Interleaved streaming: detect <tool_call>...</tool_call> token-by-token,
+        # interrupt the generation, execute the tool immediately, inject the result,
+        # and resume generation — all while streaming live to the client.
+        _TC_OPEN = "<tool_call>"
+        _TC_CLOSE = "</tool_call>"
+        _TC_JSON_RE = _re.compile(r"\{.*\}", _re.DOTALL)
+
         total_tool_calls = 0
+        MAX_TOOL_CALLS = MAX_ITERATIONS * 4  # per-turn cap
         _total_text_len = 0
 
+        # Track the current turn's full assistant text for history injection
+        turn_assistant_text = ""
+
         for iteration in range(MAX_ITERATIONS):
-            response_dict: dict | None = None
-            accumulated_text_buf = ""
+            stop_event = _threading.Event()
+            accumulated_buf = ""       # running buffer for current generation pass
+            in_tool_call = False       # currently inside <tool_call>...</tool_call>
+            tool_call_buf = ""         # accumulates content inside <tool_call>
+            tool_executed_this_pass = False
+            pass_text = ""             # text emitted to client this pass (no tool_call tags)
+
             try:
                 async for event in engine_router.generate_with_tools(
                     messages=messages,
                     tools=tools,
                     temperature=req.temperature,
                     max_tokens=req.max_tokens,
+                    stop_event=stop_event,
                 ):
-                    event_type = event.get("type") if isinstance(event, dict) else None
-                    if event_type == "text_delta":
-                        content = event.get("content", "")
-                        if content:
-                            if _first_token_time is None:
-                                _first_token_time = _time.perf_counter()
-                            accumulated_text_buf += content
-                            # Stream every chunk immediately — frontend parses inline
-                            chunk_evt = _json.dumps({"type": "text_chunk", "content": content})
-                            yield f"data: {chunk_evt}\n\n"
-                    elif event_type == "response":
-                        response_dict = event
-                    elif event_type == "error":
+                    if isinstance(event, dict) and event.get("type") == "error":
                         yield f"data: {_json.dumps({'type': 'error', 'error': event.get('error', 'Unknown error')})}\n\n"
                         return
-                    elif isinstance(event, dict) and "choices" in event:
-                        response_dict = event
+
+                    if not isinstance(event, dict) or event.get("type") not in ("text_delta", "response"):
+                        continue
+
+                    if event.get("type") == "response":
+                        # Structured tool_calls from llama.cpp native API
+                        tool_calls_native = (event.get("choices", [{}])[0]
+                                             .get("message", {})
+                                             .get("tool_calls")) or []
+                        if tool_calls_native and not tool_executed_this_pass:
+                            for tc in tool_calls_native:
+                                total_tool_calls += 1
+                                if total_tool_calls > MAX_TOOL_CALLS:
+                                    break
+                                func = tc.get("function", {})
+                                tool_name = func.get("name", "")
+                                raw_args = func.get("arguments", "{}")
+                                try:
+                                    tool_args = _json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                                except _json.JSONDecodeError:
+                                    tool_args = {}
+                                tc_id = tc.get("id", f"native_{iteration}_{total_tool_calls}")
+
+                                yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
+                                tool_result = execute_tool(tool_name, tool_args, req.project_id)
+                                yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
+
+                                messages.append({"role": "assistant", "content": pass_text or "", "tool_calls": [tc]})
+                                messages.append({"role": "tool", "tool_call_id": tc_id, "content": tool_result})
+                                tool_executed_this_pass = True
+                        continue
+
+                    # text_delta — the interesting path
+                    content = event.get("content", "")
+                    if not content:
+                        continue
+
+                    if _first_token_time is None:
+                        _first_token_time = _time.perf_counter()
+
+                    accumulated_buf += content
+
+                    # Process content char-by-char to handle tag boundaries across chunks
+                    remaining = content
+                    while remaining:
+                        if not in_tool_call:
+                            # Look for <tool_call> open tag in remaining + buffer
+                            search_buf = accumulated_buf  # full buffer up to now
+                            open_pos = search_buf.rfind(_TC_OPEN)
+                            if open_pos == -1:
+                                # No open tag anywhere — stream everything in `remaining` that
+                                # can't start a partial tag
+                                safe_end = len(remaining)
+                                # Hold back up to len(_TC_OPEN)-1 chars in case a tag spans chunks
+                                hold = len(_TC_OPEN) - 1
+                                if len(remaining) > hold:
+                                    emit = remaining[:-hold] if hold > 0 else remaining
+                                    if emit:
+                                        _total_text_len += len(emit)
+                                        pass_text += emit
+                                        turn_assistant_text += emit
+                                        chunk_evt = _json.dumps({"type": "text_chunk", "content": emit})
+                                        yield f"data: {chunk_evt}\n\n"
+                                remaining = ""
+                            else:
+                                # Found <tool_call> — emit text before it
+                                before = search_buf[:open_pos]
+                                already_emitted = len(pass_text)
+                                to_emit = before[already_emitted:]
+                                if to_emit:
+                                    _total_text_len += len(to_emit)
+                                    pass_text += to_emit
+                                    turn_assistant_text += to_emit
+                                    chunk_evt = _json.dumps({"type": "text_chunk", "content": to_emit})
+                                    yield f"data: {chunk_evt}\n\n"
+                                in_tool_call = True
+                                tool_call_buf = search_buf[open_pos + len(_TC_OPEN):]
+                                remaining = ""
+                        else:
+                            # Inside a tool_call — accumulate into tool_call_buf
+                            tool_call_buf += remaining
+                            remaining = ""
+                            # Check if we have the closing tag
+                            close_pos = tool_call_buf.find(_TC_CLOSE)
+                            if close_pos != -1:
+                                raw_tc_content = tool_call_buf[:close_pos]
+                                tool_call_buf = ""
+                                in_tool_call = False
+
+                                # Parse the tool call JSON
+                                tc_json_match = _TC_JSON_RE.search(raw_tc_content)
+                                if tc_json_match:
+                                    try:
+                                        tc_data = _json.loads(tc_json_match.group())
+                                        tool_name = tc_data.get("name", "")
+                                        raw_args = tc_data.get("arguments", tc_data.get("args", {}))
+                                        tool_args = _json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+
+                                        total_tool_calls += 1
+                                        if total_tool_calls > MAX_TOOL_CALLS:
+                                            _cap = _json.dumps({"type": "text_chunk", "content": "\n\n[Max tool calls reached.]"})
+                                            yield f"data: {_cap}\n\n"
+                                            stop_event.set()
+                                            break
+
+                                        # Stop the current generation — we'll resume after tool execution
+                                        stop_event.set()
+
+                                        yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
+                                        tool_result = execute_tool(tool_name, tool_args, req.project_id)
+                                        yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
+
+                                        # Inject into history so the model continues with context
+                                        tc_id = f"tc_{iteration}_{total_tool_calls}"
+                                        messages.append({
+                                            "role": "assistant",
+                                            "content": pass_text or "",
+                                            "tool_calls": [{
+                                                "id": tc_id,
+                                                "type": "function",
+                                                "function": {
+                                                    "name": tool_name,
+                                                    "arguments": _json.dumps(tool_args),
+                                                },
+                                            }],
+                                        })
+                                        messages.append({"role": "tool", "tool_call_id": tc_id, "content": tool_result})
+                                        tool_executed_this_pass = True
+                                        pass_text = ""  # reset for next pass
+                                    except (_json.JSONDecodeError, Exception) as parse_err:
+                                        logger.warning(f"[tool-chat] failed to parse inline tool_call: {parse_err}")
+
             except Exception as e:
-                logger.error(f"[tool-chat] generate_with_tools error: {e}")
+                logger.error(f"[tool-chat] generate error: {e}")
                 yield f"data: {_json.dumps({'type': 'error', 'error': str(e)})}\n\n"
                 return
 
-            _total_text_len += len(accumulated_text_buf)
-
-            # Determine tool_calls from structured response or text fallback
-            tool_calls = None
-            if response_dict:
-                choice = response_dict.get("choices", [{}])[0]
-                message = choice.get("message", {})
-                tool_calls = message.get("tool_calls") or None
-
-            if not tool_calls and "<tool_call>" in accumulated_text_buf:
-                tc_matches = _TC_RE.findall(accumulated_text_buf)
-                if tc_matches:
-                    tool_calls = []
-                    for i, tc_json in enumerate(tc_matches):
-                        try:
-                            tc_data = _json.loads(tc_json)
-                            args = tc_data.get("arguments", tc_data.get("args", {}))
-                            tool_calls.append({
-                                "id": f"text_tc_{iteration}_{i}",
-                                "type": "function",
-                                "function": {
-                                    "name": tc_data.get("name", ""),
-                                    "arguments": _json.dumps(args) if not isinstance(args, str) else args,
-                                },
-                            })
-                        except _json.JSONDecodeError:
-                            logger.warning(f"[tool-chat] failed to parse text tool_call: {tc_json[:100]}")
-                    clean_text = _TC_RE.sub("", accumulated_text_buf).strip()
-                    messages.append({"role": "assistant", "content": clean_text or ""})
-                else:
-                    tool_calls = None
-
-            if not tool_calls:
-                # Pure text response — already streamed live, just need history entry
-                messages.append({"role": "assistant", "content": accumulated_text_buf})
-                break
-
-            # Has tool calls — emit them and execute
-            if response_dict:
-                msg_obj = response_dict.get("choices", [{}])[0].get("message", {})
-                messages.append({
-                    "role": "assistant",
-                    "content": msg_obj.get("content") or "",
-                    "tool_calls": tool_calls,
-                })
-
-            for tc in tool_calls:
-                total_tool_calls += 1
-                if total_tool_calls > MAX_ITERATIONS:
-                    logger.warning(f"[tool-chat] hard tool call cap reached ({total_tool_calls})")
-                    _cap_msg = _json.dumps({"type": "text_chunk", "content": "\n\n[Max tool calls reached.]"})
-                    yield f"data: {_cap_msg}\n\n"
-                    break
-
-                tc_id: str = tc.get("id", f"call_{iteration}")
-                func = tc.get("function", {})
-                tool_name: str = func.get("name", "")
-                raw_args: str = func.get("arguments", "{}")
-
-                try:
-                    tool_args: dict = _json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                except _json.JSONDecodeError:
-                    tool_args = {}
-
-                yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
-
-                tool_result: str = execute_tool(tool_name, tool_args, req.project_id)
-
-                yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
-
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc_id,
-                    "content": tool_result,
-                })
-            else:
+            if tool_executed_this_pass:
+                # Tool was executed mid-stream — loop back to let the model continue
                 continue
 
+            # No tool calls — pure text response, we're done
+            if pass_text or accumulated_buf:
+                # Emit any remaining buffered text not yet sent
+                already = len(pass_text)
+                tail = accumulated_buf[already:]
+                # Strip any incomplete <tool_call> at the end (model cut off)
+                if _TC_OPEN in tail and _TC_CLOSE not in tail:
+                    tail = tail[:tail.rfind(_TC_OPEN)].rstrip()
+                if tail:
+                    _total_text_len += len(tail)
+                    pass_text += tail
+                    turn_assistant_text += tail
+                    chunk_evt = _json.dumps({"type": "text_chunk", "content": tail})
+                    yield f"data: {chunk_evt}\n\n"
+            messages.append({"role": "assistant", "content": turn_assistant_text})
             break
 
         else:
-            _cap_msg2 = _json.dumps({"type": "text_chunk", "content": "\n\n[Max tool calls reached.]"})
-            yield f"data: {_cap_msg2}\n\n"
+            _cap2 = _json.dumps({"type": "text_chunk", "content": "\n\n[Max iterations reached.]"})
+            yield f"data: {_cap2}\n\n"
 
         # Always emit done with workspace file list — even after errors/loops
         try:

@@ -289,13 +289,14 @@ async def generate(messages: list[dict], **kwargs):
 async def generate_with_tools(
     messages: list[dict],
     tools: list[dict],
+    stop_event=None,
     **kwargs,
 ):
     """Route tool use call to the active engine. Yields a single response dict."""
     from backend.services import llama_service, vllm_service
     if _active_engine == "llama":
         async for result in llama_service.generate_with_tools(
-            messages=messages, tools=tools, **kwargs
+            messages=messages, tools=tools, stop_event=stop_event, **kwargs
         ):
             yield result
     elif _active_engine == "vllm":

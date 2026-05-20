@@ -471,22 +471,26 @@ async def generate_with_tools(
     tools: list[dict],
     temperature: float = 0.2,
     max_tokens: int = 8192,
+    stop_event: threading.Event | None = None,
     **_ignored,
 ) -> AsyncGenerator:
     """
     Streaming tool use via llama-cpp-python.
 
-    Yields dicts with two possible shapes:
+    Yields dicts:
     - {"type": "text_delta", "content": "..."} — streaming text token
-    - {"type": "response", "choices": [...]} — full response dict at end (may contain tool_calls)
+    - {"type": "response", "choices": [...]} — final response (tool_calls if any)
 
-    The caller uses text_delta for live streaming and response for tool_calls detection.
+    stop_event: when set by caller, the sync thread exits cleanly after the current chunk.
+    Used for interleaved tool execution — caller stops the stream, runs the tool,
+    then calls generate_with_tools again with the enriched message history.
     """
     if _llm is None:
         raise RuntimeError("No model loaded")
 
     loop = asyncio.get_event_loop()
     queue: asyncio.Queue = asyncio.Queue()
+    _stop = stop_event or threading.Event()
 
     def _stream_sync() -> None:
         has_user = any(m.get("role") == "user" for m in messages)
@@ -520,12 +524,11 @@ async def generate_with_tools(
                 )
 
             for chunk in chunks:
-                if _eject_requested:
+                if _eject_requested or _stop.is_set():
                     break
                 choice = chunk.get("choices", [{}])[0]
                 delta = choice.get("delta", {})
 
-                # Stream text content live
                 content = delta.get("content") or ""
                 if content:
                     accumulated_text += content
@@ -533,7 +536,6 @@ async def generate_with_tools(
                         queue.put({"type": "text_delta", "content": content}), loop
                     )
 
-                # Accumulate tool_calls deltas
                 tc_deltas = delta.get("tool_calls")
                 if tc_deltas:
                     for tc_delta in tc_deltas:
@@ -550,7 +552,6 @@ async def generate_with_tools(
                         if func.get("arguments"):
                             accumulated_tool_calls[idx]["function"]["arguments"] += func["arguments"]
 
-            # Emit final response dict
             final_message: dict = {"role": "assistant", "content": accumulated_text or None}
             if accumulated_tool_calls:
                 final_message["tool_calls"] = accumulated_tool_calls
