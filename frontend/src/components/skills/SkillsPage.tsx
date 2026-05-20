@@ -6,12 +6,39 @@ import { useDialog } from '@/components/shared/Dialog'
 
 type Tab = 'discover' | 'installed'
 
+// ── Discover state — lifted so it survives tab switches ────────────────────────
+
+interface DiscoverState {
+  query: string
+  results: GithubSkillResult[]
+  total: number
+  loading: boolean
+  searched: boolean
+  fromCache: boolean
+  cacheAgeH: number | null
+  authenticated: boolean
+  rateLimited: boolean
+  rlRemaining: number | null
+  rlLimit: number | null
+  rlResetTs: number | null
+  error: string | null
+}
+
+const DISCOVER_INIT: DiscoverState = {
+  query: '', results: [], total: 0, loading: false, searched: false,
+  fromCache: false, cacheAgeH: null, authenticated: false, rateLimited: false,
+  rlRemaining: null, rlLimit: null, rlResetTs: null, error: null,
+}
+
+// ── SkillsPage ─────────────────────────────────────────────────────────────────
+
 export function SkillsPage({ onGoToSettings }: { onGoToSettings?: () => void }): React.ReactElement {
   const [tab, setTab] = useState<Tab>('discover')
   const [native, setNative] = useState<NativeSkill[]>([])
   const [community, setCommunity] = useState<CommunitySkill[]>([])
   const [showInstall, setShowInstall] = useState(false)
   const [installUrl, setInstallUrl] = useState('')
+  const [discover, setDiscover] = useState<DiscoverState>(DISCOVER_INIT)
   const { confirm, element: dialogEl } = useDialog()
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -39,7 +66,6 @@ export function SkillsPage({ onGoToSettings }: { onGoToSettings?: () => void }):
     <div className="flex flex-col flex-1 overflow-hidden bg-base">
       {dialogEl}
 
-      {/* Header */}
       <div className="flex items-center justify-between px-8 py-5 border-b border-border flex-shrink-0">
         <div>
           <h1 className="text-lg font-semibold text-text-primary">Skills</h1>
@@ -56,17 +82,16 @@ export function SkillsPage({ onGoToSettings }: { onGoToSettings?: () => void }):
         </button>
       </div>
 
-      {/* Tabs */}
       <div className="flex gap-0 px-8 border-b border-border flex-shrink-0">
-        {([['discover', 'Discover'], ['installed', 'Installed']] as [Tab, string][]).map(([id, label]) => (
+        {(['discover', 'installed'] as Tab[]).map(id => (
           <button
             key={id}
             onClick={() => setTab(id)}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer -mb-px ${
+            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer -mb-px capitalize ${
               tab === id ? 'border-accent text-accent' : 'border-transparent text-text-muted hover:text-text-secondary'
             }`}
           >
-            {label}
+            {id}
             {id === 'installed' && community.length > 0 && (
               <span className="ml-1.5 text-2xs bg-elevated border border-border text-text-muted rounded px-1.5 py-0.5">{native.length + community.length}</span>
             )}
@@ -74,10 +99,18 @@ export function SkillsPage({ onGoToSettings }: { onGoToSettings?: () => void }):
         ))}
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-hidden">
-        {tab === 'discover' && <DiscoverTab community={community} onInstall={url => openInstallModal(url)} onGoToSettings={onGoToSettings} />}
-        {tab === 'installed' && <InstalledTab native={native} community={community} onDelete={handleDelete} />}
+      {/* Both tabs always mounted so state is preserved */}
+      <div className={`flex-1 overflow-hidden ${tab === 'discover' ? '' : 'hidden'}`}>
+        <DiscoverTab
+          community={community}
+          state={discover}
+          onStateChange={setDiscover}
+          onInstall={url => openInstallModal(url)}
+          onGoToSettings={onGoToSettings}
+        />
+      </div>
+      <div className={`flex-1 overflow-hidden ${tab === 'installed' ? '' : 'hidden'}`}>
+        <InstalledTab native={native} community={community} onDelete={handleDelete} />
       </div>
 
       <AnimatePresence>
@@ -95,53 +128,60 @@ export function SkillsPage({ onGoToSettings }: { onGoToSettings?: () => void }):
 
 // ── Discover tab ───────────────────────────────────────────────────────────────
 
-function DiscoverTab({ community, onInstall, onGoToSettings }: { community: CommunitySkill[]; onInstall: (url: string) => void; onGoToSettings?: () => void }): React.ReactElement {
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<GithubSkillResult[]>([])
-  const [loading, setLoading] = useState(false)
-  const [total, setTotal] = useState(0)
-  const [authenticated, setAuthenticated] = useState(false)
-  const [rateLimited, setRateLimited] = useState(false)
-  const [fromCache, setFromCache] = useState(false)
-  const [cacheAgeH, setCacheAgeH] = useState<number | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [searched, setSearched] = useState(false)
+function DiscoverTab({ community, state, onStateChange, onInstall, onGoToSettings }: {
+  community: CommunitySkill[]
+  state: DiscoverState
+  onStateChange: React.Dispatch<React.SetStateAction<DiscoverState>>
+  onInstall: (url: string) => void
+  onGoToSettings?: () => void
+}): React.ReactElement {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   const installedUrls = new Set(community.map(c => c.repo_url))
 
   const doSearch = useCallback(async (q: string, force = false): Promise<void> => {
-    setLoading(true)
-    setError(null)
-    setRateLimited(false)
-    setFromCache(false)
+    onStateChange(prev => ({ ...prev, loading: true, error: null, rateLimited: false, fromCache: false }))
     try {
       const data = await searchSkills(q, force)
-      setResults(data.results)
-      setTotal(data.total)
-      setAuthenticated(data.authenticated)
-      setFromCache(data.from_cache ?? false)
-      setCacheAgeH(data.cache_age_h ?? null)
-      if (data.rate_limited) setRateLimited(true)
-      if (data.error) setError(data.error)
-      setSearched(true)
+      onStateChange({
+        query: q,
+        results: data.results,
+        total: data.total,
+        loading: false,
+        searched: true,
+        fromCache: data.from_cache ?? false,
+        cacheAgeH: data.cache_age_h ?? null,
+        authenticated: data.authenticated,
+        rateLimited: data.rate_limited ?? false,
+        rlRemaining: data.rl_remaining ?? null,
+        rlLimit: data.rl_limit ?? null,
+        rlResetTs: data.rl_reset ?? null,
+        error: data.error ?? null,
+      })
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Search failed')
+      onStateChange(prev => ({ ...prev, loading: false, error: e instanceof Error ? e.message : 'Search failed' }))
     }
-    setLoading(false)
-  }, [])
+  }, [onStateChange])
 
-  useEffect(() => { doSearch('') }, [doSearch])
+  // Auto-search once on first mount
+  const didMount = useRef(false)
+  useEffect(() => {
+    if (!didMount.current && !state.searched) {
+      didMount.current = true
+      doSearch('')
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleInput = (val: string): void => {
-    setQuery(val)
+    onStateChange(prev => ({ ...prev, query: val }))
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => doSearch(val), 400)
   }
 
+  const { results, query, loading, searched, fromCache, cacheAgeH, authenticated,
+    rateLimited, rlRemaining, rlLimit, rlResetTs, error, total } = state
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Search bar */}
       <div className="px-8 py-4 border-b border-border flex-shrink-0">
         <div className="flex gap-3 items-center">
           <div className="relative flex-1 max-w-xl">
@@ -150,18 +190,15 @@ function DiscoverTab({ community, onInstall, onGoToSettings }: { community: Comm
             </svg>
             <input
               type="text" value={query} onChange={e => handleInput(e.target.value)}
-              placeholder="Search skills…"
+              placeholder="Search MCP servers and LLM tools…"
               className="w-full bg-elevated border border-border focus:border-accent/60 rounded-md pl-9 pr-3 py-2 text-sm text-text-primary placeholder-text-muted outline-none transition-colors"
             />
           </div>
           {loading
             ? <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin flex-shrink-0" />
             : (
-              <button
-                onClick={() => doSearch(query, true)}
-                title="Refresh from GitHub"
-                className="w-7 h-7 flex items-center justify-center rounded hover:bg-overlay text-text-muted hover:text-text-secondary transition-colors cursor-pointer flex-shrink-0"
-              >
+              <button onClick={() => doSearch(query, true)} title="Refresh from GitHub"
+                className="w-7 h-7 flex items-center justify-center rounded hover:bg-overlay text-text-muted hover:text-text-secondary transition-colors cursor-pointer flex-shrink-0">
                 <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="23 4 23 10 17 10"/>
                   <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
@@ -173,45 +210,41 @@ function DiscoverTab({ community, onInstall, onGoToSettings }: { community: Comm
             {fromCache && cacheAgeH !== null && (
               <span className="text-2xs text-text-muted">Cached · {cacheAgeH < 1 ? '<1h' : `${cacheAgeH}h`} ago</span>
             )}
-            {!authenticated
-              ? <span className="text-2xs text-text-muted">60 req/h · <button onClick={onGoToSettings} className="text-accent hover:underline cursor-pointer">Add token</button></span>
-              : <span className="text-2xs text-text-muted">5000 req/h</span>
-            }
+            <RateLimitBadge
+              remaining={rlRemaining} limit={rlLimit} resetTs={rlResetTs}
+              authenticated={authenticated} onGoToSettings={onGoToSettings}
+            />
           </div>
         </div>
       </div>
 
-      {/* Results */}
       <div className="flex-1 overflow-y-auto px-8 py-4">
         {rateLimited && (
           <div className="mb-4 px-4 py-3 bg-yellow/10 border border-yellow/30 rounded-md text-sm text-yellow flex items-start gap-2">
             <svg className="w-4 h-4 mt-0.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
             </svg>
-            <span>GitHub rate limit reached. {results.length > 0 ? 'Showing cached results.' : ''} Add a GitHub token in Settings → Setup to increase to 5000 req/h.</span>
+            <span>GitHub rate limit reached. {results.length > 0 ? 'Showing cached results.' : ''} Add a GitHub token in Settings to increase to 5000 req/h.</span>
           </div>
         )}
         {error && !rateLimited && (
-          <div className="mb-4 px-4 py-3 bg-surface border border-border rounded-md text-sm text-text-muted">{error} {results.length > 0 && '— showing cached results'}</div>
+          <div className="mb-4 px-4 py-3 bg-surface border border-border rounded-md text-sm text-text-muted">
+            {error}{results.length > 0 ? ' — showing cached results' : ''}
+          </div>
         )}
-
         {searched && !loading && results.length === 0 && !error && !rateLimited && (
           <div className="flex flex-col items-center justify-center py-16 gap-3 text-text-muted">
             <svg className="w-10 h-10 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            <span className="text-sm">No skills found{query ? ` for "${query}"` : ''}</span>
-            <span className="text-xs text-center max-w-xs">
-              Publish a skill on GitHub and add the <code className="font-mono bg-elevated px-1 py-0.5 rounded">echohub-skill</code> topic to make it discoverable.
-            </span>
+            <span className="text-sm">No results{query ? ` for "${query}"` : ''}</span>
           </div>
         )}
-
         {results.length > 0 && (
           <>
             <p className="text-xs text-text-muted mb-3">
               {total > results.length ? `${results.length} of ${total.toLocaleString()} results` : `${results.length} result${results.length !== 1 ? 's' : ''}`}
-              {fromCache && ' · cached'}
+              {fromCache ? ' · cached' : ''}
             </p>
             <div className="flex flex-col gap-2">
               {results.map(r => (
@@ -225,53 +258,32 @@ function DiscoverTab({ community, onInstall, onGoToSettings }: { community: Comm
   )
 }
 
-function DiscoverCard({ result, installed, onInstall }: { result: GithubSkillResult; installed: boolean; onInstall: () => void }): React.ReactElement {
+// ── Rate limit badge ───────────────────────────────────────────────────────────
+
+function RateLimitBadge({ remaining, limit, resetTs, authenticated, onGoToSettings }: {
+  remaining: number | null; limit: number | null; resetTs: number | null
+  authenticated: boolean; onGoToSettings?: () => void
+}): React.ReactElement {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 10_000)
+    return () => clearInterval(t)
+  }, [])
+
+  const resetIn = resetTs ? Math.max(0, Math.ceil((resetTs * 1000 - now) / 60_000)) : null
+  const pct = remaining !== null && limit ? Math.round((remaining / limit) * 100) : null
+  const color = pct === null ? 'text-text-muted' : pct > 30 ? 'text-text-muted' : pct > 10 ? 'text-yellow' : 'text-red'
+
   return (
-    <div className="bg-surface border border-border rounded-lg px-4 py-3.5 flex items-center gap-4 hover:border-border-hover transition-colors">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium text-text-primary">{result.name}</span>
-          <span className="text-2xs text-text-muted font-mono">{result.full_name}</span>
-          {result.language && (
-            <span className="text-2xs px-1.5 py-0.5 rounded bg-elevated text-text-muted border border-border">{result.language}</span>
-          )}
-          {installed && (
-            <span className="text-2xs px-1.5 py-0.5 rounded bg-green/10 text-green border border-green/20">installed</span>
-          )}
-        </div>
-        {result.description && (
-          <p className="text-xs text-text-muted mt-1 line-clamp-2">{result.description}</p>
-        )}
-        <div className="flex items-center gap-3 mt-1.5">
-          <span className="flex items-center gap-1 text-2xs text-text-muted">
-            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-            </svg>
-            {result.stars.toLocaleString()}
-          </span>
-          <a
-            href={result.html_url}
-            target="_blank"
-            rel="noreferrer"
-            className="text-2xs text-text-muted hover:text-accent transition-colors"
-            onClick={e => e.stopPropagation()}
-          >
-            View on GitHub ↗
-          </a>
-        </div>
-      </div>
-      <button
-        onClick={onInstall}
-        disabled={installed}
-        className={`flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-sm transition-colors cursor-pointer ${
-          installed
-            ? 'bg-elevated border border-border text-text-muted cursor-default'
-            : 'bg-accent hover:bg-accent-hover text-white'
-        }`}
-      >
-        {installed ? 'Installed' : 'Install'}
-      </button>
-    </div>
+    <span className={`text-2xs ${color} flex items-center gap-1`}>
+      {remaining !== null && limit !== null
+        ? <>{remaining}/{limit} req remaining{resetIn !== null && remaining < limit / 2 ? ` · resets in ${resetIn}m` : ''}</>
+        : authenticated ? '5000 req/h' : '60 req/h'
+      }
+      {!authenticated && (
+        <> · <button onClick={onGoToSettings} className="text-accent hover:underline cursor-pointer">Add token</button></>
+      )}
+    </span>
   )
 }
 
@@ -281,7 +293,7 @@ function InstalledTab({ native, community, onDelete }: {
   native: NativeSkill[]; community: CommunitySkill[]; onDelete: (s: CommunitySkill) => void
 }): React.ReactElement {
   return (
-    <div className="flex-1 overflow-y-auto px-8 py-6 flex flex-col gap-8">
+    <div className="flex-1 overflow-y-auto px-8 py-6 flex flex-col gap-8 h-full">
       <SkillSection title="Built-in skills" description="Shipped with EchoHub. Always available." count={native.length}>
         {native.map(s => <NativeSkillCard key={s.id} skill={s} />)}
       </SkillSection>
@@ -302,11 +314,7 @@ function SkillSection({ title, description, count, empty, children }: {
         <span className="text-xs text-text-muted">{count}</span>
       </div>
       <p className="text-xs text-text-muted -mt-1">{description}</p>
-      {count === 0 && empty ? (
-        <p className="text-sm text-text-muted italic py-3">{empty}</p>
-      ) : (
-        <div className="flex flex-col gap-2">{children}</div>
-      )}
+      {count === 0 && empty ? <p className="text-sm text-text-muted italic py-3">{empty}</p> : <div className="flex flex-col gap-2">{children}</div>}
     </section>
   )
 }
@@ -403,6 +411,39 @@ function DetailRow({ label, value, mono }: { label: string; value: string; mono?
   )
 }
 
+function DiscoverCard({ result, installed, onInstall }: { result: GithubSkillResult; installed: boolean; onInstall: () => void }): React.ReactElement {
+  return (
+    <div className="bg-surface border border-border rounded-lg px-4 py-3.5 flex items-center gap-4 hover:border-border-hover transition-colors">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium text-text-primary">{result.name}</span>
+          <span className="text-2xs text-text-muted font-mono">{result.full_name}</span>
+          {result.language && <span className="text-2xs px-1.5 py-0.5 rounded bg-elevated text-text-muted border border-border">{result.language}</span>}
+          {installed && <span className="text-2xs px-1.5 py-0.5 rounded bg-green/10 text-green border border-green/20">installed</span>}
+        </div>
+        {result.description && <p className="text-xs text-text-muted mt-1 line-clamp-2">{result.description}</p>}
+        <div className="flex items-center gap-3 mt-1.5">
+          <span className="flex items-center gap-1 text-2xs text-text-muted">
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            {result.stars.toLocaleString()}
+          </span>
+          <a href={result.html_url} target="_blank" rel="noreferrer" className="text-2xs text-text-muted hover:text-accent transition-colors" onClick={e => e.stopPropagation()}>
+            View on GitHub ↗
+          </a>
+        </div>
+      </div>
+      <button
+        onClick={onInstall} disabled={installed}
+        className={`flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-sm transition-colors cursor-pointer ${
+          installed ? 'bg-elevated border border-border text-text-muted cursor-default' : 'bg-accent hover:bg-accent-hover text-white'
+        }`}
+      >
+        {installed ? 'Installed' : 'Install'}
+      </button>
+    </div>
+  )
+}
+
 // ── Install modal ──────────────────────────────────────────────────────────────
 
 function InstallModal({ initialUrl, onClose, onDone }: { initialUrl: string; onClose: () => void; onDone: () => void }): React.ReactElement {
@@ -412,21 +453,30 @@ function InstallModal({ initialUrl, onClose, onDone }: { initialUrl: string; onC
   const [done, setDone] = useState(false)
   const [failed, setFailed] = useState(false)
   const logRef = useRef<HTMLDivElement>(null)
+  const abortRef = useRef(false)
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' })
   }, [log])
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent): void => { if (e.key === 'Escape' && !installing) onClose() }
+    const handler = (e: KeyboardEvent): void => { if (e.key === 'Escape') handleClose() }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onClose, installing])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-start if URL pre-filled from Discover
   useEffect(() => {
     if (initialUrl) handleInstall(initialUrl)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleClose = (): void => {
+    if (installing) {
+      abortRef.current = true
+      setInstalling(false)
+    }
+    onClose()
+  }
 
   const handleInstall = async (targetUrl = url): Promise<void> => {
     if (!targetUrl.trim() || installing) return
@@ -434,16 +484,20 @@ function InstallModal({ initialUrl, onClose, onDone }: { initialUrl: string; onC
     setLog([])
     setDone(false)
     setFailed(false)
+    abortRef.current = false
 
     try {
       for await (const line of installSkillStream(targetUrl.trim())) {
+        if (abortRef.current) break
         if (line.startsWith('INSTALL_DONE:')) { setDone(true); setInstalling(false); return }
         if (line === 'INSTALL_FAILED') { setFailed(true); setInstalling(false); return }
         setLog(prev => [...prev, line])
       }
     } catch (e) {
-      setLog(prev => [...prev, `Error: ${e instanceof Error ? e.message : String(e)}`])
-      setFailed(true)
+      if (!abortRef.current) {
+        setLog(prev => [...prev, `Error: ${e instanceof Error ? e.message : String(e)}`])
+        setFailed(true)
+      }
       setInstalling(false)
     }
   }
@@ -451,9 +505,8 @@ function InstallModal({ initialUrl, onClose, onDone }: { initialUrl: string; onC
   return (
     <motion.div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      transition={{ duration: 0.15 }}
-      onClick={e => { if (e.target === e.currentTarget && !installing) onClose() }}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
+      onClick={e => { if (e.target === e.currentTarget) handleClose() }}
     >
       <motion.div
         className="bg-surface border border-border-hover rounded-lg w-[560px] max-h-[80vh] flex flex-col shadow-[0_24px_60px_rgba(0,0,0,0.5)]"
@@ -462,13 +515,11 @@ function InstallModal({ initialUrl, onClose, onDone }: { initialUrl: string; onC
       >
         <div className="flex items-center gap-2.5 px-5 py-4 border-b border-border">
           <h2 className="flex-1 text-md font-semibold text-text-primary">Install skill</h2>
-          {!installing && (
-            <button onClick={onClose} className="w-6 h-6 flex items-center justify-center rounded hover:bg-overlay text-text-muted hover:text-text-secondary transition-colors cursor-pointer">
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-              </svg>
-            </button>
-          )}
+          <button onClick={handleClose} className="w-6 h-6 flex items-center justify-center rounded hover:bg-overlay text-text-muted hover:text-text-secondary transition-colors cursor-pointer">
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
         </div>
 
         <div className="p-5 flex flex-col gap-4 flex-1 overflow-hidden">
@@ -483,15 +534,14 @@ function InstallModal({ initialUrl, onClose, onDone }: { initialUrl: string; onC
                 className="flex-1 bg-elevated border border-border focus:border-accent/60 rounded-sm px-3 py-2 text-sm text-text-primary placeholder-text-muted outline-none transition-colors font-mono disabled:opacity-50"
               />
               <button
-                onClick={() => handleInstall()}
-                disabled={!url.trim() || installing || done}
+                onClick={() => handleInstall()} disabled={!url.trim() || installing || done}
                 className="px-4 py-2 bg-accent hover:bg-accent-hover disabled:opacity-40 text-white text-sm font-medium rounded-sm transition-colors cursor-pointer disabled:cursor-not-allowed"
               >
                 {installing ? 'Installing…' : 'Install'}
               </button>
             </div>
             <p className="text-2xs text-text-muted">
-              EchoHub installs via <span className="font-mono">package.json</span> (bun) or <span className="font-mono">pyproject.toml</span> (pip).
+              Installed via <span className="font-mono">package.json</span> (bun) or <span className="font-mono">pyproject.toml</span> (pip).
               Add an <span className="font-mono">"echohub"</span> key to declare tools and awareness.
             </p>
           </div>
@@ -501,12 +551,12 @@ function InstallModal({ initialUrl, onClose, onDone }: { initialUrl: string; onC
               <div className="flex items-center gap-2">
                 <span className="text-xs font-medium text-text-secondary">Install log</span>
                 {installing && <div className="w-3 h-3 border border-accent/30 border-t-accent rounded-full animate-spin" />}
-                {done && <span className="text-2xs text-green font-medium">Done</span>}
+                {done && <span className="text-2xs text-green font-medium">Done ✓</span>}
                 {failed && <span className="text-2xs text-red font-medium">Failed</span>}
               </div>
               <div ref={logRef} className="flex-1 min-h-[160px] max-h-[260px] bg-base border border-border rounded-sm px-3 py-2.5 overflow-y-auto font-mono text-xs text-text-secondary space-y-0.5">
                 {log.map((line, i) => (
-                  <div key={i} className={`leading-relaxed ${line.startsWith('ERROR') ? 'text-red' : ''}`}>{line}</div>
+                  <div key={i} className={`leading-relaxed ${line.startsWith('ERROR') ? 'text-red' : line.startsWith('✓') ? 'text-green' : ''}`}>{line}</div>
                 ))}
                 {installing && !done && !failed && <div className="text-text-muted animate-pulse">▌</div>}
               </div>
@@ -514,15 +564,22 @@ function InstallModal({ initialUrl, onClose, onDone }: { initialUrl: string; onC
           )}
         </div>
 
-        <div className="px-5 py-3.5 border-t border-border flex justify-end">
+        <div className="px-5 py-3.5 border-t border-border flex justify-end gap-2">
           {done ? (
             <button onClick={onDone} className="px-4 py-1.5 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-sm transition-colors cursor-pointer">
               Done
             </button>
           ) : (
-            <button onClick={onClose} disabled={installing} className="px-4 py-1.5 border border-border text-text-secondary hover:text-text-primary text-sm rounded-sm transition-colors cursor-pointer disabled:opacity-40">
-              Cancel
-            </button>
+            <>
+              {installing && (
+                <button onClick={handleClose} className="px-4 py-1.5 border border-red/40 text-red hover:bg-red/10 text-sm rounded-sm transition-colors cursor-pointer">
+                  Cancel
+                </button>
+              )}
+              <button onClick={handleClose} className="px-4 py-1.5 border border-border text-text-secondary hover:text-text-primary text-sm rounded-sm transition-colors cursor-pointer">
+                {installing ? 'Close' : 'Cancel'}
+              </button>
+            </>
           )}
         </div>
       </motion.div>

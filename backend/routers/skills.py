@@ -442,19 +442,17 @@ def search_skills(q: str = "", force_refresh: bool = False) -> dict[str, Any]:
             headers=headers,
             timeout=10,
         )
+        # Parse rate limit headers (always present even on success)
+        rl_remaining = int(r.headers.get("X-RateLimit-Remaining", -1))
+        rl_limit = int(r.headers.get("X-RateLimit-Limit", rate_limit))
+        rl_reset = int(r.headers.get("X-RateLimit-Reset", 0))  # unix timestamp
+
         if r.status_code == 403:
-            # Rate limited — return cache even if stale
-            stale = get_skills_cache(cache_key) or get_skills_cache.__module__ and None
             stale_data = get_skills_cache(cache_key)
+            base = {"rate_limited": True, "authenticated": bool(token), "rl_remaining": 0, "rl_limit": rl_limit, "rl_reset": rl_reset}
             if stale_data:
-                return {
-                    "results": _mark_installed(stale_data["results"]),
-                    "total": stale_data["total"],
-                    "from_cache": True,
-                    "rate_limited": True,
-                    "authenticated": bool(token),
-                }
-            return {"results": [], "total": 0, "rate_limited": True, "authenticated": bool(token)}
+                return {**base, "results": _mark_installed(stale_data["results"]), "total": stale_data["total"], "from_cache": True}
+            return {**base, "results": [], "total": 0}
 
         r.raise_for_status()
         data = r.json()
@@ -475,8 +473,6 @@ def search_skills(q: str = "", force_refresh: bool = False) -> dict[str, Any]:
             for item in data.get("items", [])
         ]
         total = data.get("total_count", 0)
-
-        # Persist to cache
         set_skills_cache(cache_key, results, total)
 
         return {
@@ -484,8 +480,10 @@ def search_skills(q: str = "", force_refresh: bool = False) -> dict[str, Any]:
             "total": total,
             "from_cache": False,
             "authenticated": bool(token),
-            "rate_limit": rate_limit,
             "rate_limited": False,
+            "rl_remaining": rl_remaining,
+            "rl_limit": rl_limit,
+            "rl_reset": rl_reset,
         }
 
     except httpx.TimeoutException:

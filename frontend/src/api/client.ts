@@ -700,8 +700,9 @@ export interface GithubSkillResult {
 
 export const searchSkills = (q: string, forceRefresh = false): Promise<{
   results: GithubSkillResult[]; total: number; authenticated: boolean
-  rate_limit?: number; rate_limited?: boolean; error?: string
+  rate_limited?: boolean; error?: string
   from_cache?: boolean; cache_age_h?: number
+  rl_remaining?: number; rl_limit?: number; rl_reset?: number
 }> => apiRequest(`/skills/search?q=${encodeURIComponent(q)}${forceRefresh ? '&force_refresh=true' : ''}`)
 
 export const getGithubToken = (): Promise<{ token_set: boolean; token_preview: string }> =>
