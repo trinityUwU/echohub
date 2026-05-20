@@ -476,7 +476,8 @@ async def tool_chat(req: ToolChatRequest):
                     sig = f"{tool_name}:{raw_args}"
                     if sig == last_tool_signature:
                         logger.warning(f"[tool-chat] loop detected on {tool_name}, breaking")
-                        yield f"data: {_json.dumps({'type': 'text_chunk', 'content': f'\n\n[Tool loop detected — stopping]'})}\n\n"
+                        loop_msg = "\n\n[Tool loop detected — stopping]"
+                        yield f"data: {_json.dumps({'type': 'text_chunk', 'content': loop_msg})}\n\n"
                         tool_calls = None  # type: ignore[assignment]
                         break
                     last_tool_signature = sig
@@ -504,11 +505,10 @@ async def tool_chat(req: ToolChatRequest):
             break  # done
 
         else:
-            # Hit max iterations without a final text answer
+            # Hit max iterations — still emit done with files so UI updates
             yield f"data: {_json.dumps({'type': 'error', 'error': 'Max iterations reached without final answer'})}\n\n"
-            return
 
-        # Final event with workspace file list
+        # Always emit done with workspace file list — even after errors/loops
         try:
             files = list_workspace_files(req.project_id)
         except Exception as e:

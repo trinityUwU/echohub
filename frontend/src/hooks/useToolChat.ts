@@ -63,6 +63,20 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
   const [toolCalls, setToolCalls] = useState<ToolCall[]>([])
   const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([])
   const [streaming, setStreaming] = useState(false)
+
+  // Poll workspace files every 2s for real-time panel updates
+  useEffect(() => {
+    let alive = true
+    const poll = async (): Promise<void> => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/workspace-files`)
+        if (res.ok && alive) setWorkspaceFiles(await res.json() as WorkspaceFile[])
+      } catch { /* ignore */ }
+    }
+    poll()
+    const id = setInterval(poll, 2000)
+    return () => { alive = false; clearInterval(id) }
+  }, [projectId])
   const optionsRef = useRef(options)
 
   // Keep options ref fresh so send() always reads current values

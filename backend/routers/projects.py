@@ -86,3 +86,9 @@ def clear_messages(project_id: str, conv_id: str) -> dict:
     except Exception as exc:
         logger.error("clear_messages error: {}", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/{project_id}/workspace-files")
+def list_workspace_files_endpoint(project_id: str) -> list:
+    from backend.services.tool_service import list_workspace_files
+    return list_workspace_files(project_id)
