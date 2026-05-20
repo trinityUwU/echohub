@@ -108,6 +108,21 @@ async def install_skill(req: InstallRequest) -> StreamingResponse:
         else:
             yield sse("No install commands — registering as-is")
 
+        # Auto-detect MCP at install time — no need to wait for LLM analysis
+        try:
+            from backend.services.mcp_manager import detect_mcp_server
+            mcp_info = detect_mcp_server(target_dir)
+            if mcp_info:
+                entry["is_mcp"] = True
+                entry["mcp_start_command"] = mcp_info.get("start_command")
+                entry["mcp_transport"] = mcp_info.get("transport")
+                entry["mcp_port_hint"] = mcp_info.get("port_hint")
+                yield sse(f"Detected as MCP server ({mcp_info.get('transport', 'http')}) ✓")
+            else:
+                entry["is_mcp"] = False
+        except Exception:
+            entry["is_mcp"] = False
+
         registry = [r for r in _load_registry() if r["id"] != skill_id]
         registry.append(entry)
         _save_registry(registry)
