@@ -21,12 +21,13 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "create_file",
-            "description": "Create or overwrite a file with the given content",
+            "description": "Create a new file. Returns an error if the file already exists (use overwrite=true to force, or edit_file to modify an existing file).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Relative path from workspace root"},
                     "content": {"type": "string", "description": "File content"},
+                    "overwrite": {"type": "boolean", "description": "Set to true to replace an existing file. Default false.", "default": False},
                 },
                 "required": ["path", "content"],
             },
@@ -183,9 +184,15 @@ def list_workspace_files(project_id: str) -> list[dict[str, Any]]:
 def _create_file(workspace: Path, args: dict[str, Any]) -> str:
     path_str: str = args.get("path", "")
     content: str = args.get("content", "")
+    overwrite: bool = args.get("overwrite", False)
     if not path_str:
         raise ValueError("path is required")
     target = _safe_path(workspace, path_str)
+    if target.exists() and not overwrite:
+        raise ValueError(
+            f"File '{path_str}' already exists. "
+            "Use overwrite=true to replace it, edit_file to modify it, or choose a different name."
+        )
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
     logger.info(f"[tool_service] create_file {target}")

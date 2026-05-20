@@ -367,8 +367,19 @@ async def tool_chat(req: ToolChatRequest):
         _active_engine = engine_router.get_active_engine()
         _model_status = engine_router.get_status()
         messages: list[dict] = []
-        if req.system_prompt and req.system_prompt.strip():
-            messages.append({"role": "system", "content": req.system_prompt})
+        _DEV_SYSTEM_PROMPT = (
+            "You are a coding assistant operating in Dev mode. "
+            "You have access to file system tools: create_file, read_file, edit_file, delete_file, list_files.\n\n"
+            "CRITICAL RULES:\n"
+            "- ALWAYS use tools to create, read, edit, or delete files. NEVER output code in markdown — write it directly to files using create_file.\n"
+            "- When asked to create a project or file, call create_file immediately with the full content.\n"
+            "- If a file already exists and you try to create it, you will get an error — handle it: either edit the existing file or ask the user.\n"
+            "- After creating files, briefly summarize what you did (1-2 sentences). No code blocks in your summary.\n"
+            "- Use list_files to check the workspace before starting if relevant.\n"
+            "- You can chain multiple tool calls: create several files one after another without waiting."
+        )
+        system = req.system_prompt.strip() if req.system_prompt and req.system_prompt.strip() else _DEV_SYSTEM_PROMPT
+        messages.append({"role": "system", "content": system})
 
         # Filter out empty messages — llama.cpp crashes on empty assistant content
         for m in req.messages:
