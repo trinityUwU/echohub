@@ -405,11 +405,21 @@ async def tool_chat(req: ToolChatRequest):
                     if event_type == "text_delta":
                         content = event.get("content", "")
                         if content:
+                            prev_buf = accumulated_text_buf
                             accumulated_text_buf += content
-                            # Only stream if no tool_call tag anywhere in buffer yet
-                            if "<tool_call>" not in accumulated_text_buf:
+                            tool_call_pos = accumulated_text_buf.find("<tool_call>")
+                            if tool_call_pos == -1:
+                                # No tool call yet — stream normally
                                 streamed_text = True
                                 yield f"data: {_json.dumps({'type': 'text_chunk', 'content': content})}\n\n"
+                            elif tool_call_pos > len(prev_buf):
+                                # Tool call tag starts inside this chunk — emit the part before it
+                                before = accumulated_text_buf[:tool_call_pos]
+                                tail = before[len(prev_buf):]  # only the new part before <tool_call>
+                                if tail:
+                                    streamed_text = True
+                                    yield f"data: {_json.dumps({'type': 'text_chunk', 'content': tail})}\n\n"
+                            # else: tool_call already detected, suppress token
                     elif event_type == "response":
                         response_dict = event
                     elif event_type == "error":
