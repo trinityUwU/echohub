@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listSkills, listMcpServers, startMcp, stopMcp } from '@/api/client'
 import type { CommunitySkill, McpStatus } from '@/api/client'
+import { addToast } from '@/hooks/useToast'
 
 export interface Skill {
   id: string
@@ -121,8 +122,29 @@ export function useSkills() {
     // Auto-start/stop MCP server when toggling a community MCP skill
     const skill = rawCommunityRef.current.find(s => s.id === id)
     if (skill?.is_mcp) {
-      if (enabling) startMcp(id).then(() => fetchMcpStatuses()).catch(() => {})
-      else stopMcp(id).then(() => fetchMcpStatuses()).catch(() => {})
+      if (enabling) {
+        startMcp(id)
+          .then(() => {
+            fetchMcpStatuses()
+            addToast({ type: 'success', title: 'MCP server started', message: skill.name })
+          })
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err)
+            addToast({
+              type: 'error',
+              title: 'MCP failed to start',
+              message: msg,
+              action: { label: 'View skill', onClick: () => { /* navigate handled by caller */ } },
+            })
+          })
+      } else {
+        stopMcp(id)
+          .then(() => {
+            fetchMcpStatuses()
+            addToast({ type: 'info', title: 'MCP server stopped', message: skill.name })
+          })
+          .catch(() => {})
+      }
     }
   }, [fetchMcpStatuses])
 

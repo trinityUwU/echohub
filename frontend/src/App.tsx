@@ -17,6 +17,7 @@ import { ModelPickerModal } from '@/components/modals/ModelPickerModal'
 import { useDialog } from '@/components/shared/Dialog'
 import { UpdateBanner } from '@/components/shared/UpdateBanner'
 import { ChangelogNotification } from '@/components/shared/ChangelogNotification'
+import { Toaster } from '@/components/shared/Toaster'
 import { OnboardingWizard } from '@/components/onboarding/OnboardingWizard'
 import { getOnboardingStatus } from '@/api/client'
 
@@ -257,6 +258,7 @@ export default function App(): React.ReactElement {
       {showOnboarding && <OnboardingWizard onComplete={() => setShowOnboarding(false)} />}
       {dialogEl}
       <ChangelogNotification />
+      <Toaster />
         </div>
     </div>
   )
