@@ -513,8 +513,11 @@ async def tool_chat(req: ToolChatRequest):
                             in_tool_call = True
                             tool_call_buf = accumulated_buf[open_pos + len(_TC_OPEN):]
                     else:
-                        # Inside a tool_call — append incoming content to buffer
+                        # Inside a tool_call — stream JSON content live to client
                         tool_call_buf += content
+                        # Emit the raw token so frontend can show it in real-time inside the tool block
+                        tc_live_evt = _json.dumps({"type": "tool_call_streaming", "content": content})
+                        yield f"data: {tc_live_evt}\n\n"
                         # Check if we have the closing tag
                         close_pos = tool_call_buf.find(_TC_CLOSE)
                         if close_pos != -1:

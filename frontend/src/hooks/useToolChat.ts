@@ -38,8 +38,9 @@ interface ErrorEvent {
 }
 
 interface ToolCallPendingEvent { type: 'tool_call_pending' }
+interface ToolCallStreamingEvent { type: 'tool_call_streaming'; content: string }
 
-type SseEvent = ToolCallEvent | ToolResultEvent | TextChunkEvent | DoneEvent | ErrorEvent | ToolCallPendingEvent
+type SseEvent = ToolCallEvent | ToolResultEvent | TextChunkEvent | DoneEvent | ErrorEvent | ToolCallPendingEvent | ToolCallStreamingEvent
 
 function isSseEvent(v: unknown): v is SseEvent {
   return typeof v === 'object' && v !== null && 'type' in v
@@ -152,9 +153,11 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
 
     const controller = new AbortController()
     abortRef.current = controller
-    // accumulated tracks the full text for the current assistant turn (including tool_call tags)
+    // accumulated tracks the full text for the current assistant turn
     let accumulated = ''
-    // pendingToolName tracks which tool is currently executing so we can inject tool_result inline
+    // true while we are inside a <tool_call> block being streamed live
+    let inToolCallBlock = false
+    // tool name for the current pending tool (set when tool_call_streaming starts)
     let pendingToolName = ''
 
     const req = {
@@ -173,7 +176,21 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
           if (!isSseEvent(raw)) continue
 
           if (raw.type === 'tool_call_pending') {
-            // No-op — text is already streaming live
+            // no-op
+          } else if (raw.type === 'tool_call_streaming') {
+            // First token of a new tool_call block — open the tag in accumulated
+            if (!inToolCallBlock) {
+              accumulated += '\n<tool_call>'
+              inToolCallBlock = true
+            }
+            accumulated += raw.content
+            const snap = accumulated
+            setMessages(prev => {
+              const updated = [...prev]
+              updated[updated.length - 1] = { role: 'assistant', content: snap, id: assistantId }
+              messagesRef.current = updated
+              return updated
+            })
           } else if (raw.type === 'text_chunk') {
             accumulated += raw.content
             const snap = accumulated
@@ -185,17 +202,21 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
               return updated
             })
           } else if (raw.type === 'tool_call') {
-            // Update DevPanel sidebar
+            // Tool call fully parsed — close the streaming block and update DevPanel
+            if (inToolCallBlock) {
+              accumulated += '</tool_call>'
+              inToolCallBlock = false
+            }
+            pendingToolName = raw.tool
             const tcId = crypto.randomUUID()
             const tc: ToolCall = { id: tcId, tool: raw.tool, args: raw.args, status: 'running' }
-            pendingToolName = raw.tool
             setToolCalls(prev => [...prev, tc])
           } else if (raw.type === 'tool_result') {
             // Update DevPanel sidebar status
             setToolCalls(prev =>
               prev.map(tc => tc.tool === raw.tool ? { ...tc, result: raw.result, status: 'done' } : tc)
             )
-            // Inject result inline into the accumulated text so MessageContent can render it
+            // Inject result inline
             const resultTag = `\n<tool_result tool="${raw.tool}">${raw.result}</tool_result>\n`
             accumulated += resultTag
             pendingToolName = ''

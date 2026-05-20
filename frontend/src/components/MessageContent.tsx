@@ -22,8 +22,18 @@ function parseSegments(raw: string): Segment[] {
   const segments: Segment[] = []
   let pos = 0
 
+  // Handle orphan </think> — model started thinking without emitting <think> (Qwen3 behavior)
+  // Everything before the first </think> is implicitly thinking content
+  if (!raw.includes('<think>') && raw.includes('</think>')) {
+    const closePos = raw.indexOf('</think>')
+    const thinkContent = raw.slice(0, closePos)
+    if (thinkContent.trim()) {
+      segments.push({ type: 'thinking', content: thinkContent, open: false })
+    }
+    pos = closePos + 8
+  }
+
   while (pos < raw.length) {
-    // Find the earliest opening tag
     const thinkStart = raw.indexOf('<think>', pos)
     const tcStart = raw.indexOf('<tool_call>', pos)
     const trStart = raw.indexOf('<tool_result', pos)
@@ -35,21 +45,19 @@ function parseSegments(raw: string): Segment[] {
     )
 
     if (next === Infinity) {
-      // No more tags
       const tail = raw.slice(pos)
-      if (tail) segments.push({ type: 'text', content: tail })
+      if (tail.trim()) segments.push({ type: 'text', content: tail })
       break
     }
 
-    // Text before next tag
     if (next > pos) {
-      segments.push({ type: 'text', content: raw.slice(pos, next) })
+      const before = raw.slice(pos, next)
+      if (before.trim()) segments.push({ type: 'text', content: before })
     }
 
     if (next === thinkStart) {
       const end = raw.indexOf('</think>', next)
       if (end === -1) {
-        // Still streaming — unclosed
         segments.push({ type: 'thinking', content: raw.slice(next + 7), open: true })
         break
       }
@@ -58,7 +66,6 @@ function parseSegments(raw: string): Segment[] {
     } else if (next === tcStart) {
       const end = raw.indexOf('</tool_call>', next)
       if (end === -1) {
-        // Still streaming — unclosed
         segments.push({ type: 'tool_call', content: raw.slice(next + 11), open: true })
         break
       }
@@ -96,14 +103,20 @@ function parseSegments(raw: string): Segment[] {
 function ToolCallBlock({ content, streaming }: { content: string; streaming?: boolean }): React.ReactElement {
   const [open, setOpen] = useState(true)
 
+  // Try to extract tool name even from partial JSON (streaming)
   let toolName = ''
   let argsDisplay = content.trim()
-  try {
-    const parsed = JSON.parse(content.trim())
-    toolName = parsed.name ?? ''
-    const args = parsed.arguments ?? parsed.args ?? parsed
-    argsDisplay = JSON.stringify(typeof args === 'string' ? JSON.parse(args) : args, null, 2)
-  } catch { /* raw display */ }
+  const nameMatch = content.match(/"name"\s*:\s*"([^"]+)"/)
+  if (nameMatch) toolName = nameMatch[1]
+
+  if (!streaming) {
+    try {
+      const parsed = JSON.parse(content.trim())
+      toolName = parsed.name ?? toolName
+      const args = parsed.arguments ?? parsed.args ?? parsed
+      argsDisplay = JSON.stringify(typeof args === 'string' ? JSON.parse(args) : args, null, 2)
+    } catch { /* raw display */ }
+  }
 
   return (
     <motion.div
@@ -132,7 +145,10 @@ function ToolCallBlock({ content, streaming }: { content: string; streaming?: bo
         <span className="text-2xs font-mono font-medium text-yellow-300">
           {toolName || 'tool_call'}
         </span>
-        {streaming && <span className="text-2xs text-yellow-400/60 animate-pulse ml-1">running…</span>}
+        {streaming && <span className="text-2xs text-yellow-400/60 ml-1 flex items-center gap-1">
+          <span className="animate-pulse">generating</span>
+          <span className="inline-block w-1 h-2.5 bg-yellow-400/60 animate-pulse rounded-sm" />
+        </span>}
         <motion.svg
           className="w-3 h-3 ml-auto flex-shrink-0 opacity-50 text-yellow-400"
           viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
@@ -142,7 +158,7 @@ function ToolCallBlock({ content, streaming }: { content: string; streaming?: bo
         </motion.svg>
       </button>
       <AnimatePresence initial={false}>
-        {open && argsDisplay && (
+        {open && (argsDisplay || streaming) && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
@@ -151,7 +167,7 @@ function ToolCallBlock({ content, streaming }: { content: string; streaming?: bo
             className="overflow-hidden border-t border-yellow-500/10"
           >
             <pre className="text-2xs font-mono leading-relaxed px-3 py-2 text-yellow-200/60 overflow-x-auto max-h-48 whitespace-pre-wrap break-all">
-              {argsDisplay}
+              {argsDisplay}{streaming && <span className="inline-block w-1 h-3 bg-yellow-400/60 animate-pulse rounded-sm ml-0.5 align-middle" />}
             </pre>
           </motion.div>
         )}
