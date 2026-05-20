@@ -8,6 +8,7 @@ from backend.routers.skills_discover import router as _disc
 from backend.routers.skills_helpers import _load_registry, NATIVE_SKILLS  # noqa: F401
 
 router = APIRouter()
-router.include_router(_reg)
-router.include_router(_mcp)
-router.include_router(_disc)
+# Static/literal routes MUST come before parametric /{skill_id} routes
+router.include_router(_disc)  # GET /search, POST /{id}/analyze
+router.include_router(_mcp)   # GET /mcp/all, POST /{id}/mcp/*
+router.include_router(_reg)   # GET /{skill_id} — catch-all LAST
