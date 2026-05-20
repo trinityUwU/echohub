@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { listSkills, deleteSkill, patchSkill, analyzeSkill, installSkillStream, searchSkills, detectMcp, startMcp, stopMcp, getMcpStatus } from '@/api/client'
+import { listSkills, deleteSkill, patchSkill, analyzeSkillStream, installSkillStream, searchSkills, detectMcp, startMcp, stopMcp, getMcpStatus } from '@/api/client'
+import type { AnalyzeResult } from '@/api/client'
 import type { NativeSkill, CommunitySkill, GithubSkillResult, McpStatus } from '@/api/client'
 import { useDialog } from '@/components/shared/Dialog'
 
@@ -561,8 +562,17 @@ function CommunitySkillCard({ skill, onDelete, onRefresh }: { skill: CommunitySk
   const [awareness, setAwareness] = useState(skill.awareness)
   const [saving, setSaving] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
+  const [analyzeLog, setAnalyzeLog] = useState<string[]>([])
+  const [analyzeTokens, setAnalyzeTokens] = useState('')
   const [analyzeError, setAnalyzeError] = useState<string | null>(null)
+  const analyzeLogRef = useRef<HTMLDivElement>(null)
   const hasTools = skill.tools.length > 0
+
+  useEffect(() => {
+    if (analyzeLogRef.current) {
+      analyzeLogRef.current.scrollTop = analyzeLogRef.current.scrollHeight
+    }
+  }, [analyzeLog, analyzeTokens])
 
   const handleSave = async (): Promise<void> => {
     setSaving(true)
@@ -578,18 +588,31 @@ function CommunitySkillCard({ skill, onDelete, onRefresh }: { skill: CommunitySk
   const handleAnalyze = async (): Promise<void> => {
     setAnalyzing(true)
     setAnalyzeError(null)
+    setAnalyzeLog([])
+    setAnalyzeTokens('')
     try {
-      const result = await analyzeSkill(skill.id)
-      setTools(result.suggested_tools.join(', '))
-      setAwareness(result.suggested_awareness)
-      setEditing(true)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Analysis failed'
-      if (msg.includes('503') || msg.includes('No model loaded')) {
-        setAnalyzeError('No model loaded — load a model from the Chat page first, then retry.')
-      } else {
-        setAnalyzeError(msg)
+      let result: AnalyzeResult | null = null
+      for await (const event of analyzeSkillStream(skill.id)) {
+        if (event.type === 'log') {
+          setAnalyzeLog(prev => [...prev, event.msg])
+        } else if (event.type === 'token') {
+          setAnalyzeTokens(prev => prev + event.content)
+        } else if (event.type === 'done') {
+          result = event.result
+        } else if (event.type === 'error') {
+          const msg = event.message
+          setAnalyzeError(msg.includes('No model') ? 'No model loaded — load a model from the Chat page first.' : msg)
+          setAnalyzing(false)
+          return
+        }
       }
+      if (result) {
+        setTools(result.suggested_tools.join(', '))
+        setAwareness(result.suggested_awareness)
+        setEditing(true)
+      }
+    } catch (e) {
+      setAnalyzeError(e instanceof Error ? e.message : 'Analysis failed')
     }
     setAnalyzing(false)
   }
@@ -647,6 +670,25 @@ function CommunitySkillCard({ skill, onDelete, onRefresh }: { skill: CommunitySk
                     )
                   }
                   {skill.awareness && <DetailRow label="Awareness" value={skill.awareness} />}
+                  {/* Analyze log */}
+                  {(analyzing || analyzeLog.length > 0 || analyzeTokens) && (
+                    <div className="flex flex-col gap-1">
+                      <div
+                        ref={analyzeLogRef}
+                        className="bg-base border border-border rounded-sm px-3 py-2 max-h-[140px] overflow-y-auto font-mono text-xs text-text-secondary space-y-0.5"
+                      >
+                        {analyzeLog.map((msg, i) => (
+                          <div key={i} className="text-text-muted leading-relaxed">▸ {msg}</div>
+                        ))}
+                        {analyzeTokens && (
+                          <div className="text-text-primary leading-relaxed whitespace-pre-wrap">{analyzeTokens}{analyzing && <span className="animate-pulse">▌</span>}</div>
+                        )}
+                        {analyzing && !analyzeTokens && (
+                          <div className="text-text-muted animate-pulse">Waiting for model...</div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {analyzeError && (
                     <div className="flex items-start gap-2 px-3 py-2.5 bg-elevated border border-border rounded-md">
                       <svg className="w-3.5 h-3.5 text-text-muted flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

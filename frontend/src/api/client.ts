@@ -683,9 +683,40 @@ export const deleteSkill = (id: string): Promise<{ status: string; id: string }>
 export const patchSkill = (id: string, patch: { tools?: string[]; awareness?: string; name?: string; description?: string }): Promise<CommunitySkill> =>
   apiRequest(`/skills/${id}`, { method: 'PATCH', body: JSON.stringify(patch) })
 
-export const analyzeSkill = (id: string): Promise<{
-  skill_id: string; suggested_tools: string[]; suggested_awareness: string; model_used: string
-}> => apiRequest(`/skills/${id}/analyze`, { method: 'POST' })
+export interface AnalyzeResult {
+  skill_id: string; suggested_tools: string[]; suggested_awareness: string
+  is_mcp: boolean; mcp_start_command: string | null; mcp_transport: string | null; model_used: string
+}
+
+export type AnalyzeEvent =
+  | { type: 'log'; msg: string }
+  | { type: 'token'; content: string }
+  | { type: 'done'; result: AnalyzeResult }
+  | { type: 'error'; message: string }
+
+export async function* analyzeSkillStream(id: string): AsyncGenerator<AnalyzeEvent> {
+  const url = await apiUrl(`/skills/${id}/analyze`)
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+  if (!res.ok || !res.body) {
+    const text = await res.text()
+    yield { type: 'error', message: `API error ${res.status}: ${text}` }
+    return
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const blocks = buf.split('\n\n')
+    buf = blocks.pop() ?? ''
+    for (const block of blocks) {
+      if (!block.startsWith('data: ')) continue
+      try { yield JSON.parse(block.slice(6)) as AnalyzeEvent } catch { /* skip */ }
+    }
+  }
+}
 
 export async function* installSkillStream(repoUrl: string, skillId?: string): AsyncGenerator<string> {
   const url = await apiUrl('/skills/install')

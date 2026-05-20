@@ -647,171 +647,213 @@ async def configure_mcp(skill_id: str, req: McpConfigureRequest | None = None) -
 
 
 @router.post("/{skill_id}/analyze")
-async def analyze_skill(skill_id: str) -> dict[str, Any]:
+async def analyze_skill(skill_id: str) -> StreamingResponse:
     """
-    Use the loaded model to analyze a community skill's source code and auto-suggest
-    tools[] and awareness block. Returns suggestions — does NOT save automatically.
+    Use the loaded model to analyze a skill. Streams tokens live as SSE, then
+    emits a final DONE event with the parsed result.
+    Events:
+      data: {"type": "log", "msg": "..."}       — progress messages
+      data: {"type": "token", "content": "..."}  — live model tokens
+      data: {"type": "done", "result": {...}}    — final parsed result
+      data: {"type": "error", "message": "..."}  — on failure
     """
     from backend.services import engine_router
 
     if engine_router.get_status() is None:
-        raise HTTPException(status_code=503, detail="No model loaded. Load a model first.")
+        async def _err():
+            yield f'data: {json.dumps({"type":"error","message":"No model loaded. Load a model first."})}\n\n'
+        return StreamingResponse(_err(), media_type="text/event-stream",
+                                 headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
 
     registry = _load_registry()
     entry = next((r for r in registry if r["id"] == skill_id), None)
-    if not entry:
-        raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' not found")
 
-    skill_dir = Path(entry["path"])
-    if not skill_dir.exists():
-        raise HTTPException(status_code=404, detail="Skill directory not found on disk")
+    async def _stream():
+        import re as _re
 
-    # ── Collect context from skill directory ──────────────────────────────────
-    context_parts: list[str] = []
+        def sse(obj: dict) -> str:
+            return f"data: {json.dumps(obj)}\n\n"
 
-    def _read_safe(path: Path, max_chars: int = 4000) -> str:
-        try:
-            return path.read_text(errors="replace")[:max_chars]
-        except Exception:
-            return ""
+        if not entry:
+            yield sse({"type":"error","message":f"Skill '{skill_id}' not found"})
+            return
 
-    # Priority: README, package.json, pyproject.toml, main source files
-    priority_files = ["README.md", "README.rst", "README.txt", "package.json",
-                      "pyproject.toml", "setup.py", "index.ts", "index.js",
-                      "main.py", "server.py", "src/index.ts", "src/main.ts",
-                      "src/index.js", "src/server.ts"]
+        skill_dir = Path(entry["path"])
+        if not skill_dir.exists():
+            yield sse({"type":"error","message":"Skill directory not found on disk"})
+            return
 
-    seen: set[str] = set()
-    for fname in priority_files:
-        p = skill_dir / fname
-        if p.exists() and p.name not in seen:
-            seen.add(p.name)
-            content = _read_safe(p)
-            if content.strip():
-                context_parts.append(f"=== {fname} ===\n{content}")
+        # ── Collect context ───────────────────────────────────────────────────
+        yield sse({"type":"log","msg":f"Scanning skill directory: {skill_dir}"})
 
-    # Scan top-level .ts/.js/.py files not yet included (max 3)
-    extras = 0
-    for p in sorted(skill_dir.rglob("*.ts")) + sorted(skill_dir.rglob("*.py")):
-        if extras >= 3:
-            break
-        if p.name in seen or "node_modules" in str(p) or ".git" in str(p):
-            continue
-        content = _read_safe(p, 2000)
-        if content.strip():
-            seen.add(p.name)
-            context_parts.append(f"=== {p.relative_to(skill_dir)} ===\n{content}")
-            extras += 1
+        def _read_safe(path: Path, max_chars: int = 3000) -> str:
+            try:
+                return path.read_text(errors="replace")[:max_chars]
+            except Exception:
+                return ""
 
-    if not context_parts:
-        raise HTTPException(status_code=422, detail="No readable source files found in skill directory")
+        context_parts: list[str] = []
+        seen: set[str] = set()
 
-    full_context = "\n\n".join(context_parts)
-    # Cap total context to ~6000 chars to stay well within context window
-    if len(full_context) > 6000:
-        full_context = full_context[:6000] + "\n\n[... truncated ...]"
+        # 1. Always include package.json / pyproject.toml first (tool manifest)
+        for fname in ["package.json", "pyproject.toml", "setup.py"]:
+            p = skill_dir / fname
+            if p.exists():
+                content = _read_safe(p, 4000)
+                if content.strip():
+                    context_parts.append(f"=== {fname} ===\n{content}")
+                    seen.add(fname)
 
-    # ── Build prompt ──────────────────────────────────────────────────────────
-    prompt = f"""You are analyzing a software skill/plugin to configure it for an AI assistant.
+        # 2. MCP-specific files — highest signal
+        mcp_patterns = [
+            "src/app/api/mcp/route.ts", "src/app/api/mcp/server.ts",
+            "src/libs/mcp-server/index.ts", "src/libs/mcp-server/streamableHttp.ts",
+            "mcp.json", ".mcp.json", "src/mcp.ts", "mcp_server.py", "server.py",
+        ]
+        for fname in mcp_patterns:
+            p = skill_dir / fname
+            if p.exists() and p.name not in seen:
+                content = _read_safe(p, 3000)
+                if content.strip():
+                    context_parts.append(f"=== {fname} ===\n{content}")
+                    seen.add(p.name)
 
-The skill is: {entry.get('name', skill_id)}
-Description: {entry.get('description', 'unknown')}
+        # 3. README for general description
+        for fname in ["README.md", "README.rst"]:
+            p = skill_dir / fname
+            if p.exists() and p.name not in seen:
+                content = _read_safe(p, 2000)
+                if content.strip():
+                    context_parts.append(f"=== {fname} ===\n{content}")
+                    seen.add(p.name)
 
-Here is the source code:
+        # 4. Scan all TS/JS/PY for MCP patterns (max 5 extra files)
+        mcp_source_patterns = [
+            r"StreamableHTTPServerTransport", r"McpServer|createMcpServer",
+            r"server\.tool\(", r"setRequestHandler", r"from.*@modelcontextprotocol",
+            r"FastMCP", r"mcp\.server",
+        ]
+        extras = 0
+        for p in sorted(skill_dir.rglob("*.ts")) + sorted(skill_dir.rglob("*.py")):
+            if extras >= 5:
+                break
+            if "node_modules" in str(p) or ".git" in str(p) or p.name in seen:
+                continue
+            try:
+                txt = p.read_text(errors="ignore")
+                if any(_re.search(pat, txt) for pat in mcp_source_patterns):
+                    content = txt[:2500]
+                    context_parts.append(f"=== {p.relative_to(skill_dir)} ===\n{content}")
+                    seen.add(p.name)
+                    extras += 1
+            except Exception:
+                pass
 
+        if not context_parts:
+            yield sse({"type":"error","message":"No readable source files found in skill directory"})
+            return
+
+        full_context = "\n\n".join(context_parts)
+        if len(full_context) > 12000:
+            full_context = full_context[:12000] + "\n\n[... truncated ...]"
+
+        yield sse({"type":"log","msg":f"Loaded {len(context_parts)} file(s), {len(full_context)} chars of context"})
+        yield sse({"type":"log","msg":"Sending to model for analysis..."})
+
+        # ── Build prompt ──────────────────────────────────────────────────────
+        prompt = f"""Analyze this software skill to configure it for an AI assistant called EchoHub.
+
+Skill: {entry.get('name', skill_id)}
+Description: {entry.get('description', '')}
+
+Source files:
 {full_context}
 
-Based on this code, determine:
-1. What tool functions does this skill expose that an AI model could call? (function names only)
-2. Write a concise awareness block (≤80 tokens) explaining to the model how and when to use these tools.
-3. Is this an MCP (Model Context Protocol) server? Signs: imports from @modelcontextprotocol/sdk or the Python `mcp` package, uses Server/McpServer class, registers tools/resources/prompts via server.tool() or server.setRequestHandler(). If yes, what command starts it (check scripts.start in package.json, or main entry point)?
-4. If it is an MCP server, what transport does it use: "http" (uses StreamableHTTP or SSE transport) or "stdio" (uses StdioServerTransport)?
+Answer these questions:
+1. What tool function names does this skill expose for an AI model to call?
+2. Write a concise awareness block (≤80 tokens) telling the model how/when to use these tools.
+3. Is this an MCP (Model Context Protocol) server? Signs: StreamableHTTPServerTransport, McpServer class, server.tool() registrations, /api/mcp routes, @modelcontextprotocol imports, FastMCP usage.
+4. If MCP, what command starts it? (from package.json scripts.start or main entry). What transport: "http" or "stdio"?
 
-Respond ONLY with valid JSON in this exact format, no explanation:
-{{
-  "tools": ["tool_name_1", "tool_name_2"],
-  "awareness": "One or two sentences explaining how to use these tools.",
-  "is_mcp": true,
-  "mcp_start_command": "bun run start",
-  "mcp_transport": "http"
-}}"""
+Respond ONLY with this exact JSON, no explanation, no markdown:
+{{"tools":["tool_name"],"awareness":"Brief description for the model.","is_mcp":true,"mcp_start_command":"bun run start","mcp_transport":"http"}}"""
 
-    messages = [{"role": "user", "content": prompt}]
+        messages = [{"role": "user", "content": prompt}]
+        accumulated = ""
 
-    # ── Call model, collect response ───────────────────────────────────────────
-    # engine_router.generate() yields raw SSE strings: "data: {...}\n\n"
-    # Parse delta.content from each chunk exactly like the chat endpoint does.
-    accumulated = ""
-    try:
-        async for chunk in engine_router.generate(
-            messages=messages,
-            temperature=0.1,
-            max_tokens=512,
-            stream=True,
-        ):
-            if not isinstance(chunk, str):
-                continue
-            # Each chunk may contain one or more SSE lines
-            for line in chunk.splitlines():
-                line = line.strip()
-                if not line.startswith("data:"):
+        # ── Stream model tokens ───────────────────────────────────────────────
+        try:
+            async for chunk in engine_router.generate(
+                messages=messages, temperature=0.1, max_tokens=512, stream=True,
+            ):
+                if not isinstance(chunk, str):
                     continue
-                raw = line[5:].strip()
-                if raw == "[DONE]":
-                    continue
-                try:
-                    parsed = json.loads(raw)
-                    delta = parsed.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                    if delta:
-                        accumulated += delta
-                except (json.JSONDecodeError, IndexError, KeyError):
-                    pass
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Model generation failed: {e}")
+                for line in chunk.splitlines():
+                    line = line.strip()
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if raw == "[DONE]":
+                        continue
+                    try:
+                        parsed = json.loads(raw)
+                        delta = parsed.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        if delta:
+                            accumulated += delta
+                            yield sse({"type":"token","content":delta})
+                    except (json.JSONDecodeError, IndexError, KeyError):
+                        pass
+        except Exception as e:
+            yield sse({"type":"error","message":f"Model generation failed: {e}"})
+            return
 
-    # ── Parse JSON from response ───────────────────────────────────────────────
-    # Model may wrap JSON in ```json ... ``` — strip that
-    text = accumulated.strip()
-    if "```" in text:
-        import re
-        m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-        if m:
-            text = m.group(1)
+        yield sse({"type":"log","msg":"Parsing result..."})
 
-    # Find first { ... } block
-    import re as _re
-    m = _re.search(r"\{.*\}", text, _re.DOTALL)
-    if not m:
-        raise HTTPException(status_code=422, detail=f"Model did not return valid JSON. Response: {accumulated[:200]}")
+        # ── Parse JSON ────────────────────────────────────────────────────────
+        text = accumulated.strip()
+        if "```" in text:
+            m = _re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, _re.DOTALL)
+            if m:
+                text = m.group(1)
 
-    try:
-        result = json.loads(m.group())
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=422, detail=f"JSON parse error: {e}. Raw: {m.group()[:200]}")
+        m = _re.search(r"\{.*\}", text, _re.DOTALL)
+        if not m:
+            yield sse({"type":"error","message":f"Model did not return valid JSON. Got: {accumulated[:200]}"})
+            return
 
-    tools = result.get("tools", [])
-    awareness = result.get("awareness", "")
-    is_mcp: bool = bool(result.get("is_mcp", False))
-    mcp_start_command: str | None = result.get("mcp_start_command") or None
-    mcp_transport: str | None = result.get("mcp_transport") or None
+        try:
+            result = json.loads(m.group())
+        except json.JSONDecodeError as e:
+            yield sse({"type":"error","message":f"JSON parse error: {e}"})
+            return
 
-    if not isinstance(tools, list):
-        tools = []
-    tools = [str(t).strip() for t in tools if t]
+        tools = result.get("tools", [])
+        if not isinstance(tools, list):
+            tools = []
+        tools = [str(t).strip() for t in tools if t]
 
-    # Normalize transport value — only accept known values
-    if mcp_transport not in ("http", "stdio"):
-        mcp_transport = None
+        awareness = str(result.get("awareness", ""))
+        is_mcp: bool = bool(result.get("is_mcp", False))
+        mcp_start_command: str | None = result.get("mcp_start_command") or None
+        mcp_transport: str | None = result.get("mcp_transport") or None
+        if mcp_transport not in ("http", "stdio"):
+            mcp_transport = None
 
-    return {
-        "skill_id": skill_id,
-        "suggested_tools": tools,
-        "suggested_awareness": awareness,
-        "is_mcp": is_mcp,
-        "mcp_start_command": mcp_start_command,
-        "mcp_transport": mcp_transport,
-        "model_used": engine_router.get_status().id if engine_router.get_status() else "unknown",
-    }
+        model_id = engine_router.get_status().id if engine_router.get_status() else "unknown"
+        yield sse({"type":"done","result":{
+            "skill_id": skill_id,
+            "suggested_tools": tools,
+            "suggested_awareness": awareness,
+            "is_mcp": is_mcp,
+            "mcp_start_command": mcp_start_command,
+            "mcp_transport": mcp_transport,
+            "model_used": model_id,
+        }})
+
+    return StreamingResponse(
+        _stream(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/search")
