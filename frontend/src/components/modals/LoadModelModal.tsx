@@ -74,9 +74,27 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
   }, [model.id])
 
   const gpuUtil = gpuUtilPct / 100
-  const engine  = check?.engine ?? (model.quantization?.toLowerCase().includes('gguf') ? 'llama' : 'vllm')
+  const isGgufModel = model.quantization?.toUpperCase().startsWith('GGUF') ||
+    model.id?.toLowerCase().includes('gguf') ||
+    model.quantization?.toUpperCase().includes('Q4') ||
+    model.quantization?.toUpperCase().includes('Q5') ||
+    model.quantization?.toUpperCase().includes('Q8')
+  const engine  = check?.engine ?? (isGgufModel ? 'llama' : 'vllm')
   const params  = model.params_billion ?? 8
-  const weightsGb = model.vram_estimate_gb ?? check?.vram_estimate_gb ?? params * 0.6
+
+  // For GGUF models, recompute VRAM from params × quant factor (backend may have returned BF16 estimate)
+  const ggufFactor = (() => {
+    const q = (model.quantization ?? '').toUpperCase()
+    if (q.includes('Q4')) return 0.55
+    if (q.includes('Q5')) return 0.67
+    if (q.includes('Q8')) return 1.1
+    if (q.includes('F16')) return 2.0
+    return 0.55 // default Q4 estimate
+  })()
+  const backendEstimate = model.vram_estimate_gb ?? check?.vram_estimate_gb
+  const weightsGb = engine === 'llama'
+    ? (backendEstimate && backendEstimate < params * 1.2 ? backendEstimate : params * ggufFactor)
+    : (backendEstimate ?? params * 0.6)
 
   const kv        = engine === 'vllm' ? kvCacheGb(ctxLen, params) : 0
   const overhead  = engine === 'vllm' ? CUDA_OVERHEAD_GB : 0

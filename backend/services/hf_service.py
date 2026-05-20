@@ -236,17 +236,22 @@ def _detect_capabilities(tags: list[str], model_id: str) -> ModelCapabilities:
     multilingual = "multilingual" in tags_lower
     # Check local tokenizer_config.json first — ground truth for downloaded models
     local_tools = _read_local_tools_support(model_id)
+    # Models known to support tool calling natively even without explicit tags
+    _TOOL_FAMILIES = (
+        "qwen2.5", "qwen3", "qwen2",  # all Qwen instruct models support tools
+        "llama-3.1", "llama-3.2", "llama-3.3",  # Llama 3.1+ supports tools
+        "mistral", "mixtral",         # Mistral instruct models support tools
+        "hermes", "gorilla", "nexus", "functionary",
+        "xlam", "toolbench", "toolllm", "hammer", "meetkai",
+    )
     tools = local_tools or \
             any(t in tags_lower for t in (
                 "function-calling", "tool-use", "tools", "tool_use",
                 "tool-calls", "function_calling", "agent", "agentic",
                 "hermes", "nexusflow", "gorilla",
             )) or \
-            any(k in name_lower for k in (
-                "hermes", "gorilla", "nexus", "functionary",
-                "xlam", "toolbench", "toolllm", "hammer", "meetkai",
-                "tool", "function-calling",
-            ))
+            any(k in name_lower for k in _TOOL_FAMILIES) or \
+            "tool" in name_lower or "function-calling" in name_lower
 
     return ModelCapabilities(
         thinking=thinking,
