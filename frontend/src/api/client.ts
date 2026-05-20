@@ -659,6 +659,17 @@ export interface CommunitySkill {
   id: string; name: string; description: string; tools: string[]
   type: 'community'; repo_url: string; path: string; version: string; author: string
   awareness: string
+  is_mcp?: boolean
+  mcp_start_command?: string
+}
+
+export interface McpStatus {
+  skill_id: string
+  status: 'stopped' | 'starting' | 'running' | 'error'
+  port: number | null
+  pid: number | null
+  error: string | null
+  started_at: number | null
 }
 
 export type AnySkill = NativeSkill | CommunitySkill
@@ -717,3 +728,28 @@ export const getGithubToken = (): Promise<{ token_set: boolean; token_preview: s
 
 export const setGithubToken = (token: string): Promise<{ status: string; token_set: boolean }> =>
   apiRequest('/settings/github-token', { method: 'POST', body: JSON.stringify({ token }) })
+
+// ── MCP Server management ─────────────────────────────────────────────────────
+
+export const detectMcp = (id: string): Promise<{
+  is_mcp: boolean; transport: string | null; start_command: string | null
+  port_hint: number | null; detail: string
+}> => apiRequest(`/skills/${id}/detect-mcp`, { method: 'POST' })
+
+export const startMcp = (id: string): Promise<McpStatus> =>
+  apiRequest(`/skills/${id}/mcp/start`, { method: 'POST' })
+
+export const stopMcp = (id: string): Promise<McpStatus> =>
+  apiRequest(`/skills/${id}/mcp/stop`, { method: 'POST' })
+
+export const getMcpStatus = (id: string): Promise<McpStatus> =>
+  apiRequest(`/skills/${id}/mcp/status`)
+
+export const listMcpServers = (): Promise<McpStatus[]> =>
+  apiRequest('/skills/mcp/all')
+
+export const configureMcp = (
+  id: string,
+  config?: { start_command?: string; port?: number; env?: Record<string, string> },
+): Promise<CommunitySkill> =>
+  apiRequest(`/skills/${id}/mcp/configure`, { method: 'POST', body: JSON.stringify(config ?? {}) })

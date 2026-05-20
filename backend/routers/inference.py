@@ -359,6 +359,15 @@ async def tool_chat(req: ToolChatRequest):
         raise HTTPException(status_code=404, detail="No model loaded.")
 
     tools = get_tools(req.enabled_tools)
+    # Inject tools from running MCP servers
+    try:
+        from backend.services.mcp_client import get_mcp_tools_definitions
+        mcp_tools = await get_mcp_tools_definitions()
+        if mcp_tools:
+            tools = tools + mcp_tools
+            logger.info(f"[tool-chat] injected {len(mcp_tools)} MCP tool(s) from running servers")
+    except Exception as _mcp_err:
+        logger.debug(f"[tool-chat] MCP tools injection skipped: {_mcp_err}")
     MAX_ITERATIONS = 40  # generous — model decides when it's done; we warn at threshold
 
     async def _event_stream():
@@ -439,7 +448,7 @@ async def tool_chat(req: ToolChatRequest):
         _total_text_len = 0
         _cap_warning_injected = False
 
-        def _execute_tool_with_intercept(tool_name: str, tool_args: dict) -> str:
+        async def _execute_tool_with_intercept(tool_name: str, tool_args: dict) -> str:
             nonlocal MAX_TOOL_CALLS, _cap_warning_injected
             if tool_name == "set_tool_limit":
                 new_limit = int(tool_args.get("new_limit", 0))
@@ -450,9 +459,20 @@ async def tool_chat(req: ToolChatRequest):
                     return f"Error: new_limit ({new_limit}) exceeds the absolute maximum ({ABSOLUTE_CAP})."
                 old = MAX_TOOL_CALLS
                 MAX_TOOL_CALLS = new_limit
-                _cap_warning_injected = False  # reset so warning fires again near new cap
+                _cap_warning_injected = False
                 logger.info(f"[tool-chat] set_tool_limit {old} → {new_limit} (reason: {reason})")
                 return f"Tool limit updated: {old} → {new_limit}. Reason recorded: {reason}"
+            # Route MCP tools directly
+            try:
+                from backend.services.mcp_client import is_mcp_tool, call_mcp_tool
+                is_mcp, skill_id = is_mcp_tool(tool_name, req.project_id)
+                if is_mcp and skill_id:
+                    logger.info(f"[tool-chat] routing {tool_name!r} → MCP server {skill_id!r}")
+                    return await call_mcp_tool(skill_id, tool_name, tool_args)
+            except ImportError:
+                pass
+            except Exception as e:
+                logger.warning(f"[tool-chat] MCP routing check failed: {e}")
             return execute_tool(tool_name, tool_args, req.project_id)
 
         def _maybe_inject_cap_warning() -> None:
@@ -517,7 +537,7 @@ async def tool_chat(req: ToolChatRequest):
                                 tc_id = tc.get("id", f"native_{iteration}_{total_tool_calls}")
 
                                 yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
-                                tool_result = _execute_tool_with_intercept(tool_name, tool_args)
+                                tool_result = await _execute_tool_with_intercept(tool_name, tool_args)
                                 yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
 
                                 messages.append({"role": "assistant", "content": pass_text or "", "tool_calls": [tc]})
@@ -593,7 +613,7 @@ async def tool_chat(req: ToolChatRequest):
                                     stop_event.set()
 
                                     yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
-                                    tool_result = _execute_tool_with_intercept(tool_name, tool_args)
+                                    tool_result = await _execute_tool_with_intercept(tool_name, tool_args)
                                     yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
 
                                     tc_id = f"tc_{iteration}_{total_tool_calls}"

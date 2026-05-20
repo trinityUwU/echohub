@@ -258,10 +258,21 @@ function SkillsSection({ skills }: { skills: UseSkillsReturn }): React.ReactElem
     <div className="flex flex-col gap-0.5">
       {all.map(skill => {
         const active = skills.activeIds.has(skill.id)
+        const mcpStatus = skills.mcpStatuses[skill.id]
+        const isMcp = skill.type === 'community' && mcpStatus !== undefined
+        const isRunning = mcpStatus?.status === 'running'
         return (
           <div key={skill.id} className="flex items-center gap-2 py-1.5">
             <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-              <span className={`text-sm truncate leading-tight ${active ? 'text-text-primary' : 'text-text-secondary'}`}>{skill.name}</span>
+              <div className="flex items-center gap-1.5">
+                <span className={`text-sm truncate leading-tight ${active ? 'text-text-primary' : 'text-text-secondary'}`}>{skill.name}</span>
+                {isMcp && (
+                  <span className="flex items-center gap-1 text-2xs px-1.5 py-px rounded bg-elevated border border-border text-text-muted flex-shrink-0">
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isRunning ? 'bg-green' : 'bg-text-muted/40'}`} />
+                    MCP
+                  </span>
+                )}
+              </div>
               <span className="text-2xs text-text-muted truncate leading-tight">{skill.description || 'Community skill'}</span>
             </div>
             <Toggle on={active} onChange={() => skills.toggle(skill.id)} />

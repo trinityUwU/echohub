@@ -338,6 +338,24 @@ def init_db() -> None:
             """)
             conn.commit()
 
+        # mcp_servers — lifecycle tracking for MCP server processes
+        existing_tables4 = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "mcp_servers" not in existing_tables4:
+            conn.execute("""
+                CREATE TABLE mcp_servers (
+                    skill_id TEXT PRIMARY KEY,
+                    port INTEGER NOT NULL,
+                    pid INTEGER,
+                    status TEXT NOT NULL DEFAULT 'stopped',
+                    start_command TEXT NOT NULL,
+                    env_json TEXT,
+                    error TEXT,
+                    started_at REAL,
+                    last_seen REAL
+                )
+            """)
+            conn.commit()
+
     logger.info("DB initialized at {}", get_db_path())
 
 
@@ -1310,3 +1328,95 @@ def get_skills_cache_age(query: str) -> float | None:
     if not row:
         return None
     return time.time() - row["fetched_at"]
+
+
+# ---------------------------------------------------------------------------
+# MCP server registry functions
+# ---------------------------------------------------------------------------
+
+def get_mcp_server(skill_id: str) -> dict | None:
+    with _lock:
+        conn = _get_conn()
+        row = conn.execute(
+            "SELECT * FROM mcp_servers WHERE skill_id=?", (skill_id,)
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def upsert_mcp_server(
+    skill_id: str,
+    port: int,
+    start_command: str,
+    env_json: str | None = None,
+) -> dict:
+    with _lock:
+        conn = _get_conn()
+        conn.execute(
+            """INSERT INTO mcp_servers (skill_id, port, start_command, env_json, status)
+               VALUES (?, ?, ?, ?, 'stopped')
+               ON CONFLICT(skill_id) DO UPDATE SET
+                   port=excluded.port,
+                   start_command=excluded.start_command,
+                   env_json=excluded.env_json""",
+            (skill_id, port, start_command, env_json),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM mcp_servers WHERE skill_id=?", (skill_id,)
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def update_mcp_status(
+    skill_id: str,
+    status: str,
+    pid: int | None = None,
+    error: str | None = None,
+    last_seen: float | None = None,
+) -> None:
+    import time as _time
+    with _lock:
+        conn = _get_conn()
+        fields = ["status=?"]
+        values: list = [status]
+        if pid is not None:
+            fields.append("pid=?")
+            values.append(pid)
+        if error is not None:
+            fields.append("error=?")
+            values.append(error)
+        if last_seen is not None:
+            fields.append("last_seen=?")
+            values.append(last_seen)
+        if status == "running":
+            fields.append("started_at=?")
+            values.append(_time.time())
+        values.append(skill_id)
+        conn.execute(
+            f"UPDATE mcp_servers SET {', '.join(fields)} WHERE skill_id=?",
+            values,
+        )
+        conn.commit()
+
+
+def list_mcp_servers() -> list[dict]:
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute("SELECT * FROM mcp_servers ORDER BY skill_id").fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def delete_mcp_server(skill_id: str) -> None:
+    with _lock:
+        conn = _get_conn()
+        conn.execute("DELETE FROM mcp_servers WHERE skill_id=?", (skill_id,))
+        conn.commit()
+
+
+def get_running_mcp_servers() -> list[dict]:
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT * FROM mcp_servers WHERE status='running' ORDER BY skill_id"
+        ).fetchall()
+    return [dict(r) for r in rows]

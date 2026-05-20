@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { listSkills } from '@/api/client'
-import type { CommunitySkill } from '@/api/client'
+import { listSkills, listMcpServers } from '@/api/client'
+import type { CommunitySkill, McpStatus } from '@/api/client'
 
 export interface Skill {
   id: string
@@ -74,18 +74,31 @@ function communityToSkill(c: CommunitySkill): Skill {
 export function useSkills() {
   const [activeIds, setActiveIds] = useState<Set<string>>(loadActiveIds)
   const [communitySkills, setCommunitySkills] = useState<Skill[]>([])
+  const [mcpStatuses, setMcpStatuses] = useState<Record<string, McpStatus>>({})
+
+  const fetchMcpStatuses = useCallback((): void => {
+    listMcpServers()
+      .then(list => {
+        const map: Record<string, McpStatus> = {}
+        list.forEach(s => { map[s.skill_id] = s })
+        setMcpStatuses(map)
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     listSkills()
       .then(data => setCommunitySkills(data.community.map(communityToSkill)))
       .catch(() => {})
-  }, [])
+    fetchMcpStatuses()
+  }, [fetchMcpStatuses])
 
   const refresh = useCallback((): void => {
     listSkills()
       .then(data => setCommunitySkills(data.community.map(communityToSkill)))
       .catch(() => {})
-  }, [])
+    fetchMcpStatuses()
+  }, [fetchMcpStatuses])
 
   const allSkills: Skill[] = [...NATIVE_SKILLS, ...communitySkills]
 
@@ -104,7 +117,7 @@ export function useSkills() {
   const awarenessBlock = activeSkills.map(s => s.awareness).filter(Boolean).join('\n')
   const hasToolSkills = enabledTools.length > 0
 
-  return { activeIds, allSkills, communitySkills, activeSkills, enabledTools, awarenessBlock, hasToolSkills, toggle, refresh }
+  return { activeIds, allSkills, communitySkills, activeSkills, enabledTools, awarenessBlock, hasToolSkills, toggle, refresh, mcpStatuses }
 }
 
 // Legacy type alias kept for compat
