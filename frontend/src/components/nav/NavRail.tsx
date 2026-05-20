@@ -1,4 +1,4 @@
-type Page = 'chat' | 'library' | 'discover' | 'downloads' | 'finetune' | 'settings'
+type Page = 'chat' | 'library' | 'discover' | 'downloads' | 'finetune' | 'skills' | 'settings'
 
 interface NavRailProps {
   active: Page
@@ -40,6 +40,11 @@ export function NavRail({ active, onNavigate, downloadsBadge }: NavRailProps): R
         <circle cx="8" cy="6" r="2" fill="currentColor" stroke="none"/>
         <circle cx="16" cy="12" r="2" fill="currentColor" stroke="none"/>
         <circle cx="10" cy="18" r="2" fill="currentColor" stroke="none"/>
+      </NavItem>
+      <NavItem id="skills" title="Skills" active={active === 'skills'} onClick={() => onNavigate('skills')}>
+        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+        <path d="M2 17l10 5 10-5"/>
+        <path d="M2 12l10 5 10-5"/>
       </NavItem>
 
       <div className="flex-1" />

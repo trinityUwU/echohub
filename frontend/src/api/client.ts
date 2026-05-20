@@ -647,3 +647,47 @@ export async function evalRunStreamUrl(): Promise<string> {
 
 export const deleteFinetunedModel = (jobId: string): Promise<{ status: string }> =>
   apiRequest(`/models/finetuned/${jobId}`, { method: 'DELETE' })
+
+// ── Skills ────────────────────────────────────────────────────────────────────
+
+export interface NativeSkill {
+  id: string; name: string; description: string; tools: string[]
+  type: 'native'; storage: string; awareness: string; version: string; author: string
+}
+
+export interface CommunitySkill {
+  id: string; name: string; description: string; tools: string[]
+  type: 'community'; repo_url: string; path: string; version: string; author: string
+  awareness: string
+}
+
+export type AnySkill = NativeSkill | CommunitySkill
+
+export const listSkills = (): Promise<{ native: NativeSkill[]; community: CommunitySkill[] }> =>
+  apiRequest('/skills')
+
+export const deleteSkill = (id: string): Promise<{ status: string; id: string }> =>
+  apiRequest(`/skills/${id}`, { method: 'DELETE' })
+
+export async function* installSkillStream(repoUrl: string, skillId?: string): AsyncGenerator<string> {
+  const url = await apiUrl('/skills/install')
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo_url: repoUrl, skill_id: skillId }),
+  })
+  if (!res.ok || !res.body) throw new Error(`Install failed: ${res.status}`)
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const lines = buf.split('\n\n')
+    buf = lines.pop() ?? ''
+    for (const block of lines) {
+      if (block.startsWith('data: ')) yield block.slice(6)
+    }
+  }
+}

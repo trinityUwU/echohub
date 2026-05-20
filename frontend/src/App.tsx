@@ -11,6 +11,7 @@ import { DiscoverPage } from '@/components/discover/DiscoverPage'
 import { DownloadsPage } from '@/components/downloads/DownloadsPage'
 import { SettingsPage } from '@/components/settings/SettingsPage'
 import { FineTunePage } from '@/components/finetune/FineTunePage'
+import { SkillsPage } from '@/components/skills/SkillsPage'
 import { LoadModelModal } from '@/components/modals/LoadModelModal'
 import { ModelPickerModal } from '@/components/modals/ModelPickerModal'
 import { useDialog } from '@/components/shared/Dialog'
@@ -19,7 +20,7 @@ import { ChangelogNotification } from '@/components/shared/ChangelogNotification
 import { OnboardingWizard } from '@/components/onboarding/OnboardingWizard'
 import { getOnboardingStatus } from '@/api/client'
 
-type Page = 'chat' | 'library' | 'discover' | 'downloads' | 'finetune' | 'settings'
+type Page = 'chat' | 'library' | 'discover' | 'downloads' | 'finetune' | 'skills' | 'settings'
 
 export default function App(): React.ReactElement {
   const { confirm, element: dialogEl } = useDialog()
@@ -222,6 +223,9 @@ export default function App(): React.ReactElement {
             downloadJobs={Object.fromEntries(downloadJobs.map(j => [j.model_id, j]))}
             onDownloaded={refresh}
           />
+        </div>
+        <div className={`flex flex-1 overflow-hidden ${page === 'skills' ? 'animate-fade-in' : 'hidden'}`}>
+          <SkillsPage />
         </div>
         <div className={`flex flex-1 overflow-hidden ${page === 'settings' ? 'animate-fade-in' : 'hidden'}`}>
           <SettingsPage initialTab={settingsInitialTab} />
