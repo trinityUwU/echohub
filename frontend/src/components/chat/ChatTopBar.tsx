@@ -1,3 +1,4 @@
+import React from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import type { ModelInfo } from '@/types'
 import type { ChatView, ProjectMode } from '@/hooks/useChatMode'
@@ -233,21 +234,100 @@ function NormalBar({
 }
 
 function LoadingBar({ pct, modelName, onEject }: { pct: number; modelName: string; onEject: () => void }): React.ReactElement {
+  const [showLogs, setShowLogs] = React.useState(false)
+  const [logs, setLogs] = React.useState<string>('')
+  const logsEndRef = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    if (!showLogs) return
+    let active = true
+    const poll = async (): Promise<void> => {
+      try {
+        const res = await fetch('/api/system/engine-log')
+        if (res.ok && active) setLogs(await res.text())
+      } catch { /* ignore */ }
+    }
+    poll()
+    const id = setInterval(poll, 1500)
+    return () => { active = false; clearInterval(id) }
+  }, [showLogs])
+
+  React.useEffect(() => {
+    if (showLogs) logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [logs, showLogs])
+
   return (
-    <div className="h-[50px] bg-surface border-b border-border flex items-center px-4 gap-3 flex-shrink-0">
-      <div className="flex-1 flex flex-col gap-1">
-        <div className="flex justify-between text-xs">
-          <span className="text-accent">Loading {modelName}…</span>
-          <span className="font-mono text-text-muted">~{pct}%</span>
+    <div className="flex flex-col flex-shrink-0">
+      <div className="h-[50px] bg-surface border-b border-border flex items-center px-4 gap-3">
+        <div className="flex-1 flex flex-col gap-1">
+          <div className="flex justify-between text-xs">
+            <span className="text-accent">Loading {modelName}…</span>
+            <span className="font-mono text-text-muted">~{pct}%</span>
+          </div>
+          <div className="h-[3px] bg-overlay rounded-sm overflow-hidden">
+            <div className="h-full bg-accent rounded-sm transition-all duration-300" style={{ width: `${pct}%` }} />
+          </div>
         </div>
-        <div className="h-[3px] bg-overlay rounded-sm overflow-hidden">
-          <div className="h-full bg-accent rounded-sm transition-all duration-300" style={{ width: `${pct}%` }} />
-        </div>
+
+        {/* Eye button — toggle live logs */}
+        <button
+          onClick={() => setShowLogs(v => !v)}
+          title={showLogs ? 'Hide logs' : 'Show live logs'}
+          className={`w-7 h-7 flex items-center justify-center rounded-sm border transition-colors cursor-pointer ${
+            showLogs
+              ? 'border-accent/40 bg-accent/15 text-accent'
+              : 'border-border hover:bg-overlay text-text-muted hover:text-text-secondary'
+          }`}
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {showLogs ? (
+              <>
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                <line x1="1" y1="1" x2="23" y2="23"/>
+              </>
+            ) : (
+              <>
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </>
+            )}
+          </svg>
+        </button>
+
+        <TopBarBtn onClick={onEject}>
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          Eject
+        </TopBarBtn>
       </div>
-      <TopBarBtn onClick={onEject}>
-        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-        Eject
-      </TopBarBtn>
+
+      {/* Live logs panel */}
+      <AnimatePresence initial={false}>
+        {showLogs && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 220, opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            className="overflow-hidden bg-[#0d0d0f] border-b border-border"
+          >
+            <div className="h-full overflow-y-auto p-3 font-mono text-[11px] leading-relaxed text-text-muted">
+              {logs
+                ? logs.split('\n').map((line, i) => (
+                    <div key={i} className={
+                      line.includes('error') || line.includes('Error') ? 'text-red' :
+                      line.includes('warn') || line.includes('Warn') ? 'text-yellow' :
+                      line.includes('loaded') || line.includes('success') || line.includes('OK') ? 'text-green' :
+                      ''
+                    }>{line || ' '}</div>
+                  ))
+                : <span className="animate-pulse text-text-muted/50">Waiting for log output…</span>
+              }
+              <div ref={logsEndRef} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
