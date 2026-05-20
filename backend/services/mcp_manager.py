@@ -86,14 +86,37 @@ def detect_mcp_server(skill_path: Path) -> dict[str, Any] | None:
                 **pkg.get("dependencies", {}),
                 **pkg.get("devDependencies", {}),
             }
-            is_mcp = "@modelcontextprotocol/sdk" in deps or "mcp" in deps
-            if is_mcp:
+            # Direct MCP SDK dependency
+            is_mcp_dep = "@modelcontextprotocol/sdk" in deps or "mcp" in deps
+
+            # Source-level MCP detection: scan TS/JS files for MCP patterns
+            # Covers repos that bundle MCP or use it indirectly (e.g. via ai-sdk)
+            is_mcp_source = False
+            _mcp_source_patterns = [
+                r"StreamableHTTPServerTransport",
+                r"McpServer|createMcpServer",
+                r"from ['\"]@modelcontextprotocol",
+                r"require\(['\"]@modelcontextprotocol",
+                r"/api/mcp",
+            ]
+            if not is_mcp_dep:
+                for ts_file in list(skill_path.rglob("*.ts"))[:40] + list(skill_path.rglob("*.js"))[:20]:
+                    if "node_modules" in str(ts_file) or ".git" in str(ts_file):
+                        continue
+                    try:
+                        txt = ts_file.read_text(errors="ignore")
+                        if any(re.search(p, txt) for p in _mcp_source_patterns):
+                            is_mcp_source = True
+                            break
+                    except Exception:
+                        pass
+
+            if is_mcp_dep or is_mcp_source:
                 scripts = pkg.get("scripts", {})
-                raw_cmd = scripts.get("start") or scripts.get("dev") or "node dist/index.js"
-                # Prefer a package manager runner
+                raw_cmd = scripts.get("start") or scripts.get("dev") or "bun run start"
                 runner = "bun run start" if scripts.get("start") else "bun run dev"
                 start_command = runner
-                port_hint = _extract_port(raw_cmd)
+                port_hint = _extract_port(raw_cmd) or 3000
                 transport = "http"
                 return {
                     "start_command": start_command,

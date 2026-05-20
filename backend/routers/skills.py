@@ -739,20 +739,33 @@ Respond ONLY with valid JSON in this exact format, no explanation:
     messages = [{"role": "user", "content": prompt}]
 
     # ── Call model, collect response ───────────────────────────────────────────
+    # engine_router.generate() yields raw SSE strings: "data: {...}\n\n"
+    # Parse delta.content from each chunk exactly like the chat endpoint does.
     accumulated = ""
     try:
         async for chunk in engine_router.generate(
             messages=messages,
             temperature=0.1,
-            max_tokens=256,
+            max_tokens=512,
             stream=True,
         ):
-            if isinstance(chunk, str):
-                accumulated += chunk
-            elif isinstance(chunk, dict):
-                delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                if delta:
-                    accumulated += delta
+            if not isinstance(chunk, str):
+                continue
+            # Each chunk may contain one or more SSE lines
+            for line in chunk.splitlines():
+                line = line.strip()
+                if not line.startswith("data:"):
+                    continue
+                raw = line[5:].strip()
+                if raw == "[DONE]":
+                    continue
+                try:
+                    parsed = json.loads(raw)
+                    delta = parsed.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                    if delta:
+                        accumulated += delta
+                except (json.JSONDecodeError, IndexError, KeyError):
+                    pass
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Model generation failed: {e}")
 
