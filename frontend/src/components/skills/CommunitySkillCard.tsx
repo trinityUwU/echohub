@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { patchSkill, analyzeSkillStream } from '@/api/client'
+import { patchSkill, configureMcp, analyzeSkillStream } from '@/api/client'
 import type { CommunitySkill, AnalyzeResult } from '@/api/client'
 import { DetailRow } from '@/components/skills/InstalledTab'
 import { McpSection } from '@/components/skills/McpSection'
@@ -60,6 +60,17 @@ export function CommunitySkillCard({ skill, onDelete, onRefresh }: { skill: Comm
         setTools(result.suggested_tools.join(', '))
         setAwareness(result.suggested_awareness)
         setEditing(true)
+        // Auto-persist MCP config if detected
+        if (result.is_mcp && result.mcp_start_command) {
+          configureMcp(skill.id, {
+            start_command: result.mcp_start_command,
+            port: result.mcp_transport === 'http' ? 3000 : undefined,
+          }).catch(() => {})
+          patchSkill(skill.id, {
+            tools: result.suggested_tools,
+            awareness: result.suggested_awareness,
+          }).then(() => onRefresh()).catch(() => {})
+        }
       }
     } catch (e) {
       setAnalyzeError(e instanceof Error ? e.message : 'Analysis failed')
