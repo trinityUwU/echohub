@@ -223,86 +223,125 @@ class InstallRequest(BaseModel):
 @router.post("/install")
 async def install_skill(req: InstallRequest) -> StreamingResponse:
     """
-    Clone a GitHub repo into the skills directory and run auto-detected install commands.
-    Streams install log lines as text/event-stream.
+    Clone a GitHub repo and run install commands, streaming output line by line.
+    Uses asyncio subprocesses so every line is flushed immediately.
     """
-    skill_id = req.skill_id or str(uuid.uuid4())[:8]
+    import asyncio
 
-    # Derive a clean skill_id from the repo URL if not provided
+    skill_id = req.skill_id or str(uuid.uuid4())[:8]
     if not req.skill_id:
-        repo_name = req.repo_url.rstrip("/").split("/")[-1]
-        repo_name = repo_name.replace(".git", "")
+        repo_name = req.repo_url.rstrip("/").split("/")[-1].replace(".git", "")
         skill_id = repo_name.lower().replace(" ", "-")
 
     target_dir = SKILLS_DIR / skill_id
 
+    async def _run(cmd: list[str] | str, cwd: str | None = None) -> int:
+        """Run a command, streaming stdout+stderr line by line. Returns exit code."""
+        if isinstance(cmd, str):
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=cwd,
+            )
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                cwd=cwd,
+            )
+        return proc
+
     async def _stream():
-        yield f"data: Starting install for {req.repo_url}\n\n"
+        import asyncio as _asyncio
+
+        def sse(msg: str) -> str:
+            # Sanitize: newlines inside a message break SSE framing
+            return f"data: {msg.rstrip()}\n\n"
+
+        yield sse(f"Starting install: {req.repo_url}")
 
         # Conflict check
         if target_dir.exists():
-            yield f"data: Directory {skill_id} already exists — removing and re-cloning\n\n"
-            shutil.rmtree(target_dir)
+            yield sse(f"Directory already exists — removing and re-cloning")
+            await _asyncio.get_event_loop().run_in_executor(None, shutil.rmtree, str(target_dir))
 
-        # Clone
-        yield f"data: Cloning {req.repo_url}...\n\n"
+        SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+
+        # ── Clone ─────────────────────────────────────────────────────────────
+        yield sse(f"Cloning {req.repo_url} ...")
         try:
-            result = subprocess.run(
-                ["git", "clone", "--depth=1", req.repo_url, str(target_dir)],
-                capture_output=True, text=True, timeout=120,
+            proc = await _asyncio.create_subprocess_exec(
+                "git", "clone", "--depth=1", "--progress", req.repo_url, str(target_dir),
+                stdout=_asyncio.subprocess.PIPE,
+                stderr=_asyncio.subprocess.STDOUT,
             )
-            if result.returncode != 0:
-                yield f"data: ERROR: git clone failed\n{result.stderr}\n\n"
-                yield "data: INSTALL_FAILED\n\n"
+            async for raw in proc.stdout:
+                line = raw.decode(errors="replace").rstrip()
+                if line:
+                    yield sse(line)
+            rc = await _asyncio.wait_for(proc.wait(), timeout=120)
+            if rc != 0:
+                yield sse("ERROR: git clone failed")
+                yield sse("INSTALL_FAILED")
                 return
-            yield "data: Clone complete\n\n"
-        except subprocess.TimeoutExpired:
-            yield "data: ERROR: git clone timed out (120s)\n\n"
-            yield "data: INSTALL_FAILED\n\n"
+        except _asyncio.TimeoutError:
+            yield sse("ERROR: git clone timed out (120s)")
+            yield sse("INSTALL_FAILED")
             return
         except Exception as e:
-            yield f"data: ERROR: {e}\n\n"
-            yield "data: INSTALL_FAILED\n\n"
+            yield sse(f"ERROR: {e}")
+            yield sse("INSTALL_FAILED")
             return
+
+        yield sse("Clone complete ✓")
 
         # Read manifest
         manifest = _read_manifest(target_dir)
         display_name = manifest.get("name") or skill_id
         description = manifest.get("description") or "Community skill"
         version = manifest.get("version") or "unknown"
-        author = manifest.get("author") or req.repo_url.split("/")[-2] if "/" in req.repo_url else "unknown"
+        url_parts = req.repo_url.replace(".git", "").rstrip("/").split("/")
+        author = manifest.get("author") or (url_parts[-2] if len(url_parts) >= 2 else "unknown")
         tools = manifest.get("tools") or []
         awareness = manifest.get("awareness") or ""
 
-        # Detect and run install commands
+        # ── Install commands ──────────────────────────────────────────────────
         cmds = _detect_install_commands(target_dir)
         if cmds:
-            yield f"data: Detected {len(cmds)} install command(s)\n\n"
+            yield sse(f"Running {len(cmds)} install command(s)...")
             for cmd in cmds:
-                yield f"data: Running: {cmd}\n\n"
+                yield sse(f"$ {cmd}")
                 try:
-                    proc = subprocess.run(
-                        cmd, shell=True, capture_output=True, text=True,
-                        cwd=str(target_dir), timeout=300,
+                    proc = await _asyncio.create_subprocess_shell(
+                        cmd,
+                        stdout=_asyncio.subprocess.PIPE,
+                        stderr=_asyncio.subprocess.STDOUT,
+                        cwd=str(target_dir),
                     )
-                    if proc.stdout.strip():
-                        for line in proc.stdout.strip().splitlines():
-                            yield f"data: {line}\n\n"
-                    if proc.returncode != 0:
-                        yield f"data: ERROR: command exited with code {proc.returncode}\n\n"
-                        if proc.stderr.strip():
-                            for line in proc.stderr.strip().splitlines()[-10:]:
-                                yield f"data: {line}\n\n"
-                        yield "data: INSTALL_FAILED\n\n"
+                    async for raw in proc.stdout:
+                        line = raw.decode(errors="replace").rstrip()
+                        if line:
+                            yield sse(line)
+                    rc = await _asyncio.wait_for(proc.wait(), timeout=300)
+                    if rc != 0:
+                        yield sse(f"ERROR: command exited with code {rc}")
+                        yield sse("INSTALL_FAILED")
                         return
-                except subprocess.TimeoutExpired:
-                    yield "data: ERROR: command timed out (300s)\n\n"
-                    yield "data: INSTALL_FAILED\n\n"
+                    yield sse(f"✓ done")
+                except _asyncio.TimeoutError:
+                    yield sse("ERROR: command timed out (300s)")
+                    yield sse("INSTALL_FAILED")
+                    return
+                except Exception as e:
+                    yield sse(f"ERROR: {e}")
+                    yield sse("INSTALL_FAILED")
                     return
         else:
-            yield "data: No install commands detected — skill registered as-is\n\n"
+            yield sse("No install commands detected — registering as-is")
 
-        # Register
+        # ── Register ──────────────────────────────────────────────────────────
         entry: dict[str, Any] = {
             "id": skill_id,
             "name": display_name,
@@ -320,10 +359,14 @@ async def install_skill(req: InstallRequest) -> StreamingResponse:
         registry.append(entry)
         _save_registry(registry)
 
-        yield f"data: Skill '{display_name}' installed successfully\n\n"
-        yield f"data: INSTALL_DONE:{skill_id}\n\n"
+        yield sse(f"Skill '{display_name}' installed successfully ✓")
+        yield sse(f"INSTALL_DONE:{skill_id}")
 
-    return StreamingResponse(_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.delete("/{skill_id}")
