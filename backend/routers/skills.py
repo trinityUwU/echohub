@@ -343,6 +343,71 @@ def delete_skill(skill_id: str) -> dict[str, str]:
     return {"status": "deleted", "id": skill_id}
 
 
+@router.get("/search")
+def search_skills(q: str = "") -> dict[str, Any]:
+    """
+    Search GitHub for repos tagged with topic:echohub-skill.
+    Optionally filtered by query string. Uses GITHUB_TOKEN if set (5000 req/h vs 60).
+    """
+    import httpx
+
+    topic_query = "topic:echohub-skill"
+    if q.strip():
+        topic_query = f"{q.strip()} {topic_query}"
+
+    headers: dict[str, str] = {"Accept": "application/vnd.github+json"}
+    token = os.getenv("GITHUB_TOKEN", "")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+        rate_limit = 5000
+    else:
+        rate_limit = 60
+
+    try:
+        r = httpx.get(
+            "https://api.github.com/search/repositories",
+            params={"q": topic_query, "sort": "stars", "order": "desc", "per_page": 30},
+            headers=headers,
+            timeout=10,
+        )
+        if r.status_code == 403:
+            return {"results": [], "total": 0, "rate_limited": True, "authenticated": bool(token)}
+        r.raise_for_status()
+        data = r.json()
+        results = [
+            {
+                "id": item["full_name"].replace("/", "-").lower(),
+                "name": item["name"],
+                "full_name": item["full_name"],
+                "description": item.get("description") or "",
+                "stars": item.get("stargazers_count", 0),
+                "author": item["owner"]["login"],
+                "repo_url": item["clone_url"],
+                "html_url": item["html_url"],
+                "topics": item.get("topics", []),
+                "updated_at": item.get("updated_at", ""),
+                "language": item.get("language"),
+            }
+            for item in data.get("items", [])
+        ]
+        # Mark already installed
+        installed_urls = {r["repo_url"] for r in _load_registry()}
+        for res in results:
+            res["installed"] = res["repo_url"] in installed_urls
+        return {
+            "results": results,
+            "total": data.get("total_count", 0),
+            "authenticated": bool(token),
+            "rate_limit": rate_limit,
+            "rate_limited": False,
+        }
+    except httpx.TimeoutException:
+        return {"results": [], "total": 0, "error": "GitHub API timed out", "authenticated": bool(token)}
+    except Exception as e:
+        logger.error(f"[skills] search error: {e}")
+        return {"results": [], "total": 0, "error": str(e), "authenticated": bool(token)}
+
+
 @router.get("/{skill_id}")
 def get_skill(skill_id: str) -> dict[str, Any]:
     # Check native first

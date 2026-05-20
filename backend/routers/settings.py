@@ -295,6 +295,27 @@ def reset_onboarding() -> dict:
     return {"status": "reset"}
 
 
+@router.post("/github-token")
+def set_github_token(req: dict) -> dict:
+    token: str = req.get("token", "").strip()
+    if token:
+        os.environ["GITHUB_TOKEN"] = token
+    else:
+        os.environ.pop("GITHUB_TOKEN", None)
+    try:
+        _update_env_file("GITHUB_TOKEN", token)
+    except Exception as e:
+        logger.warning(f"Could not update .env file: {e}")
+    return {"status": "ok", "token_set": bool(token)}
+
+
+@router.get("/github-token")
+def get_github_token() -> dict:
+    token = os.getenv("GITHUB_TOKEN", "")
+    preview = f"ghp_...{token[-4:]}" if len(token) > 8 else ""
+    return {"token_set": bool(token), "token_preview": preview}
+
+
 @router.post("/hf-token/validate")
 def validate_hf_token() -> dict:
     """Test the current HF token against the HF API."""

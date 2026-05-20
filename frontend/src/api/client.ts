@@ -691,3 +691,20 @@ export async function* installSkillStream(repoUrl: string, skillId?: string): As
     }
   }
 }
+
+export interface GithubSkillResult {
+  id: string; name: string; full_name: string; description: string
+  stars: number; author: string; repo_url: string; html_url: string
+  topics: string[]; updated_at: string; language: string | null; installed: boolean
+}
+
+export const searchSkills = (q: string): Promise<{
+  results: GithubSkillResult[]; total: number; authenticated: boolean
+  rate_limit?: number; rate_limited?: boolean; error?: string
+}> => apiRequest(`/skills/search?q=${encodeURIComponent(q)}`)
+
+export const getGithubToken = (): Promise<{ token_set: boolean; token_preview: string }> =>
+  apiRequest('/settings/github-token')
+
+export const setGithubToken = (token: string): Promise<{ status: string; token_set: boolean }> =>
+  apiRequest('/settings/github-token', { method: 'POST', body: JSON.stringify({ token }) })

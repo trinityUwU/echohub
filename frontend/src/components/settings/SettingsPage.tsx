@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getInferenceSettings, setInferenceSetting, checkForUpdates, runUpdate, saveChangelog } from '@/api/client'
+import { getInferenceSettings, setInferenceSetting, checkForUpdates, runUpdate, saveChangelog, getGithubToken, setGithubToken } from '@/api/client'
 import { apiRequest } from '@/api/base'
 import { Toggle } from '@/components/shared/Toggle'
 import { EnginesTab } from './EnginesTab'
@@ -70,6 +70,9 @@ function SetupSection(): React.ReactElement {
       <SettingsGroup title="Hugging Face" desc="Required for gated models and faster downloads.">
         <HfTokenRow />
       </SettingsGroup>
+      <SettingsGroup title="GitHub" desc="Optional — increases Skills search rate limit from 60 to 5000 requests/hour.">
+        <GithubTokenRow />
+      </SettingsGroup>
     </>
   )
 }
@@ -126,6 +129,47 @@ function HfTokenRow(): React.ReactElement {
             {message}
           </span>
         )}
+      </div>
+    </SettingsRow>
+  )
+}
+
+function GithubTokenRow(): React.ReactElement {
+  const [token, setToken] = useState("")
+  const [status, setStatus] = useState<"idle"|"saving"|"ok"|"error">("idle")
+  const [preview, setPreview] = useState("")
+
+  useEffect(() => {
+    getGithubToken().then(r => { if (r.token_set) setPreview(r.token_preview) }).catch(() => {})
+  }, [])
+
+  const save = async (): Promise<void> => {
+    setStatus("saving")
+    try {
+      await setGithubToken(token)
+      setStatus("ok")
+      setPreview(token ? `ghp_...${token.slice(-4)}` : "")
+      setToken("")
+    } catch {
+      setStatus("error")
+    }
+  }
+
+  return (
+    <SettingsRow label="GitHub Token" desc={preview ? `Active: ${preview}` : "Optional — 5000 req/h vs 60 unauthenticated"}>
+      <div className="flex flex-col items-end gap-1.5">
+        <div className="flex gap-2">
+          <input type="password" value={token} onChange={e => setToken(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && token && save()}
+            placeholder="ghp_…"
+            className="w-[180px] bg-elevated border border-border focus:border-accent rounded-sm px-2.5 py-1.5 text-sm font-mono text-text-primary outline-none transition-colors" />
+          <button onClick={save} disabled={!token || status === "saving"}
+            className="px-3 py-1.5 text-xs rounded-sm bg-accent hover:bg-accent-hover disabled:opacity-40 text-white cursor-pointer transition-colors">
+            {status === "saving" ? "…" : "Save"}
+          </button>
+        </div>
+        {status === "ok" && <span className="text-xs text-green">Token saved</span>}
+        {status === "error" && <span className="text-xs text-red">Failed to save</span>}
       </div>
     </SettingsRow>
   )
