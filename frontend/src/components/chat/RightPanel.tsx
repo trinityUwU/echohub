@@ -22,7 +22,7 @@ export function RightPanel({ params, onChange, profiles, loadedModel, skills }: 
   const set = <K extends keyof ChatParams>(k: K, v: ChatParams[K]): void => onChange({ ...params, [k]: v })
 
   return (
-    <aside className="w-[260px] bg-surface border-l border-border flex flex-col flex-shrink-0 overflow-y-auto">
+    <aside className="w-[260px] h-full bg-surface border-l border-border flex flex-col flex-shrink-0 overflow-y-auto">
       <Accordion title="Profile">
         <ProfileSection params={params} profiles={profiles} />
       </Accordion>

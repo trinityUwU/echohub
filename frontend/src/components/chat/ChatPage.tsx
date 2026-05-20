@@ -455,7 +455,7 @@ function PanelWrapper({ side, collapsed, onToggle, children }: PanelWrapperProps
   const border = isLeft ? 'border-r' : 'border-l'
 
   return (
-    <div className={`relative flex flex-shrink-0 ${border} border-border`}>
+    <div className={`relative flex flex-shrink-0 h-full ${border} border-border`}>
       <AnimatePresence initial={false}>
         {!collapsed && (
           <motion.div
@@ -464,7 +464,7 @@ function PanelWrapper({ side, collapsed, onToggle, children }: PanelWrapperProps
             animate={{ width: 'auto', opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
             transition={{ duration: 0.2, ease: 'easeInOut' }}
-            className="overflow-hidden"
+            className="overflow-x-hidden h-full"
           >
             {children}
           </motion.div>
