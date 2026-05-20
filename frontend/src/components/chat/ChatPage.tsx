@@ -49,7 +49,11 @@ export function ChatPage({
 }: ChatPageProps): React.ReactElement {
   const { view, mode, activeProject, setView, setMode, openProject, closeProject } = useChatMode()
   const projectsHook = useProjects()
-  const profilesHook = useProfiles()
+  const chatProfilesHook = useProfiles()
+  const projectProfilesHook = useProfiles(
+    activeProject ? { mode: activeProject.mode, projectId: activeProject.id } : undefined
+  )
+  const profilesHook = activeProject ? projectProfilesHook : chatProfilesHook
   // Local params state — syncs from profile on profile switch, edited freely by sliders
   const [params, setParams] = useState(profilesHook.activeProfile.params)
   const prevProfileId = useRef(profilesHook.activeId)
@@ -233,7 +237,7 @@ export function ChatPage({
           onLoadModel={onLoadModel}
         />
       </div>
-      {view === 'chat' && <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />}
+      {(view === 'chat' || activeProject) && <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />}
     </div>
   )
 }
