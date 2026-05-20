@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import type { ToolCall, WorkspaceFile } from '@/types'
+import { apiRequest } from '@/api/base'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -123,13 +124,31 @@ export interface DevPanelProps {
 }
 
 export function DevPanel({
+  projectId,
   loadedModelHasTools,
   toolCalls,
   workspaceFiles,
   onRefresh,
 }: DevPanelProps): React.ReactElement {
   const [toolsOpen, setToolsOpen] = useState(true)
+  const [viewer, setViewer] = useState<{ path: string; content: string } | null>(null)
   const fileEntries = groupFiles(workspaceFiles)
+
+  const openFile = useCallback(async (path: string): Promise<void> => {
+    try {
+      const res = await apiRequest<{ result: string }>(`/projects/${projectId}/workspace-files/${encodeURIComponent(path)}`)
+      setViewer({ path, content: res.result })
+    } catch {
+      setViewer({ path, content: '(failed to load file)' })
+    }
+  }, [projectId])
+
+  const deleteFile = useCallback(async (path: string): Promise<void> => {
+    try {
+      await apiRequest(`/projects/${projectId}/workspace-files/${encodeURIComponent(path)}`, { method: 'DELETE' })
+      onRefresh()
+    } catch { /* ignore */ }
+  }, [projectId, onRefresh])
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -237,14 +256,36 @@ export function DevPanel({
               {fileEntries.map(entry => (
                 <div
                   key={entry.name}
-                  className="flex items-center gap-2 px-3 py-1.5 hover:bg-overlay/40 transition-colors cursor-default"
+                  className="group flex items-center gap-2 px-3 py-1.5 hover:bg-overlay/60 transition-colors cursor-default"
                 >
                   {entry.isDir ? <IconFolder /> : <IconFile />}
                   <span className="text-xs text-text-secondary truncate flex-1 min-w-0">{entry.name}</span>
                   {!entry.isDir && entry.file && (
-                    <span className="text-2xs text-text-muted flex-shrink-0 tabular-nums">
-                      {formatBytes(entry.file.size)}
-                    </span>
+                    <>
+                      <span className="text-2xs text-text-muted flex-shrink-0 tabular-nums group-hover:hidden">
+                        {formatBytes(entry.file.size)}
+                      </span>
+                      <div className="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
+                        <button
+                          title="View file"
+                          onClick={() => void openFile(entry.file!.path)}
+                          className="w-5 h-5 flex items-center justify-center rounded hover:bg-overlay text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+                        >
+                          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+                          </svg>
+                        </button>
+                        <button
+                          title="Delete file"
+                          onClick={() => void deleteFile(entry.file!.path)}
+                          className="w-5 h-5 flex items-center justify-center rounded hover:bg-red/20 text-text-muted hover:text-red transition-colors cursor-pointer"
+                        >
+                          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/>
+                          </svg>
+                        </button>
+                      </div>
+                    </>
                   )}
                 </div>
               ))}
@@ -252,6 +293,102 @@ export function DevPanel({
           )}
         </div>
       </div>
+
+      {/* File viewer modal */}
+      <AnimatePresence>
+        {viewer && (
+          <FileViewerModal
+            path={viewer.path}
+            content={viewer.content}
+            onClose={() => setViewer(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
+  )
+}
+
+// ── File Viewer Modal ─────────────────────────────────────────────────────────
+
+function FileViewerModal({ path, content, onClose }: {
+  path: string; content: string; onClose: () => void
+}): React.ReactElement {
+  const [copied, setCopied] = useState(false)
+
+  const copy = (): void => {
+    navigator.clipboard.writeText(content).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  const lang = ext === 'ts' || ext === 'tsx' ? 'typescript'
+    : ext === 'js' || ext === 'jsx' ? 'javascript'
+    : ext === 'py' ? 'python'
+    : ext === 'html' ? 'html'
+    : ext === 'css' ? 'css'
+    : ext === 'json' ? 'json'
+    : 'text'
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        transition={{ duration: 0.15 }}
+        className="bg-elevated border border-border rounded-lg shadow-2xl flex flex-col overflow-hidden w-full max-w-3xl max-h-[80vh]"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-border flex-shrink-0">
+          <svg className="w-4 h-4 text-text-muted flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+          </svg>
+          <span className="text-sm font-medium text-text-primary truncate flex-1">{path}</span>
+          <span className="text-2xs text-text-muted bg-overlay px-1.5 py-0.5 rounded font-mono flex-shrink-0">{lang}</span>
+          <button
+            onClick={copy}
+            title="Copy"
+            className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded border border-border hover:bg-overlay text-text-secondary transition-colors cursor-pointer flex-shrink-0"
+          >
+            {copied ? (
+              <><svg className="w-3 h-3 text-green" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Copied</>
+            ) : (
+              <><svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy</>
+            )}
+          </button>
+          <button
+            onClick={onClose}
+            className="w-6 h-6 flex items-center justify-center rounded hover:bg-overlay text-text-muted hover:text-text-primary transition-colors cursor-pointer flex-shrink-0"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-auto bg-[#0a0a0c]">
+          <pre className="p-4 text-xs font-mono leading-relaxed text-text-primary whitespace-pre overflow-x-auto">
+            {content}
+          </pre>
+        </div>
+      </motion.div>
+    </motion.div>
   )
 }
