@@ -27,15 +27,7 @@ export function ChatTopBar({
   view, mode, activeProjectName, onViewChange, onModeChange, onBackToHub, loadedModelHasTools,
   showLogs, onToggleLogs,
 }: ChatTopBarProps): React.ReactElement {
-  if (loading) return (
-    <LoadingBar
-      pct={loadingPct}
-      modelName={loadedModel?.name ?? '…'}
-      onEject={onEject}
-      showLogs={showLogs ?? false}
-      onToggleLogs={onToggleLogs ?? (() => {})}
-    />
-  )
+  if (loading) return <LoadingBar pct={loadingPct} modelName={loadedModel?.name ?? '…'} onEject={onEject} />
   return (
     <NormalBar
       loadedModel={loadedModel}
@@ -233,12 +225,10 @@ function NormalBar({
   )
 }
 
-function LoadingBar({ pct, modelName, onEject, showLogs, onToggleLogs }: {
+function LoadingBar({ pct, modelName, onEject }: {
   pct: number
   modelName: string
   onEject: () => void
-  showLogs: boolean
-  onToggleLogs: () => void
 }): React.ReactElement {
   return (
     <div className="h-[50px] bg-surface border-b border-border flex items-center px-4 gap-3 flex-shrink-0">
@@ -251,24 +241,6 @@ function LoadingBar({ pct, modelName, onEject, showLogs, onToggleLogs }: {
           <div className="h-full bg-accent rounded-sm transition-all duration-300" style={{ width: `${pct}%` }} />
         </div>
       </div>
-
-      {/* Eye — opens logs panel in the content area */}
-      <button
-        onClick={onToggleLogs}
-        title={showLogs ? 'Hide logs' : 'Show live logs'}
-        className={`w-7 h-7 flex items-center justify-center rounded-sm border transition-colors cursor-pointer ${
-          showLogs ? 'border-accent/40 bg-accent/15 text-accent' : 'border-border hover:bg-overlay text-text-muted hover:text-text-secondary'
-        }`}
-      >
-        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          {showLogs ? (
-            <><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></>
-          ) : (
-            <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></>
-          )}
-        </svg>
-      </button>
-
       <TopBarBtn onClick={onEject}>
         <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
         Eject
