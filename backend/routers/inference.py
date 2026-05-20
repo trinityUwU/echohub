@@ -460,9 +460,31 @@ async def tool_chat(req: ToolChatRequest):
         WARN_THRESHOLD = 2
         _total_text_len = 0
         _cap_warning_injected = False
+        # Context budget: warn at 75%, hard-stop at 92% to leave room for a final answer
+        _ctx_window = (_model_status.max_context_window if _model_status and _model_status.max_context_window else 4096)
+        _CTX_WARN_PCT = 0.75
+        _CTX_STOP_PCT = 0.92
+        _context_exhausted = False
+
+        def _estimate_tokens(msgs: list) -> int:
+            return sum(len(str(m.get("content", ""))) for m in msgs) // 4
+
+        def _context_footer(msgs: list) -> str:
+            used = _estimate_tokens(msgs)
+            pct = used / _ctx_window
+            remaining = _ctx_window - used
+            if pct >= _CTX_WARN_PCT:
+                return (
+                    f"\n\n[CONTEXT BUDGET: {used:,}/{_ctx_window:,} tokens used ({pct:.0%}). "
+                    f"Only {remaining:,} tokens remaining. "
+                    f"STOP all research immediately — synthesize your findings and give a final answer now.]"
+                )
+            return f"\n\n[Context: {used:,}/{_ctx_window:,} tokens ({pct:.0%} used)]"
 
         async def _execute_tool_with_intercept(tool_name: str, tool_args: dict) -> str:
-            nonlocal MAX_TOOL_CALLS, _cap_warning_injected
+            nonlocal MAX_TOOL_CALLS, _cap_warning_injected, _context_exhausted
+            if _context_exhausted:
+                return "[BLOCKED: context window exhausted. You must stop tool calls and give your final answer now.]"
             if tool_name == "set_tool_limit":
                 new_limit = int(tool_args.get("new_limit", 0))
                 reason = str(tool_args.get("reason", ""))
@@ -483,17 +505,27 @@ async def tool_chat(req: ToolChatRequest):
                     logger.info(f"[tool-chat] routing {tool_name!r} → MCP server {skill_id!r}")
                     import asyncio as _asyncio
                     try:
-                        return await _asyncio.wait_for(
+                        mcp_result = await _asyncio.wait_for(
                             call_mcp_tool(skill_id, tool_name, tool_args),
                             timeout=60.0,
                         )
                     except _asyncio.TimeoutError:
-                        return f"Error: MCP tool '{tool_name}' timed out after 60s"
+                        mcp_result = f"Error: MCP tool '{tool_name}' timed out after 60s"
+                    mcp_result += _context_footer(messages)
+                    if _estimate_tokens(messages) / _ctx_window >= _CTX_STOP_PCT:
+                        _context_exhausted = True
+                        mcp_result += "\n\n[HARD STOP: context window at 92%+. No more tool calls allowed. Summarize now.]"
+                    return mcp_result
             except ImportError:
                 pass
             except Exception as e:
                 logger.warning(f"[tool-chat] MCP routing check failed: {e}")
-            return execute_tool(tool_name, tool_args, req.project_id)
+            result = execute_tool(tool_name, tool_args, req.project_id)
+            result += _context_footer(messages)
+            if _estimate_tokens(messages) / _ctx_window >= _CTX_STOP_PCT:
+                _context_exhausted = True
+                result += "\n\n[HARD STOP: context window at 92%+. No more tool calls allowed. Summarize now.]"
+            return result
 
         def _maybe_inject_cap_warning() -> None:
             nonlocal _cap_warning_injected
