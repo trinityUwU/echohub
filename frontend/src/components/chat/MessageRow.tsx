@@ -22,8 +22,53 @@ interface MessageRowProps {
 
 // ── MessageRow ────────────────────────────────────────────────────────────────
 
+function CompactRow({ message }: { message: ChatMessage }): React.ReactElement {
+  const content = typeof message.content === 'string' ? message.content : ''
+  const isRunning = content === '__compacting__'
+  const summary = content.startsWith('__compacted__:') ? content.slice(14) : null
+
+  return (
+    <div className="flex items-start gap-2 px-5 py-2">
+      <div className="flex-1 rounded-xl border border-accent/20 bg-accent/5 overflow-hidden">
+        <div className="flex items-center gap-2 px-3 py-2">
+          {isRunning ? (
+            <motion.svg className="w-3.5 h-3.5 text-accent flex-shrink-0"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+              animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1.2, ease: 'linear' }}>
+              <path d="M21 12a9 9 0 1 1-6.22-8.56"/>
+            </motion.svg>
+          ) : (
+            <svg className="w-3.5 h-3.5 text-accent flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          )}
+          <span className={`text-xs ${isRunning ? 'text-accent animate-pulse' : 'text-accent/80'}`}>
+            {isRunning ? 'Compacting context…' : 'Context compacted'}
+          </span>
+          {summary && (
+            <span className="text-xs text-text-muted ml-auto">
+              {Math.round(summary.length / 4)} tokens
+            </span>
+          )}
+        </div>
+        {summary && (
+          <div className="px-3 pb-2 text-xs text-text-muted/70 leading-relaxed border-t border-accent/10 pt-2 italic max-h-24 overflow-y-auto">
+            {summary}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRegenerate, onEditUser, promptForPair, sourceConvId, sourceMsgId, loadedModelId, onReload }: MessageRowProps): React.ReactElement {
   const isUser = message.role === 'user'
+
+  // Compact markers — render dedicated UI
+  const rawContent = typeof message.content === 'string' ? message.content : ''
+  if (message.role === 'system' && (rawContent === '__compacting__' || rawContent.startsWith('__compacted__:'))) {
+    return <CompactRow message={message} />
+  }
   const [copied, setCopied] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState('')

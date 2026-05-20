@@ -511,6 +511,7 @@ function ProjectWorkspace({
   const toolChatHook = useToolChat(project.id, {
     conversationId: convHook.activeId,
     onSaveMessage: convHook.saveMessage,
+    maxContextTokens: loadedModel?.max_context_window ?? undefined,
   })
 
   const isDevMode = project.mode === 'dev'

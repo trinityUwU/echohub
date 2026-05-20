@@ -211,9 +211,10 @@ async def summarize_messages(req: ChatRequest) -> dict:
         {
             "role": "user",
             "content": (
-                "Summarize the following conversation concisely. "
-                "Preserve all key facts, decisions, and context. "
-                "Write in third person, past tense. Be dense and complete.\n\n"
+                "Summarize the following conversation in maximum 400 tokens. "
+                "Be extremely dense: preserve all technical decisions, file names, errors encountered, "
+                "tools used, and current state of the work. Write in third person, past tense. "
+                "No fluff — every word must carry information.\n\n"
                 f"{messages_text}"
             )
         }
@@ -222,8 +223,8 @@ async def summarize_messages(req: ChatRequest) -> dict:
     async for chunk in engine_router.generate(
         messages=summarize_prompt,
         stream=False,
-        temperature=0.3,
-        max_tokens=512,
+        temperature=0.2,
+        max_tokens=400,
     ):
         result = chunk
 

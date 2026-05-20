@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { toolChat } from '@/api/client'
+import { toolChat, summarizeMessages } from '@/api/client'
 import type { ChatMessage, GenerationStats, ToolCall, WorkspaceFile } from '@/types'
 
 // ── SSE event shapes ──────────────────────────────────────────────────────────
@@ -55,7 +55,7 @@ export interface UseToolChatReturn {
   streaming: boolean
   genStats: GenerationStats | null
   usedTokens: number
-  send: (text: string, systemPrompt?: string) => void
+  send: (text: string, systemPrompt?: string) => Promise<void>
   stop: () => void
   clear: () => void
   loadHistory: (msgs: Array<{ role: string; content: string }>) => void
@@ -65,6 +65,7 @@ export interface UseToolChatReturn {
 interface UseToolChatOptions {
   conversationId: string | null
   onSaveMessage?: (convId: string, role: string, content: string) => Promise<void>
+  maxContextTokens?: number
 }
 
 export function useToolChat(projectId: string, options: UseToolChatOptions = { conversationId: null }): UseToolChatReturn {
@@ -123,16 +124,73 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     setUsedTokens(0)
   }, [])
 
-  const send = useCallback((text: string, systemPrompt?: string): void => {
+  // Auto-compact: summarize conversation when context hits 98%
+  const compact = useCallback(async (): Promise<void> => {
+    const msgs = messagesRef.current.filter(m => {
+      const c = typeof m.content === 'string' ? m.content : ''
+      // Skip existing compact markers and empty messages
+      return c.trim() && c !== '__compacting__' && !c.startsWith('__compacted__:')
+    })
+    const human = msgs.filter(m => m.role === 'user' || m.role === 'assistant')
+    if (human.length < 4) return
+
+    // Insert "compacting" marker into chat
+    const compactingMsg: ChatMessage = { role: 'system', content: '__compacting__', id: crypto.randomUUID() }
+    const withMarker = [...messagesRef.current, compactingMsg]
+    messagesRef.current = withMarker
+    setMessages([...withMarker])
+
+    try {
+      const toSummarize = human.slice(0, -4)
+      const toKeep = human.slice(-4)
+      const { summary } = await summarizeMessages(toSummarize)
+
+      // Replace compacting marker with compacted result, keep recent messages
+      const compactedMsg: ChatMessage = { role: 'system', content: `__compacted__:${summary}`, id: crypto.randomUUID() }
+      const compacted: ChatMessage[] = [compactedMsg, ...toKeep]
+      messagesRef.current = compacted
+      setMessages([...compacted])
+
+      // Recalculate tokens after compaction
+      const newChars = compacted.reduce((s, m) => s + (typeof m.content === 'string' ? m.content.length : 0), 0)
+      setUsedTokens(Math.round(newChars / 4))
+    } catch {
+      // Failed — remove marker, keep original messages
+      messagesRef.current = msgs
+      setMessages([...msgs])
+    }
+  }, [])
+
+  const send = useCallback(async (text: string, systemPrompt?: string): Promise<void> => {
+    // Auto-compact at 98% of context window before sending
+    const { maxContextTokens } = optionsRef.current
+    if (maxContextTokens) {
+      const currentChars = messagesRef.current.reduce((s, m) => s + (typeof m.content === 'string' ? m.content.length : 0), 0)
+      const estimated = Math.round((currentChars + text.length) / 4)
+      if (estimated >= maxContextTokens * 0.98) {
+        await compact()
+      }
+    }
+
     setStreaming(true)
     setGenStats(null)
 
     const userMsg: ChatMessage = { role: 'user', content: text, id: crypto.randomUUID() }
 
+    // Build history — exclude compact markers from what we send to backend
     const historyToSend = [
       ...messagesRef.current.filter(m => {
         const c = typeof m.content === 'string' ? m.content : ''
-        return c.trim().length > 0
+        if (!c.trim()) return false
+        if (c === '__compacting__') return false
+        // Compact summary → send as system context message
+        return true
+      }).map(m => {
+        const c = typeof m.content === 'string' ? m.content : ''
+        if (c.startsWith('__compacted__:')) {
+          return { ...m, content: `[Previous context summary]: ${c.slice(14)}` }
+        }
+        return m
       }),
       userMsg,
     ]
@@ -145,7 +203,6 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     const withUser = [...messagesRef.current, userMsg]
     messagesRef.current = withUser
     setMessages(withUser)
-    // Update token estimate immediately on send
     const sendChars = withUser.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0)
     setUsedTokens(Math.round(sendChars / 4))
 
