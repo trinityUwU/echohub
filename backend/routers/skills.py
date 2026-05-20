@@ -376,12 +376,12 @@ def search_skills(q: str = "", force_refresh: bool = False) -> dict[str, Any]:
             }
 
     # Build GitHub query
-    # Empty query: broad search covering common skill/tool repo patterns
+    # Search for well-rated MCP servers, LLM tools, CLI integrations — no custom topic required.
+    # Empty query: browse top repos across all relevant categories.
     if not q:
-        github_query = "topic:echohub-skill OR topic:mcp-server OR topic:llm-tool"
+        github_query = "topic:mcp-server OR topic:mcp OR topic:llm-tools OR topic:ai-tools stars:>10"
     else:
-        # User typed something: search by name/description, bias toward echohub-skill
-        github_query = f"{q} topic:echohub-skill"
+        github_query = f"{q} topic:mcp-server OR {q} topic:mcp OR {q} topic:ai-tools OR {q} topic:llm-tools"
 
     headers: dict[str, str] = {"Accept": "application/vnd.github+json"}
     token = os.getenv("GITHUB_TOKEN", "")

@@ -225,7 +225,7 @@ export default function App(): React.ReactElement {
           />
         </div>
         <div className={`flex flex-1 overflow-hidden ${page === 'skills' ? 'animate-fade-in' : 'hidden'}`}>
-          <SkillsPage />
+          <SkillsPage onGoToSettings={() => setPage('settings')} />
         </div>
         <div className={`flex flex-1 overflow-hidden ${page === 'settings' ? 'animate-fade-in' : 'hidden'}`}>
           <SettingsPage initialTab={settingsInitialTab} />

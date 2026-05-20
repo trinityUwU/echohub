@@ -6,7 +6,7 @@ import { useDialog } from '@/components/shared/Dialog'
 
 type Tab = 'discover' | 'installed'
 
-export function SkillsPage(): React.ReactElement {
+export function SkillsPage({ onGoToSettings }: { onGoToSettings?: () => void }): React.ReactElement {
   const [tab, setTab] = useState<Tab>('discover')
   const [native, setNative] = useState<NativeSkill[]>([])
   const [community, setCommunity] = useState<CommunitySkill[]>([])
@@ -76,7 +76,7 @@ export function SkillsPage(): React.ReactElement {
 
       {/* Content */}
       <div className="flex-1 overflow-hidden">
-        {tab === 'discover' && <DiscoverTab community={community} onInstall={url => openInstallModal(url)} />}
+        {tab === 'discover' && <DiscoverTab community={community} onInstall={url => openInstallModal(url)} onGoToSettings={onGoToSettings} />}
         {tab === 'installed' && <InstalledTab native={native} community={community} onDelete={handleDelete} />}
       </div>
 
@@ -95,7 +95,7 @@ export function SkillsPage(): React.ReactElement {
 
 // ── Discover tab ───────────────────────────────────────────────────────────────
 
-function DiscoverTab({ community, onInstall }: { community: CommunitySkill[]; onInstall: (url: string) => void }): React.ReactElement {
+function DiscoverTab({ community, onInstall, onGoToSettings }: { community: CommunitySkill[]; onInstall: (url: string) => void; onGoToSettings?: () => void }): React.ReactElement {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<GithubSkillResult[]>([])
   const [loading, setLoading] = useState(false)
@@ -174,7 +174,7 @@ function DiscoverTab({ community, onInstall }: { community: CommunitySkill[]; on
               <span className="text-2xs text-text-muted">Cached · {cacheAgeH < 1 ? '<1h' : `${cacheAgeH}h`} ago</span>
             )}
             {!authenticated
-              ? <span className="text-2xs text-text-muted">60 req/h · <span className="text-accent">Add token in Settings</span></span>
+              ? <span className="text-2xs text-text-muted">60 req/h · <button onClick={onGoToSettings} className="text-accent hover:underline cursor-pointer">Add token</button></span>
               : <span className="text-2xs text-text-muted">5000 req/h</span>
             }
           </div>
