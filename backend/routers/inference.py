@@ -406,7 +406,6 @@ async def tool_chat(req: ToolChatRequest):
                         content = event.get("content", "")
                         if content:
                             accumulated_text_buf += content
-                            # Stream everything — tool calls are plain text, user sees them live
                             streamed_text = True
                             yield f"data: {_json.dumps({'type': 'text_chunk', 'content': content})}\n\n"
                     elif event_type == "response":
