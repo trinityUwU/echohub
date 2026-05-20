@@ -102,7 +102,7 @@ export default function App(): React.ReactElement {
 
     loadModel(resolvedId, {
       gpuMemoryUtilization: config.gpu_memory_utilization ?? 0.75,
-      maxModelLen: config.n_ctx ?? null,
+      maxModelLen: config.n_ctx ?? undefined,
       enforceEager: false,
       maxCudagraphCaptureSize: null,
       n_gpu_layers: config.n_gpu_layers ?? null,
