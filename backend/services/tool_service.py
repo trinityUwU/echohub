@@ -37,11 +37,17 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read the content of a file",
+            "description": (
+                "Read a file with line numbers. Every line is prefixed with its number (e.g. '  42 | code here'). "
+                "Use start_line and end_line to read a specific range (1-indexed, inclusive). "
+                "Omit both to read the entire file. Use line numbers with edit_file's start_line/end_line for precise edits."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Relative path from workspace root"},
+                    "start_line": {"type": "integer", "description": "First line to read (1-indexed). Omit to start from line 1."},
+                    "end_line": {"type": "integer", "description": "Last line to read (1-indexed, inclusive). Omit to read to end of file."},
                 },
                 "required": ["path"],
             },
@@ -283,11 +289,33 @@ def _read_file(workspace: Path, args: dict[str, Any]) -> str:
         raise FileNotFoundError(f"File not found: {path_str}")
     if not target.is_file():
         raise ValueError(f"Not a file: {path_str}")
+
     raw = target.read_bytes()
     if len(raw) > _MAX_READ_BYTES:
-        content = raw[:_MAX_READ_BYTES].decode("utf-8", errors="replace")
-        return content + f"\n\n[... truncated — file is {len(raw)} bytes, showing first {_MAX_READ_BYTES}]"
-    return raw.decode("utf-8", errors="replace")
+        text = raw[:_MAX_READ_BYTES].decode("utf-8", errors="replace")
+        truncated = True
+    else:
+        text = raw.decode("utf-8", errors="replace")
+        truncated = False
+
+    lines = text.splitlines()
+    total = len(lines)
+
+    start_line: int | None = args.get("start_line")
+    end_line: int | None = args.get("end_line")
+
+    if start_line is not None or end_line is not None:
+        s = max(1, start_line or 1)
+        e = min(total, end_line or total)
+        selected = lines[s - 1:e]
+        numbered = "\n".join(f"{s + i:>5} | {l}" for i, l in enumerate(selected))
+        header = f"[{path_str} lines {s}–{e} of {total}]\n"
+        return header + numbered
+    else:
+        numbered = "\n".join(f"{i + 1:>5} | {l}" for i, l in enumerate(lines))
+        header = f"[{path_str} — {total} lines]\n"
+        suffix = f"\n\n[truncated — file is {len(raw)} bytes]" if truncated else ""
+        return header + numbered + suffix
 
 
 def _list_files(workspace: Path, args: dict[str, Any]) -> str:
