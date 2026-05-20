@@ -166,9 +166,9 @@ function NormalBar({
           ))}
         </div>
 
-        {/* Mode selector — visible only in projects view */}
+        {/* Mode selector — visible in projects view only when no project is open */}
         <AnimatePresence>
-          {view === 'projects' && (
+          {view === 'projects' && !activeProjectName && (
             <motion.div
               initial={{ opacity: 0, width: 0 }}
               animate={{ opacity: 1, width: 'auto' }}
