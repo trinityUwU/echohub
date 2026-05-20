@@ -408,18 +408,20 @@ async def tool_chat(req: ToolChatRequest):
                             prev_buf = accumulated_text_buf
                             accumulated_text_buf += content
                             tool_call_pos = accumulated_text_buf.find("<tool_call>")
+
                             if tool_call_pos == -1:
                                 # No tool call yet — stream normally
                                 streamed_text = True
                                 yield f"data: {_json.dumps({'type': 'text_chunk', 'content': content})}\n\n"
                             elif tool_call_pos > len(prev_buf):
-                                # Tool call tag starts inside this chunk — emit the part before it
-                                before = accumulated_text_buf[:tool_call_pos]
-                                tail = before[len(prev_buf):]  # only the new part before <tool_call>
+                                # Tool call tag starts inside this chunk — emit text before it
+                                tail = accumulated_text_buf[len(prev_buf):tool_call_pos]
                                 if tail:
                                     streamed_text = True
                                     yield f"data: {_json.dumps({'type': 'text_chunk', 'content': tail})}\n\n"
-                            # else: tool_call already detected, suppress token
+                                # Signal UI that a tool call is being parsed (keep UI alive)
+                                yield f"data: {_json.dumps({'type': 'tool_call_pending'})}\n\n"
+                            # else: inside tool_call block — keep accumulating, UI already shows pending
                     elif event_type == "response":
                         response_dict = event
                     elif event_type == "error":

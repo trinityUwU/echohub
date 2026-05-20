@@ -31,7 +31,9 @@ interface ErrorEvent {
   error: string
 }
 
-type SseEvent = ToolCallEvent | ToolResultEvent | TextChunkEvent | DoneEvent | ErrorEvent
+interface ToolCallPendingEvent { type: 'tool_call_pending' }
+
+type SseEvent = ToolCallEvent | ToolResultEvent | TextChunkEvent | DoneEvent | ErrorEvent | ToolCallPendingEvent
 
 function isSseEvent(v: unknown): v is SseEvent {
   return typeof v === 'object' && v !== null && 'type' in v
@@ -155,7 +157,18 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
           if (controller.signal.aborted) break
           if (!isSseEvent(raw)) continue
 
-          if (raw.type === 'tool_call') {
+          if (raw.type === 'tool_call_pending') {
+            // Backend is parsing a tool call — show GIF to keep UI alive
+            setMessages(prev => {
+              const updated = [...prev]
+              const last = updated[updated.length - 1]
+              if (last && last.role === 'assistant' && last.content === '') {
+                updated[updated.length - 1] = { ...last, content: '' } // force re-render with GIF
+                messagesRef.current = updated
+              }
+              return updated
+            })
+          } else if (raw.type === 'tool_call') {
             const tcId = crypto.randomUUID()
             const tc: ToolCall = {
               id: tcId,
