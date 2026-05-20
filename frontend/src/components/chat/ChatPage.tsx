@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { useChat } from '@/hooks/useChat'
 import { useProfiles } from '@/hooks/useProfiles'
 import type { ConversationSummary, ModelInfo, GpuStats, ChatMessage, LoadConfig, ChatParams, GenerationStats, Attachment } from '@/types'
@@ -54,6 +55,10 @@ export function ChatPage({
     activeProject ? { mode: activeProject.mode, projectId: activeProject.id } : undefined
   )
   const profilesHook = activeProject ? projectProfilesHook : chatProfilesHook
+  const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const [rightCollapsed, setRightCollapsed] = useState(false)
+  const toggleLeft = useCallback(() => setLeftCollapsed(v => !v), [])
+  const toggleRight = useCallback(() => setRightCollapsed(v => !v), [])
   // Local params state — syncs from profile on profile switch, edited freely by sliders
   const [params, setParams] = useState(profilesHook.activeProfile.params)
   const prevProfileId = useRef(profilesHook.activeId)
@@ -174,48 +179,55 @@ export function ChatPage({
     )
   }
 
+  const showLeft = view === 'chat'
+  const showRight = view === 'chat' || !!activeProject
+
   return (
-    <div className="flex flex-1 overflow-hidden">
-      {view === 'chat' && (
-        <ConvSidebar
-          conversations={conversations}
-          archivedConversations={archivedConversations}
-          activeId={activeId}
-          onSelect={onSelectConversation}
-          onNew={onNewConversation}
-          onDelete={onDeleteConversation}
-          onArchive={onArchiveConversation}
-          onUnarchive={onUnarchiveConversation}
-          onRename={onRenameConversation}
-          gpu={gpu}
-        />
+    <div className="flex flex-col flex-1 overflow-hidden">
+      {/* Topbar spans full width */}
+      <ChatTopBar
+        loadedModel={loadedModel}
+        loading={loading}
+        loadingPct={loadingPct}
+        onOpenPicker={onOpenPicker}
+        onClear={handleClear}
+        onEject={onEject}
+        onExport={handleExport}
+        view={view}
+        mode={mode}
+        activeProjectName={activeProject?.name ?? null}
+        onViewChange={setView}
+        onModeChange={setMode}
+        onBackToHub={closeProject}
+        loadedModelHasTools={!!loadedModel?.capabilities?.tools}
+      />
+      {!hasCuda && <CpuBanner onGoToSettings={onGoToSettings} />}
+      <MigrationBanner onGoToSettings={onGoToSettings} />
+      {(oomError || [...messages].reverse().find(m => m.role === 'assistant')?.stats?.oom) && (
+        <div className="mx-4 mt-2 px-3 py-2 bg-red/10 border border-red/30 rounded-md flex items-center gap-2 text-sm text-red flex-shrink-0">
+          <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          Out of memory — VRAM insuffisante pour cette génération. Réduis le contexte ou recharge le modèle.
+        </div>
       )}
-      <div className="flex flex-col flex-1 overflow-hidden">
-        <ChatTopBar
-          loadedModel={loadedModel}
-          loading={loading}
-          loadingPct={loadingPct}
-          onOpenPicker={onOpenPicker}
-          onClear={handleClear}
-          onEject={onEject}
-          onExport={handleExport}
-          view={view}
-          mode={mode}
-          activeProjectName={activeProject?.name ?? null}
-          onViewChange={setView}
-          onModeChange={setMode}
-          onBackToHub={closeProject}
-          loadedModelHasTools={!!loadedModel?.capabilities?.tools}
-        />
-        {!hasCuda && <CpuBanner onGoToSettings={onGoToSettings} />}
-        <MigrationBanner onGoToSettings={onGoToSettings} />
-        {(oomError || [...messages].reverse().find(m => m.role === 'assistant')?.stats?.oom) && (
-          <div className="mx-4 mt-2 px-3 py-2 bg-red/10 border border-red/30 rounded-md flex items-center gap-2 text-sm text-red">
-            <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-            </svg>
-            Out of memory — VRAM insuffisante pour cette génération. Réduis le contexte ou recharge le modèle.
-          </div>
+      {/* Body: left sidebar + content + right panel */}
+      <div className="flex flex-1 overflow-hidden relative">
+        {showLeft && (
+          <PanelWrapper side="left" collapsed={leftCollapsed} onToggle={toggleLeft}>
+            <ConvSidebar
+              conversations={conversations}
+              archivedConversations={archivedConversations}
+              activeId={activeId}
+              onSelect={onSelectConversation}
+              onNew={onNewConversation}
+              onDelete={onDeleteConversation}
+              onArchive={onArchiveConversation}
+              onUnarchive={onUnarchiveConversation}
+              onRename={onRenameConversation}
+              gpu={gpu}
+            />
+          </PanelWrapper>
         )}
         <ChatContent
           view={view}
@@ -236,8 +248,12 @@ export function ChatPage({
           onStop={stop}
           onLoadModel={onLoadModel}
         />
+        {showRight && (
+          <PanelWrapper side="right" collapsed={rightCollapsed} onToggle={toggleRight}>
+            <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />
+          </PanelWrapper>
+        )}
       </div>
-      {(view === 'chat' || activeProject) && <RightPanel params={params} onChange={setParams} profiles={profilesHook} loadedModel={loadedModel} />}
     </div>
   )
 }
@@ -310,4 +326,59 @@ function ChatContent({
   }
 
   return <>{inner}</>
+}
+
+interface PanelWrapperProps {
+  side: 'left' | 'right'
+  collapsed: boolean
+  onToggle: () => void
+  children: React.ReactNode
+}
+
+function PanelWrapper({ side, collapsed, onToggle, children }: PanelWrapperProps): React.ReactElement {
+  const isLeft = side === 'left'
+  const border = isLeft ? 'border-r' : 'border-l'
+
+  return (
+    <div className={`relative flex flex-shrink-0 ${border} border-border`}>
+      <AnimatePresence initial={false}>
+        {!collapsed && (
+          <motion.div
+            key="panel"
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 'auto', opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            className="overflow-hidden"
+          >
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Toggle button — sits on the outer edge, vertically centered */}
+      <button
+        onClick={onToggle}
+        title={collapsed ? 'Expand' : 'Collapse'}
+        className={`absolute top-1/2 -translate-y-1/2 z-10 w-4 h-10 flex items-center justify-center
+          bg-elevated hover:bg-overlay border border-border text-text-muted hover:text-text-secondary
+          transition-colors cursor-pointer rounded-sm
+          ${isLeft ? '-right-4 rounded-l-none' : '-left-4 rounded-r-none'}`}
+      >
+        <motion.svg
+          className="w-3 h-3"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          animate={{ rotate: isLeft ? (collapsed ? 0 : 180) : (collapsed ? 180 : 0) }}
+          transition={{ duration: 0.2 }}
+        >
+          <polyline points="15 18 9 12 15 6"/>
+        </motion.svg>
+      </button>
+    </div>
+  )
 }
