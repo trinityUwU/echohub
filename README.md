@@ -87,6 +87,7 @@ Full technical breakdown:
 - [v0.4 — Fine-tuning & RLHF](docs/v0.4-finetune.md)
 - [v0.5 — MTP support](docs/v0.5-mtp.md)
 - [v0.6 — Vision, MTP, UX polish](docs/v0.6-vision-mtp-ux.md)
+- [v0.7 — Projects workspace & tool calling](docs/v0.7-projects-workspace.md)
 
 ---
 
@@ -100,6 +101,7 @@ Full technical breakdown:
 | [v0.4 — Fine-tuning](docs/v0.4-finetune.md) | 🚧 In progress | QLoRA fine-tuning, RLHF pairs, eval before/after, GGUF export, download history |
 | [v0.5 — MTP support](docs/v0.5-mtp.md) | ✅ Stable | MTP detection, badge in Discover/Library, fine-tune export preserves MTP tensors |
 | [v0.6 — Vision, MTP, UX polish](docs/v0.6-vision-mtp-ux.md) | ✅ Stable | Vision for GGUF (mmproj auto-detect), capability badges everywhere, reload model from footer, image lightbox, Wayland clipboard paste, vLLM fixes |
+| [v0.7 — Projects workspace](docs/v0.7-projects-workspace.md) | 🚧 In progress | Projects hub (Dev/Docs/Research), per-project profiles, tool calling detection & filter, collapsible panels |
 
 ---
 
