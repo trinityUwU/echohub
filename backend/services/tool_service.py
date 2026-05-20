@@ -105,6 +105,30 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_command",
+            "description": (
+                "Run a validation command in the workspace directory. "
+                "Use this after creating or editing code files to catch syntax errors, type errors, and runtime issues. "
+                "Examples: 'node --check app.js', 'node -e \"require(\\\"./app.js\\\")\"', "
+                "'python3 -m py_compile script.py', 'tsc --noEmit'. "
+                "Only whitelisted executables are allowed: node, python3, tsc, eslint, jshint, deno. "
+                "Output is capped at 2KB. Timeout: 10s."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The command to run (e.g. 'node --check index.js')",
+                    },
+                },
+                "required": ["command"],
+            },
+        },
+    },
 ]
 
 _MAX_READ_BYTES = 50 * 1024       # 50 KB
@@ -161,6 +185,8 @@ def execute_tool(name: str, arguments: dict[str, Any], project_id: str) -> str:
             return _edit_file(workspace, arguments)
         elif name == "get_workspace_info":
             return _get_workspace_info(workspace, project_id)
+        elif name == "run_command":
+            return _run_command(workspace, arguments)
         else:
             raise ValueError(f"Unknown tool: {name!r}")
     except (ValueError, FileNotFoundError) as e:
@@ -276,6 +302,58 @@ def _edit_file(workspace: Path, args: dict[str, Any]) -> str:
     target.write_text(updated, encoding="utf-8")
     logger.info(f"[tool_service] edit_file {target} (replaced {len(old_string)} chars)")
     return f"Edited: {path_str} (replaced {len(old_string)} chars)"
+
+
+def _run_command(workspace: Path, args: dict[str, Any]) -> str:
+    import shlex
+    import subprocess
+
+    _ALLOWED_BINS = {"node", "python3", "tsc", "eslint", "jshint", "deno"}
+    _MAX_OUTPUT = 2048
+    _TIMEOUT = 10
+
+    command: str = args.get("command", "").strip()
+    if not command:
+        raise ValueError("command is required")
+
+    try:
+        parts = shlex.split(command)
+    except ValueError as e:
+        raise ValueError(f"Invalid command syntax: {e}") from e
+
+    binary = Path(parts[0]).name
+    if binary not in _ALLOWED_BINS:
+        raise ValueError(
+            f"Binary '{binary}' is not allowed. Allowed: {', '.join(sorted(_ALLOWED_BINS))}"
+        )
+
+    try:
+        result = subprocess.run(
+            parts,
+            cwd=str(workspace),
+            capture_output=True,
+            text=True,
+            timeout=_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return f"Error: command timed out after {_TIMEOUT}s"
+    except FileNotFoundError:
+        return f"Error: '{binary}' is not installed on this system"
+
+    combined = ""
+    if result.stdout:
+        combined += result.stdout
+    if result.stderr:
+        combined += result.stderr
+
+    if not combined.strip():
+        combined = "(no output)" if result.returncode == 0 else f"(exit code {result.returncode}, no output)"
+    elif len(combined) > _MAX_OUTPUT:
+        combined = combined[:_MAX_OUTPUT] + f"\n... (truncated, {len(combined)} total chars)"
+
+    status = "OK" if result.returncode == 0 else f"FAILED (exit {result.returncode})"
+    logger.info(f"[tool_service] run_command {command!r} → {status}")
+    return f"[{status}]\n{combined.strip()}"
 
 
 def _get_workspace_info(workspace: Path, project_id: str) -> str:
