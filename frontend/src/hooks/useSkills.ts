@@ -90,10 +90,29 @@ export function useSkills() {
   }, [])
 
   useEffect(() => {
+    const active = loadActiveIds()
     listSkills().then(data => {
       rawCommunityRef.current = data.community
       setRawCommunity(data.community)
       setCommunitySkills(data.community.map(communityToSkill))
+      // Auto-start MCP servers that were active in previous session
+      const mcpSkills = data.community.filter(s => s.is_mcp && active.has(s.id))
+      if (mcpSkills.length === 0) return
+      listMcpServers().then(statuses => {
+        const runningIds = new Set(statuses.filter(s => s.status === 'running').map(s => s.skill_id))
+        mcpSkills.forEach(s => {
+          if (runningIds.has(s.id)) return
+          startMcp(s.id)
+            .then(() => {
+              fetchMcpStatuses()
+              addToast({ type: 'success', title: 'MCP server started', message: s.name })
+            })
+            .catch((err: unknown) => {
+              const msg = err instanceof Error ? err.message : String(err)
+              addToast({ type: 'error', title: `${s.name} failed to start`, message: msg })
+            })
+        })
+      }).catch(() => {})
     }).catch(() => {})
     fetchMcpStatuses()
   }, [fetchMcpStatuses])
