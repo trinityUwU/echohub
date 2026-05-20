@@ -97,69 +97,114 @@ def _save_registry(entries: list[dict[str, Any]]) -> None:
 # ── Auto-detect install strategy ──────────────────────────────────────────────
 
 def _detect_install_commands(skill_dir: Path) -> list[str]:
-    """Return a list of shell commands to install the skill."""
-    # Prefer explicit manifest
-    for manifest_name in ("echohub.yml", "echohub.yaml", "skill.yml", "skill.yaml"):
-        manifest_path = skill_dir / manifest_name
-        if manifest_path.exists():
-            try:
-                data = yaml.safe_load(manifest_path.read_text())
-                install = data.get("install") or data.get("setup")
-                if isinstance(install, str):
-                    return [install]
-                if isinstance(install, list):
-                    return install
-            except Exception:
-                pass
-
+    """
+    Return install commands in priority order:
+    1. `install` key in package.json[echohub] or pyproject.toml[tool.echohub]
+    2. Standard package manager: bun install (package.json), pip install (pyproject/setup/requirements)
+    3. Shell script fallback
+    """
     cmds: list[str] = []
 
-    # JS/TS project
-    if (skill_dir / "package.json").exists():
+    # JS/TS: package.json is the standard
+    pkg_path = skill_dir / "package.json"
+    if pkg_path.exists():
+        try:
+            pkg = json.loads(pkg_path.read_text())
+            # Custom install override via echohub namespace
+            override = (pkg.get("echohub") or {}).get("install")
+            if isinstance(override, list):
+                return override
+            if isinstance(override, str):
+                return [override]
+        except Exception:
+            pass
         cmds.append("bun install")
-        pkg = json.loads((skill_dir / "package.json").read_text())
-        if "build" in (pkg.get("scripts") or {}):
-            cmds.append("bun run build")
+        try:
+            pkg = json.loads(pkg_path.read_text())
+            scripts = pkg.get("scripts") or {}
+            if "build" in scripts:
+                cmds.append("bun run build")
+            elif "prepare" in scripts:
+                cmds.append("bun run prepare")
+        except Exception:
+            pass
         return cmds
 
-    # Python project
-    has_pyproject = (skill_dir / "pyproject.toml").exists()
-    has_setup = (skill_dir / "setup.py").exists()
-    has_req = (skill_dir / "requirements.txt").exists()
-
-    if has_pyproject or has_setup:
+    # Python: pyproject.toml is the standard (PEP 517/518)
+    if (skill_dir / "pyproject.toml").exists() or (skill_dir / "setup.py").exists():
         cmds.append(f"{sys.executable} -m pip install -e . --quiet")
         return cmds
-    if has_req:
+
+    # requirements.txt fallback
+    if (skill_dir / "requirements.txt").exists():
         cmds.append(f"{sys.executable} -m pip install -r requirements.txt --quiet")
         return cmds
 
-    # Shell scripts
-    for sh in sorted(skill_dir.glob("*.sh")):
+    # Shell script last resort
+    for sh in sorted(skill_dir.glob("install*.sh")):
         cmds.append(f"bash {sh.name}")
-        break
+        return cmds
 
     return cmds
 
 
 def _read_manifest(skill_dir: Path) -> dict[str, Any]:
-    """Read skill metadata from manifest file if present."""
-    for name in ("echohub.yml", "echohub.yaml", "skill.yml", "skill.yaml"):
-        p = skill_dir / name
-        if p.exists():
-            try:
-                return yaml.safe_load(p.read_text()) or {}
-            except Exception:
-                pass
-    # Fallback: try package.json
+    """
+    Read skill metadata. Priority:
+    1. package.json → `echohub` field (JS/TS standard)
+    2. pyproject.toml → [tool.echohub] section (Python standard)
+    3. Top-level package.json fields (name, description, version, author)
+    """
+    # JS/TS: read package.json with echohub namespace
     pkg_path = skill_dir / "package.json"
     if pkg_path.exists():
         try:
             pkg = json.loads(pkg_path.read_text())
-            return {"name": pkg.get("name"), "description": pkg.get("description"), "version": pkg.get("version")}
+            echohub = pkg.get("echohub") or {}
+            return {
+                "name": echohub.get("name") or pkg.get("name"),
+                "description": echohub.get("description") or pkg.get("description"),
+                "version": pkg.get("version"),
+                "author": _extract_author(pkg.get("author")),
+                "tools": echohub.get("tools") or [],
+                "awareness": echohub.get("awareness") or "",
+            }
         except Exception:
             pass
+
+    # Python: read pyproject.toml [tool.echohub] section
+    pyproject_path = skill_dir / "pyproject.toml"
+    if pyproject_path.exists():
+        try:
+            # tomllib available in Python 3.11+, fallback to manual parse
+            try:
+                import tomllib
+                data = tomllib.loads(pyproject_path.read_text())
+            except ImportError:
+                import tomli  # type: ignore
+                data = tomli.loads(pyproject_path.read_text())
+            meta = (data.get("project") or {})
+            echohub = (data.get("tool") or {}).get("echohub") or {}
+            return {
+                "name": echohub.get("name") or meta.get("name"),
+                "description": echohub.get("description") or meta.get("description"),
+                "version": meta.get("version"),
+                "author": _extract_author(next(iter(meta.get("authors") or []), None)),
+                "tools": echohub.get("tools") or [],
+                "awareness": echohub.get("awareness") or "",
+            }
+        except Exception:
+            pass
+
     return {}
+
+
+def _extract_author(raw: Any) -> str:
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, dict):
+        return raw.get("name") or raw.get("email") or ""
+    return ""
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────

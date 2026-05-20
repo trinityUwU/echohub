@@ -338,8 +338,10 @@ function InstallModal({ onClose, onDone }: { onClose: () => void; onDone: () => 
               </button>
             </div>
             <p className="text-2xs text-text-muted">
-              EchoHub will clone the repo, detect install commands, and register the skill automatically.
-              Skills can declare install instructions via <span className="font-mono">echohub.yml</span>.
+              EchoHub clones the repo and installs it using standard tooling —{' '}
+              <span className="font-mono">package.json</span> (bun) or{' '}
+              <span className="font-mono">pyproject.toml</span> (pip).
+              Add an <span className="font-mono">"echohub"</span> key to declare tools and awareness.
             </p>
           </div>
 
