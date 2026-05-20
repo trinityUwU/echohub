@@ -145,6 +145,9 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     const withUser = [...messagesRef.current, userMsg]
     messagesRef.current = withUser
     setMessages(withUser)
+    // Update token estimate immediately on send
+    const sendChars = withUser.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0)
+    setUsedTokens(Math.round(sendChars / 4))
 
     const assistantId = crypto.randomUUID()
     const withPlaceholder = [...withUser, { role: 'assistant' as const, content: '', id: assistantId }]
@@ -194,7 +197,12 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
           } else if (raw.type === 'text_chunk') {
             accumulated += raw.content
             const snap = accumulated
-            setUsedTokens(Math.round(snap.length / 4))
+            // Count tokens from full context: all messages + current generation
+            const historyChars = messagesRef.current.reduce((sum, m) => {
+              const c = typeof m.content === 'string' ? m.content : ''
+              return sum + c.length
+            }, 0)
+            setUsedTokens(Math.round((historyChars + snap.length) / 4))
             setMessages(prev => {
               const updated = [...prev]
               updated[updated.length - 1] = { role: 'assistant', content: snap, id: assistantId }
@@ -230,6 +238,12 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
           } else if (raw.type === 'done') {
             setWorkspaceFiles(raw.files)
             setStreaming(false)
+            // Final token count from full context
+            const finalChars = messagesRef.current.reduce((sum, m) => {
+              const c = typeof m.content === 'string' ? m.content : ''
+              return sum + c.length
+            }, 0)
+            setUsedTokens(Math.round(finalChars / 4))
             if (raw.tokens_generated != null) {
               setGenStats({
                 tokensGenerated: raw.tokens_generated,
