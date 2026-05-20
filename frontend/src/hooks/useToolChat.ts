@@ -56,6 +56,7 @@ export function useToolChat(projectId: string): UseToolChatReturn {
   const [streaming, setStreaming] = useState(false)
 
   // Maps tool name → local ToolCall id so we can update status on tool_result
+  const messagesRef = useRef<ChatMessage[]>([])
   const pendingToolMap = useRef<Map<string, string>>(new Map())
   const abortRef = useRef<AbortController | null>(null)
 
@@ -66,6 +67,7 @@ export function useToolChat(projectId: string): UseToolChatReturn {
   }, [])
 
   const clear = useCallback((): void => {
+    messagesRef.current = []
     setMessages([])
     setToolCalls([])
     setWorkspaceFiles([])
@@ -76,31 +78,36 @@ export function useToolChat(projectId: string): UseToolChatReturn {
     setStreaming(true)
 
     const userMsg: ChatMessage = { role: 'user', content: text, id: crypto.randomUUID() }
-    let currentMessages: ChatMessage[] = []
-    setMessages(prev => {
-      currentMessages = [...prev, userMsg]
-      return currentMessages
-    })
 
-    // Seed the assistant placeholder immediately
+    // Build the messages to send synchronously using the ref (not state, which is async)
+    const historyToSend = [
+      ...messagesRef.current.filter(m => {
+        const c = typeof m.content === 'string' ? m.content : ''
+        return c.trim().length > 0
+      }),
+      userMsg,
+    ]
+
+    // Update state + ref
+    const withUser = [...messagesRef.current, userMsg]
+    messagesRef.current = withUser
+    setMessages(withUser)
+
+    // Seed the assistant placeholder
     const assistantId = crypto.randomUUID()
-    setMessages(prev => [...prev, { role: 'assistant', content: '', id: assistantId }])
+    const withPlaceholder = [...withUser, { role: 'assistant' as const, content: '', id: assistantId }]
+    messagesRef.current = withPlaceholder
+    setMessages(withPlaceholder)
 
     const controller = new AbortController()
     abortRef.current = controller
     let accumulated = ''
 
     const req = {
-      // Only send non-empty messages — exclude assistant placeholders (content: '')
-      messages: [...currentMessages]
-        .filter(m => {
-          const c = typeof m.content === 'string' ? m.content : ''
-          return c.trim().length > 0
-        })
-        .map(m => ({
-          role: m.role,
-          content: typeof m.content === 'string' ? m.content : '',
-        })),
+      messages: historyToSend.map(m => ({
+        role: m.role,
+        content: typeof m.content === 'string' ? m.content : '',
+      })),
       project_id: projectId,
       system_prompt: systemPrompt,
     }
@@ -137,6 +144,7 @@ export function useToolChat(projectId: string): UseToolChatReturn {
             setMessages(prev => {
               const updated = [...prev]
               updated[updated.length - 1] = { role: 'assistant', content: snap, id: assistantId }
+              messagesRef.current = updated
               return updated
             })
           } else if (raw.type === 'done') {
@@ -150,6 +158,7 @@ export function useToolChat(projectId: string): UseToolChatReturn {
                 content: `Error: ${raw.error}`,
                 id: assistantId,
               }
+              messagesRef.current = updated
               return updated
             })
             setStreaming(false)
