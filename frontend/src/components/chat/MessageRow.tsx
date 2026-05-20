@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, memo } from 'react'
+import React, { useState, useRef, useEffect, memo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { ChatMessage, GenerationStats, LoadConfig } from '@/types'
 import { MarkdownContent } from './MarkdownContent'
@@ -36,32 +36,88 @@ function parseToolMarker(content: string): ParsedToolMarker | null {
 }
 
 function ToolCallRow({ tool, payload }: ParsedToolMarker): React.ReactElement {
-  let prettyPayload = payload
+  const [open, setOpen] = React.useState(true)
+
+  // payload is either JSON args (call in progress/just called) or a result string
+  let args: string | null = null
+  let result: string | null = null
+  let isDone = false
+
+  // Result is stored as a plain string (not valid JSON object) or starts with "File"/"Error"/"Edited"
   try {
-    prettyPayload = JSON.stringify(JSON.parse(payload), null, 2)
+    const parsed = JSON.parse(payload)
+    if (typeof parsed === 'object' && parsed !== null) {
+      args = JSON.stringify(parsed, null, 2)
+    } else {
+      // String result from tool execution
+      result = String(parsed)
+      isDone = true
+    }
   } catch {
-    // leave as-is if not valid JSON
+    if (payload) {
+      result = payload
+      isDone = true
+    }
   }
+
+  const statusColor = isDone ? 'text-green-400 border-green-500/20 bg-green-500/5' : 'text-yellow-400 border-yellow-500/20 bg-yellow-500/5'
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.15 }}
-      className="flex items-start gap-2 px-5 py-1"
+      className="px-5 py-1"
     >
-      <div className="flex items-center gap-1.5 mt-0.5 flex-shrink-0">
-        <svg className="w-3 h-3 text-text-muted/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
-        </svg>
-        <span className="text-2xs font-mono font-medium text-text-muted/80 bg-white/5 border border-border/50 rounded px-1.5 py-0.5">
-          {tool}
-        </span>
+      <div className={`rounded-md border overflow-hidden ${statusColor}`}>
+        {/* Header — clickable to toggle */}
+        <button
+          onClick={() => setOpen(v => !v)}
+          className="w-full flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-white/[0.03] transition-colors text-left"
+        >
+          {isDone ? (
+            <svg className="w-3 h-3 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          ) : (
+            <motion.svg
+              className="w-3 h-3 flex-shrink-0"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+              animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}
+            >
+              <path d="M21 12a9 9 0 1 1-6.22-8.56"/>
+            </motion.svg>
+          )}
+          <span className="text-2xs font-mono font-medium">{tool}</span>
+          {isDone && result && (
+            <span className="text-2xs text-text-muted/60 truncate max-w-[200px] ml-1">{result}</span>
+          )}
+          <motion.svg
+            className="w-3 h-3 ml-auto flex-shrink-0 opacity-50"
+            viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            animate={{ rotate: open ? 90 : 0 }} transition={{ duration: 0.15 }}
+          >
+            <polyline points="9 18 15 12 9 6"/>
+          </motion.svg>
+        </button>
+
+        {/* Body — collapsible */}
+        <AnimatePresence initial={false}>
+          {open && args && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="overflow-hidden border-t border-current/10"
+            >
+              <pre className="text-2xs font-mono leading-relaxed px-3 py-2 text-current/60 overflow-x-auto max-h-48 whitespace-pre-wrap break-all">
+                {args}
+              </pre>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-      {prettyPayload && (
-        <pre className="text-2xs text-text-muted/50 font-mono leading-relaxed overflow-x-auto max-w-[480px] whitespace-pre-wrap break-all">
-          {prettyPayload}
-        </pre>
-      )}
     </motion.div>
   )
 }
