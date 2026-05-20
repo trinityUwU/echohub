@@ -74,21 +74,29 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
   }, [model.id])
 
   const gpuUtil = gpuUtilPct / 100
-  const isGgufModel = model.quantization?.toUpperCase().startsWith('GGUF') ||
-    model.id?.toLowerCase().includes('gguf') ||
-    model.quantization?.toUpperCase().includes('Q4') ||
-    model.quantization?.toUpperCase().includes('Q5') ||
-    model.quantization?.toUpperCase().includes('Q8')
+  const _qUpper = (model.quantization ?? '').toUpperCase()
+  const _nameL  = (model.id ?? model.name ?? '').toLowerCase()
+  const isGgufModel =
+    _qUpper.startsWith('GGUF') ||
+    _nameL.includes('gguf') ||
+    _qUpper.includes('Q4') || _qUpper.includes('Q5') || _qUpper.includes('Q6') ||
+    _qUpper.includes('Q8') || _qUpper.includes('IQ') ||
+    // i1/i2/i3 quantizations (llama.cpp importance-matrix variants)
+    /[-_]i[1-4][-_.]/.test(_nameL) || _nameL.endsWith('-i1') || _nameL.endsWith('-i2')
   const engine  = check?.engine ?? (isGgufModel ? 'llama' : 'vllm')
   const params  = model.params_billion ?? 8
 
   // For GGUF models, recompute VRAM from params × quant factor (backend may have returned BF16 estimate)
   const ggufFactor = (() => {
-    const q = (model.quantization ?? '').toUpperCase()
-    if (q.includes('Q4')) return 0.55
-    if (q.includes('Q5')) return 0.67
-    if (q.includes('Q8')) return 1.1
-    if (q.includes('F16')) return 2.0
+    const q = _qUpper
+    const n = _nameL
+    if (q.includes('Q3') || n.includes('q3')) return 0.42
+    if (q.includes('Q4') || n.includes('q4')) return 0.55
+    if (q.includes('Q5') || n.includes('q5')) return 0.67
+    if (q.includes('Q6') || n.includes('q6')) return 0.80
+    if (q.includes('Q8') || n.includes('q8')) return 1.1
+    if (q.includes('F16') || n.includes('f16')) return 2.0
+    if (/i[1-4][-_.]/.test(n) || n.endsWith('-i1') || n.endsWith('-i2')) return 0.52
     return 0.55 // default Q4 estimate
   })()
   const backendEstimate = model.vram_estimate_gb ?? check?.vram_estimate_gb
