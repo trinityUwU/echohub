@@ -10,26 +10,35 @@ export interface Toast {
   message?: string
   duration?: number
   action?: ToastAction
+  createdAt: number
 }
 
 type Listener = (toasts: Toast[]) => void
 
-// Module-level singleton state
+// ── Singleton state ────────────────────────────────────────────────────────────
 let _toasts: Toast[] = []
+let _history: Toast[] = []             // full history, never auto-cleared
+let _historyListeners: Listener[] = [] // for the history page
 const _listeners: Listener[] = []
 
-function notify(): void {
+function notifyLive(): void {
   _listeners.forEach(fn => fn([..._toasts]))
 }
 
-export function addToast(opts: Omit<Toast, 'id'>): string {
+function notifyHistory(): void {
+  _historyListeners.forEach(fn => fn([..._history]))
+}
+
+export function addToast(opts: Omit<Toast, 'id' | 'createdAt'>): string {
   const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-  const toast: Toast = { ...opts, id }
+  const toast: Toast = { ...opts, id, createdAt: Date.now() }
 
-  _toasts = [..._toasts, toast].slice(-4) // max 4 visible
-  notify()
+  _toasts = [..._toasts, toast].slice(-4)
+  _history = [toast, ..._history].slice(0, 200)  // keep last 200
+  notifyLive()
+  notifyHistory()
 
-  const duration = opts.duration ?? (opts.type === 'error' ? 8000 : 4000)
+  const duration = opts.duration ?? (opts.type === 'error' ? 5000 : 4000)
   setTimeout(() => removeToast(id), duration)
 
   return id
@@ -37,14 +46,28 @@ export function addToast(opts: Omit<Toast, 'id'>): string {
 
 export function removeToast(id: string): void {
   _toasts = _toasts.filter(t => t.id !== id)
-  notify()
+  notifyLive()
 }
 
+export function clearHistory(): void {
+  _history = []
+  notifyHistory()
+}
+
+export function getHistory(): Toast[] {
+  return [..._history]
+}
+
+export function getUnreadCount(): number {
+  return _history.length
+}
+
+// ── React hook for live toasts ─────────────────────────────────────────────────
 import { useEffect, useState } from 'react'
 
 export function useToast(): {
   toasts: Toast[]
-  show: (opts: Omit<Toast, 'id'>) => string
+  show: (opts: Omit<Toast, 'id' | 'createdAt'>) => string
   dismiss: (id: string) => void
   success: (title: string, message?: string) => void
   error: (title: string, message?: string, action?: ToastAction) => void
@@ -70,4 +93,22 @@ export function useToast(): {
     warning: (title, message) => addToast({ type: 'warning', title, message }),
     info: (title, message) => addToast({ type: 'info', title, message }),
   }
+}
+
+// ── React hook for notification history ───────────────────────────────────────
+export function useNotificationHistory(): {
+  history: Toast[]
+  clear: () => void
+} {
+  const [history, setHistory] = useState<Toast[]>([..._history])
+
+  useEffect(() => {
+    _historyListeners.push(setHistory)
+    return () => {
+      const idx = _historyListeners.indexOf(setHistory)
+      if (idx !== -1) _historyListeners.splice(idx, 1)
+    }
+  }, [])
+
+  return { history, clear: clearHistory }
 }

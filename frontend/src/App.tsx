@@ -12,6 +12,8 @@ import { DownloadsPage } from '@/components/downloads/DownloadsPage'
 import { SettingsPage } from '@/components/settings/SettingsPage'
 import { FineTunePage } from '@/components/finetune/FineTunePage'
 import { SkillsPage } from '@/components/skills/SkillsPage'
+import { NotificationsPage } from '@/components/notifications/NotificationsPage'
+import { addToast } from '@/hooks/useToast'
 import { LoadModelModal } from '@/components/modals/LoadModelModal'
 import { ModelPickerModal } from '@/components/modals/ModelPickerModal'
 import { useDialog } from '@/components/shared/Dialog'
@@ -21,7 +23,7 @@ import { Toaster } from '@/components/shared/Toaster'
 import { OnboardingWizard } from '@/components/onboarding/OnboardingWizard'
 import { getOnboardingStatus } from '@/api/client'
 
-type Page = 'chat' | 'library' | 'discover' | 'downloads' | 'finetune' | 'skills' | 'settings'
+type Page = 'chat' | 'library' | 'discover' | 'downloads' | 'finetune' | 'skills' | 'notifications' | 'settings'
 
 export default function App(): React.ReactElement {
   const { confirm, element: dialogEl } = useDialog()
@@ -66,6 +68,21 @@ export default function App(): React.ReactElement {
     }
     return () => clearInterval(loadPctTimer.current ?? undefined)
   }, [loadingModelId])
+
+  // Model load errors → toast (replaces the old LoadErrorToast component)
+  const prevLoadError = useRef<string | null>(null)
+  useEffect(() => {
+    if (loadError && loadError !== prevLoadError.current) {
+      prevLoadError.current = loadError
+      addToast({
+        type: 'error',
+        title: 'Model failed to load',
+        message: loadError,
+        duration: 5000,
+      })
+    }
+    if (!loadError) prevLoadError.current = null
+  }, [loadError])
 
   useEffect(() => {
     getOnboardingStatus()
@@ -228,6 +245,9 @@ export default function App(): React.ReactElement {
         <div className={`flex flex-1 overflow-hidden ${page === 'skills' ? 'animate-fade-in' : 'hidden'}`}>
           <SkillsPage onGoToSettings={() => setPage('settings')} />
         </div>
+        <div className={`flex flex-1 overflow-hidden ${page === 'notifications' ? 'animate-fade-in' : 'hidden'}`}>
+          <NotificationsPage />
+        </div>
         <div className={`flex flex-1 overflow-hidden ${page === 'settings' ? 'animate-fade-in' : 'hidden'}`}>
           <SettingsPage initialTab={settingsInitialTab} />
         </div>
@@ -254,7 +274,6 @@ export default function App(): React.ReactElement {
           onGoToEngines={() => { setShowPicker(false); setSettingsInitialTab('engines'); setPage('settings') }}
         />
       )}
-      {loadError && <LoadErrorToast message={loadError} />}
       {showOnboarding && <OnboardingWizard onComplete={() => setShowOnboarding(false)} />}
       {dialogEl}
       <ChangelogNotification />
@@ -264,26 +283,3 @@ export default function App(): React.ReactElement {
   )
 }
 
-function LoadErrorToast({ message }: { message: string }): React.ReactElement | null {
-  const [visible, setVisible] = useState(true)
-  const dismiss = useCallback(() => setVisible(false), [])
-
-  useEffect(() => {
-    const t = setTimeout(dismiss, 60_000)
-    return () => clearTimeout(t)
-  }, [dismiss])
-
-  if (!visible) return null
-
-  return (
-    <div className="fixed bottom-4 right-4 bg-red/15 border border-red/30 text-red text-sm px-4 py-3 rounded-md max-w-sm flex items-start gap-3">
-      <span className="flex-1">Load failed: {message}</span>
-      <button onClick={dismiss}
-        className="flex-shrink-0 w-4 h-4 flex items-center justify-center opacity-60 hover:opacity-100 cursor-pointer transition-opacity mt-0.5">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="w-3 h-3">
-          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-      </button>
-    </div>
-  )
-}

@@ -2,6 +2,26 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { detectMcp, startMcpStream, stopMcp, getMcpStatus } from '@/api/client'
 import type { CommunitySkill, McpStatus } from '@/api/client'
+import { AlertBanner } from '@/components/shared/AlertBanner'
+
+function suggestFix(error: string): string | undefined {
+  const e = error.toLowerCase()
+  if (e.includes('cannot find module') || e.includes('module not found'))
+    return 'Run: bun install (dependencies are missing)'
+  if (e.includes('eaddrinuse') || e.includes('address already in use'))
+    return 'Port is already in use — stop any other instance of this server'
+  if (e.includes('.next') || e.includes('could not find a production build'))
+    return 'Run: bun run build (the project needs to be built first)'
+  if (e.includes('enoent') || e.includes('no such file'))
+    return 'The start command references a file that does not exist — check mcp_start_command'
+  if (e.includes('permission denied'))
+    return 'Permission error — check file ownership or run: chmod +x the entrypoint'
+  if (e.includes('syntax error') || e.includes('unexpected token'))
+    return 'Syntax error in source — run the start command manually to see full details'
+  if (e.includes('health check') || e.includes('timeout'))
+    return 'Server started but did not respond — check mcp.log for startup errors'
+  return undefined
+}
 
 // ── Plug icon ──────────────────────────────────────────────────────────────────
 
@@ -130,7 +150,9 @@ export function McpSection({ skill }: { skill: CommunitySkill }): React.ReactEle
             )}
           </button>
         ) : null}
-        {error && <p className="text-xs text-red">{error}</p>}
+        {error && (
+          <AlertBanner type="error" title={error} onDismiss={() => setError(null)} />
+        )}
       </div>
     )
   }
@@ -204,12 +226,22 @@ export function McpSection({ skill }: { skill: CommunitySkill }): React.ReactEle
             <span className="text-2xs text-text-secondary font-mono truncate">{startCommand}</span>
           </div>
         )}
-        {mcpStatus?.error && (
-          <p className="text-xs text-red leading-relaxed">{mcpStatus.error}</p>
-        )}
       </motion.div>
 
-      {error && <p className="text-xs text-red">{error}</p>}
+      {/* Error banner with auto-suggested fix */}
+      {(error || (status === 'error' && mcpStatus?.error)) && (
+        <AlertBanner
+          type="error"
+          title={error ?? 'Server failed to start'}
+          detail={!error && mcpStatus?.error ? mcpStatus.error : undefined}
+          solution={suggestFix(error ?? mcpStatus?.error ?? '')}
+          onDismiss={() => setError(null)}
+          onAction={error?.includes('build') || status === 'error' ? {
+            label: 'Retry start',
+            onClick: handleStart,
+          } : undefined}
+        />
+      )}
     </div>
   )
 }
