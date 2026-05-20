@@ -359,13 +359,23 @@ async def tool_chat(req: ToolChatRequest):
         raise HTTPException(status_code=404, detail="No model loaded.")
 
     tools = get_tools(req.enabled_tools)
-    # Inject tools from running MCP servers
+    _mcp_awareness_blocks: list[str] = []
+    # Inject tools from running MCP servers + collect their awareness blocks
     try:
         from backend.services.mcp_client import get_mcp_tools_definitions
+        from backend.services.db import get_running_mcp_servers
+        from backend.routers.skills import _load_registry
         mcp_tools = await get_mcp_tools_definitions()
         if mcp_tools:
             tools = tools + mcp_tools
             logger.info(f"[tool-chat] injected {len(mcp_tools)} MCP tool(s) from running servers")
+        # Collect awareness blocks from running MCP server registry entries
+        running_ids = {s["skill_id"] for s in get_running_mcp_servers()}
+        if running_ids:
+            registry = _load_registry()
+            for entry in registry:
+                if entry.get("id") in running_ids and entry.get("awareness", "").strip():
+                    _mcp_awareness_blocks.append(entry["awareness"].strip())
     except Exception as _mcp_err:
         logger.debug(f"[tool-chat] MCP tools injection skipped: {_mcp_err}")
     MAX_ITERATIONS = 40  # generous — model decides when it's done; we warn at threshold
@@ -398,7 +408,10 @@ async def tool_chat(req: ToolChatRequest):
             "- After all tool calls, write a brief 1-2 sentence summary of what was done. No code blocks in the summary."
         )
         user_system = (req.system_prompt or "").strip()
-        awareness = (req.awareness_block or "").strip()
+        # Merge awareness from: frontend skills toggles + running MCP servers
+        skill_awareness = (req.awareness_block or "").strip()
+        all_awareness_parts = [p for p in [skill_awareness] + _mcp_awareness_blocks if p]
+        awareness = "\n".join(all_awareness_parts)
         # _DEV_SYSTEM_PROMPT is always prepended — user system prompt appended after, never replacing it
         combined_system = _DEV_SYSTEM_PROMPT
         if awareness:
