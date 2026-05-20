@@ -180,12 +180,31 @@ def detect_mcp_server(skill_path: Path) -> dict[str, Any] | None:
                 raw_cmd = scripts.get("start") or scripts.get("dev") or ""
                 runner = "bun run start" if scripts.get("start") else "bun run dev"
                 start_command = runner
+
+                # Scan source for StdioServerTransport — definitive stdio marker for Node MCP
+                is_stdio_node = False
+                for ts_file in list(skill_path.rglob("*.ts"))[:40] + list(skill_path.rglob("*.js"))[:20]:
+                    if "node_modules" in str(ts_file) or ".git" in str(ts_file):
+                        continue
+                    try:
+                        if "StdioServerTransport" in ts_file.read_text(errors="ignore"):
+                            is_stdio_node = True
+                            break
+                    except Exception:
+                        pass
+
+                if is_stdio_node:
+                    return {
+                        "start_command": start_command,
+                        "port_hint": None,
+                        "transport": "stdio",
+                    }
+
                 port_hint = _extract_port(raw_cmd) or 3000
-                transport = "http"
                 return {
                     "start_command": start_command,
                     "port_hint": port_hint,
-                    "transport": transport,
+                    "transport": "http",
                 }
         except Exception:
             pass
