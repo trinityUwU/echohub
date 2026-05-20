@@ -331,12 +331,12 @@ function ChatContent({
   if (view === 'projects') {
     return (
       <ProjectsPanel mode={mode} loadedModelHasTools={loadedModelHasTools}>
-        {inner}
+        <div className="flex flex-col flex-1 overflow-hidden">{inner}</div>
       </ProjectsPanel>
     )
   }
 
-  return <>{inner}</>
+  return <div className="flex flex-col flex-1 overflow-hidden">{inner}</div>
 }
 
 interface PanelWrapperProps {
