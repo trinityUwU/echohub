@@ -70,7 +70,7 @@ function SetupSection(): React.ReactElement {
       <SettingsGroup title="Hugging Face" desc="Required for gated models and faster downloads.">
         <HfTokenRow />
       </SettingsGroup>
-      <SettingsGroup title="GitHub" desc="Optional — increases Skills search rate limit from 60 to 5000 requests/hour.">
+      <SettingsGroup title="GitHub" desc="Optional — increases Skills search rate limit from 10 to 30 requests/minute.">
         <GithubTokenRow />
       </SettingsGroup>
     </>
@@ -156,7 +156,7 @@ function GithubTokenRow(): React.ReactElement {
   }
 
   return (
-    <SettingsRow label="GitHub Token" desc={preview ? `Active: ${preview}` : "Optional — 5000 req/h vs 60 unauthenticated"}>
+    <SettingsRow label="GitHub Token" desc={preview ? `Active: ${preview}` : "Optional — 30 req/min vs 10 unauthenticated (search API)"}>
       <div className="flex flex-col items-end gap-1.5">
         <div className="flex gap-2">
           <input type="password" value={token} onChange={e => setToken(e.target.value)}

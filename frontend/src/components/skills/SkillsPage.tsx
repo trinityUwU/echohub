@@ -224,7 +224,7 @@ function DiscoverTab({ community, state, onStateChange, onInstall, onGoToSetting
             <svg className="w-4 h-4 mt-0.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
             </svg>
-            <span>GitHub rate limit reached. {results.length > 0 ? 'Showing cached results.' : ''} Add a GitHub token in Settings to increase to 5000 req/h.</span>
+            <span>GitHub rate limit reached. {results.length > 0 ? 'Showing cached results.' : ''} Add a GitHub token in Settings to increase to 30 req/min.</span>
           </div>
         )}
         {error && !rateLimited && (
@@ -278,7 +278,7 @@ function RateLimitBadge({ remaining, limit, resetTs, authenticated, onGoToSettin
     <span className={`text-2xs ${color} flex items-center gap-1`}>
       {remaining !== null && limit !== null
         ? <>{remaining}/{limit} req remaining{resetIn !== null && remaining < limit / 2 ? ` · resets in ${resetIn}m` : ''}</>
-        : authenticated ? '5000 req/h' : '60 req/h'
+        : authenticated ? '30 req/min' : '10 req/min'
       }
       {!authenticated && (
         <> · <button onClick={onGoToSettings} className="text-accent hover:underline cursor-pointer">Add token</button></>
