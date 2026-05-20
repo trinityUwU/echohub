@@ -389,6 +389,11 @@ async def tool_chat(req: ToolChatRequest):
         _active_engine = engine_router.get_active_engine()
         _model_status = engine_router.get_status()
         messages: list[dict] = []
+        _SYNTHESIS_PROMPT = (
+            "You have reached the tool call limit. Stop all research immediately. "
+            "Based on everything you have gathered so far, write a complete, well-structured final answer. "
+            "Do not call any more tools. Synthesize all findings now."
+        )
         _DEV_SYSTEM_PROMPT = (
             "You are a coding assistant operating in Dev mode with access to a file system workspace.\n"
             "Available tools: create_file, read_file, edit_file, delete_file, list_files, get_workspace_info, run_command, set_tool_limit, fetch_url, web_search.\n\n"
@@ -657,9 +662,9 @@ async def tool_chat(req: ToolChatRequest):
                                     total_tool_calls += 1
                                     _maybe_inject_cap_warning()
                                     if total_tool_calls >= MAX_TOOL_CALLS:
-                                        _cap = _json.dumps({"type": "text_chunk", "content": "\n\n[Tool call limit reached. Resume in a new message.]"})
-                                        yield f"data: {_cap}\n\n"
                                         stop_event.set()
+                                        messages.append({"role": "user", "content": _SYNTHESIS_PROMPT})
+                                        tool_executed_this_pass = True
                                         break
 
                                     stop_event.set()
@@ -714,8 +719,20 @@ async def tool_chat(req: ToolChatRequest):
             break
 
         else:
-            _cap2 = _json.dumps({"type": "text_chunk", "content": "\n\n[Tool call limit reached. Resume in a new message.]"})
-            yield f"data: {_cap2}\n\n"
+            # MAX_ITERATIONS exhausted — inject synthesis prompt and do one final pass
+            messages.append({"role": "user", "content": _SYNTHESIS_PROMPT})
+            async for _chunk in engine_router.generate(
+                messages=messages,
+                max_tokens=req.max_tokens,
+                temperature=req.temperature,
+                stream=True,
+            ):
+                if isinstance(_chunk, dict):
+                    _c = _chunk.get("content") or _chunk.get("text") or ""
+                else:
+                    _c = str(_chunk)
+                if _c:
+                    yield f"data: {_json.dumps({'type': 'text_chunk', 'content': _c})}\n\n"
 
         # Always emit done with workspace file list — even after errors/loops
         try:
