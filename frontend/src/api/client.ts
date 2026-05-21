@@ -14,7 +14,7 @@ export const getConversations = (): Promise<ConversationSummary[]> =>
 export const createConversation = (id: string, title: string, modelId?: string): Promise<ConversationSummary> =>
   apiRequest('/conversations', { method: 'POST', body: JSON.stringify({ id, title, model_id: modelId }) })
 
-export const updateConversation = (id: string, data: { title?: string; model_id?: string }): Promise<ConversationSummary> =>
+export const updateConversation = (id: string, data: { title?: string; model_id?: string; memory_enabled?: boolean }): Promise<ConversationSummary> =>
   apiRequest(`/conversations/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 
 export const deleteConversation = (id: string): Promise<void> =>
@@ -871,3 +871,37 @@ export const configureMcp = (
   config?: { start_command?: string; port?: number; env?: Record<string, string> },
 ): Promise<CommunitySkill> =>
   apiRequest(`/skills/${id}/mcp/configure`, { method: 'POST', body: JSON.stringify(config ?? {}) })
+
+// ── Memory ────────────────────────────────────────────────────────────────────
+
+export interface MemoryEntry {
+  id: string
+  content: string
+  type: string
+  conv_id: string
+  project_id: string
+  importance: number
+  distance: number
+  created_at: string
+}
+
+export interface MemoryStats {
+  total: number
+  by_type: Record<string, number>
+  chroma_dir: string
+}
+
+export const getMemoryStats = (): Promise<MemoryStats> =>
+  apiRequest('/memory/stats')
+
+export const listMemories = (params?: { conv_id?: string; project_id?: string; type?: string; limit?: number }): Promise<MemoryEntry[]> => {
+  const q = new URLSearchParams()
+  if (params?.conv_id) q.set('conv_id', params.conv_id)
+  if (params?.project_id) q.set('project_id', params.project_id)
+  if (params?.type) q.set('type', params.type)
+  if (params?.limit) q.set('limit', String(params.limit))
+  return apiRequest(`/memory/list${q.toString() ? '?' + q.toString() : ''}`)
+}
+
+export const deleteMemory = (id: string): Promise<void> =>
+  apiRequest(`/memory/${id}`, { method: 'DELETE' })

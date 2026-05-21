@@ -121,6 +121,7 @@ export interface ConversationSummary {
   id: string
   title: string
   model_id: string | null
+  memory_enabled: boolean
   created_at: string
   updated_at: string
   message_count: number

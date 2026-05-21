@@ -37,6 +37,7 @@ interface ChatPageProps {
   onArchiveConversation: (id: string) => void
   onUnarchiveConversation: (id: string) => void
   onRenameConversation: (id: string, title: string) => void
+  onToggleMemory?: (id: string) => void
   onOpenPicker: () => void
   onEject: () => void
   onGoToSettings: () => void
@@ -57,7 +58,7 @@ export function ChatPage({
   loadedModel, loading, loadingPct, gpu, hasCuda,
   conversations, archivedConversations, activeId, activeMessages,
   onNewConversation, onSelectConversation,
-  onDeleteConversation, onArchiveConversation, onUnarchiveConversation, onRenameConversation,
+  onDeleteConversation, onArchiveConversation, onUnarchiveConversation, onRenameConversation, onToggleMemory,
   onOpenPicker, onEject, onGoToSettings,
   setActiveMessages, onLoadModel,
 }: ChatPageProps): React.ReactElement {
@@ -274,6 +275,8 @@ export function ChatPage({
         onViewChange={setView}
         onModeChange={setMode}
         loadedModelHasTools={!!loadedModel?.capabilities?.tools}
+        memoryEnabled={activeConv?.memory_enabled ?? false}
+        onToggleMemory={activeId && onToggleMemory ? () => onToggleMemory(activeId) : undefined}
       />
       {!hasCuda && <CpuBanner onGoToSettings={onGoToSettings} />}
       <MigrationBanner onGoToSettings={onGoToSettings} />
