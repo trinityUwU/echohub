@@ -484,6 +484,48 @@ async def tool_chat(req: ToolChatRequest):
             combined_system += f"\n\n---\nADDITIONAL INSTRUCTIONS:\n{user_system}"
         messages.append({"role": "system", "content": combined_system})
 
+        # Inject memory context if memory is enabled for this conversation
+        if req.conv_id and req.conv_id != "global":
+            try:
+                from backend.services.conversation_manager import get_conversation
+                from backend.services import memory_service as _ms
+                conv_data = get_conversation(req.conv_id)
+                if conv_data and conv_data.get("memory_enabled"):
+                    last_user_msg = next(
+                        (m.get("content", "") for m in reversed(req.messages) if m.get("role") == "user"),
+                        "",
+                    )
+                    if isinstance(last_user_msg, list):
+                        last_user_msg = " ".join(
+                            p.get("text", "") for p in last_user_msg if isinstance(p, dict)
+                        )
+                    memories = _ms.search(query=str(last_user_msg)[:300], limit=5)
+                    if memories:
+                        mem_block = "\n".join(
+                            f"[{m.type}] (importance={m.importance}) {m.content}"
+                            for m in memories
+                        )
+                        combined_system += (
+                            "\n\n---\nMEMORY CONTEXT (from your persistent knowledge base):\n"
+                            + mem_block
+                            + "\n\nYou can use search_memory, store_memory, and invoke_agent tools. "
+                            "Store important new facts the user shares. Search memory before answering "
+                            "questions about past decisions or preferences."
+                        )
+                    else:
+                        combined_system += (
+                            "\n\n---\nMemory is enabled for this conversation. "
+                            "Use store_memory to save important facts, "
+                            "search_memory to retrieve past knowledge, "
+                            "and invoke_agent to delegate subtasks."
+                        )
+            except Exception as _me:
+                logger.debug("[tool-chat] memory inject failed: {}", _me)
+
+        # Update combined_system in messages after memory injection
+        # (re-assign the last system message we appended above)
+        messages[-1]["content"] = combined_system
+
         # Filter out empty messages — llama.cpp crashes on empty assistant content
         for m in req.messages:
             role: str = m.get("role", "")
