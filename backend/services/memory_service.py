@@ -15,7 +15,7 @@ from backend.services.user_data import get_user_data_dir
 
 MemoryType = Literal["user_trait", "decision", "fact", "context", "error_learned"]
 
-_CHROMA_DIR = Path(os.getenv("CHROMA_DIR", "")) or (get_user_data_dir() / "chromadb")
+_CHROMA_DIR = Path(os.getenv("CHROMA_DIR")) if os.getenv("CHROMA_DIR") else (get_user_data_dir() / "chromadb")
 _client: chromadb.ClientAPI | None = None
 
 

@@ -75,7 +75,8 @@ _current_model: Optional[ModelInfo] = None
 _loading_model_id: Optional[str] = None
 _load_error: Optional[str] = None
 _eject_requested: bool = False
-_lock = threading.Lock()
+from backend.services.llama_lock import get_lock as _get_llama_lock
+_lock = _get_llama_lock()
 _load_config: Optional[dict] = None           # params used at last successful load
 
 LOG_PATH = Path(__file__).resolve().parents[2] / "logs" / "llama.log"
