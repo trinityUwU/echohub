@@ -161,6 +161,7 @@ export default function App(): React.ReactElement {
     enforceEager: boolean; maxCudagraphCaptureSize: number | null
     nGpuLayers?: number | null; cpuOverflow?: boolean; isMoe?: boolean
     kvQuant?: 'q8_0' | 'q4_0' | 'bf16'
+    offloadKqv?: boolean; nBatch?: number | null
   }): void => {
     if (!pendingLoad) return
     loadModel(pendingLoad.id, {
@@ -172,6 +173,8 @@ export default function App(): React.ReactElement {
       cpu_overflow: cfg.cpuOverflow ?? false,
       is_moe: cfg.isMoe ?? false,
       kv_quant: cfg.kvQuant ?? 'q8_0',
+      offload_kqv: cfg.offloadKqv ?? false,
+      n_batch: cfg.nBatch ?? null,
     })
     setPendingLoad(null)
   }

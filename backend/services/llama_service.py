@@ -109,6 +109,8 @@ def load_model(
     mmproj_path: Optional[str] = None,
     vision_handler: Optional[str] = None,
     kv_quant: Optional[str] = None,
+    offload_kqv: bool = False,
+    n_batch_override: int | None = None,
 ) -> None:
     """Charge le modèle GGUF. Bloquant — appelé depuis un thread."""
     global _llm, _current_model, _load_error, _eject_requested, _load_config
@@ -148,9 +150,14 @@ def load_model(
 
     n_threads = _detect_n_threads()
 
+    # n_batch: user override > MoE constraint > default 512
+    # MoE gets 128 to reduce activation memory — see comment below
+    default_batch = 128 if is_moe else 512
+    n_batch = n_batch_override if n_batch_override is not None else default_batch
+
     _log(f"[llama] Loading {model_id}")
     _log(f"[llama] File: {gguf_path}")
-    _log(f"[llama] n_gpu_layers={n_gpu} | n_ctx={n_ctx} | n_batch=512 | flash_attn={_flash_attn_enabled()} | n_threads={n_threads} | cpu_overflow={cpu_overflow} | is_moe={is_moe} | vision={mmproj_path is not None}")
+    _log(f"[llama] n_gpu_layers={n_gpu} | n_ctx={n_ctx} | n_batch={n_batch} | flash_attn={_flash_attn_enabled()} | n_threads={n_threads} | cpu_overflow={cpu_overflow} | is_moe={is_moe} | offload_kqv={offload_kqv} | vision={mmproj_path is not None}")
 
     if _eject_requested:
         raise RuntimeError("Ejected by user")
@@ -166,7 +173,7 @@ def load_model(
     llama_kwargs: dict = dict(
         model_path=gguf_path,
         n_ctx=n_ctx,
-        n_batch=512,
+        n_batch=n_batch,
         n_gpu_layers=n_gpu,
         flash_attn=_flash_attn_enabled(),
         n_threads=n_threads,
@@ -175,14 +182,14 @@ def load_model(
         use_mlock=False,
         type_k=kv_type_id,
         type_v=kv_type_id,
+        offload_kqv=offload_kqv,
     )
     # split_mode: ROW for dense cpu_overflow, LAYER for MoE (MoE does not support tensor parallelism)
     if is_moe:
         try:
             from llama_cpp import LLAMA_SPLIT_MODE_LAYER
             llama_kwargs["split_mode"] = LLAMA_SPLIT_MODE_LAYER
-            llama_kwargs["n_batch"] = 128  # reduce activation memory for MoE inference
-            _log("[llama] MoE: split_mode=LAYER, n_batch=128")
+            _log(f"[llama] MoE: split_mode=LAYER, n_batch={n_batch}")
         except ImportError:
             _log("[llama] MoE: LLAMA_SPLIT_MODE_LAYER not available, using default")
     elif cpu_overflow and n_gpu != 0:
@@ -192,9 +199,9 @@ def load_model(
         except ImportError:
             _log("[llama] cpu_overflow requested but split_mode not available in this llama-cpp version", "warn")
 
-    # MoE with CPU overflow: reduce n_batch and skip CUDA graph profiling to prevent OOM at 88%
+    # MoE with CPU overflow: skip CUDA graph profiling to prevent OOM at 88%
+    # n_batch already set to 128 for MoE above unless user overrode it
     if is_moe and cpu_overflow:
-        llama_kwargs["n_batch"] = 128
         llama_kwargs["use_mmap"] = True
         # no_perf disables CUDA graph warmup in llama-cpp-python >= 0.3.x
         try:
@@ -233,8 +240,11 @@ def load_model(
         "engine": "llama",
         "n_ctx": n_ctx,
         "n_gpu_layers": n_gpu,
+        "n_batch": n_batch,
         "cpu_overflow": cpu_overflow,
         "is_moe": is_moe,
+        "offload_kqv": offload_kqv,
+        "kv_quant": kv_quant or "q8_0",
         "gguf_path": gguf_path,
     }
     logger.info(f"llama model loaded: {model_id} ({elapsed:.1f}s)")
@@ -251,6 +261,8 @@ def load_model_async(
     mmproj_path: Optional[str] = None,
     vision_handler: Optional[str] = None,
     kv_quant: Optional[str] = None,
+    offload_kqv: bool = False,
+    n_batch_override: int | None = None,
 ) -> None:
     """Lance le chargement dans un thread background — retourne immédiatement."""
     global _loading_model_id, _load_error, _eject_requested
@@ -261,7 +273,7 @@ def load_model_async(
     def _run() -> None:
         global _loading_model_id, _load_error
         try:
-            load_model(gguf_path, model_id, n_ctx, gpu_type, n_gpu_layers_override, cpu_overflow, is_moe, mmproj_path, vision_handler, kv_quant)
+            load_model(gguf_path, model_id, n_ctx, gpu_type, n_gpu_layers_override, cpu_overflow, is_moe, mmproj_path, vision_handler, kv_quant, offload_kqv, n_batch_override)
         except Exception as e:
             if not _eject_requested:
                 _load_error = str(e)

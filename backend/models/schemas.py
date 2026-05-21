@@ -58,6 +58,8 @@ class LoadRequest(BaseModel):
     gguf_path: Optional[str] = None    # absolute path for finetuned GGUFs — bypasses HF resolution
     is_moe: bool = False               # llama.cpp only: MoE model — reduces n_batch + disables CUDA graph profiling
     kv_quant: Optional[str] = None     # llama.cpp only: KV cache quantization — "q8_0" | "q4_0" | "bf16"
+    offload_kqv: bool = False          # llama.cpp only: move KV cache to system RAM — frees VRAM, tiny PCIe latency
+    n_batch: Optional[int] = None      # llama.cpp only: batch size — 512 (fast prefill) | 256 | 128 | 64 (low VRAM)
 
 
 class ChatMessage(BaseModel):

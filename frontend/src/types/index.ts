@@ -62,6 +62,8 @@ export interface LoadRequest {
   gguf_path?: string | null
   is_moe?: boolean
   kv_quant?: 'q8_0' | 'q4_0' | 'bf16'
+  offload_kqv?: boolean
+  n_batch?: number | null
 }
 
 export interface FinetunedModel {

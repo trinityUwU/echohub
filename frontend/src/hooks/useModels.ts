@@ -67,6 +67,7 @@ export function useModels() {
     maxModelLen?: number; gpuMemoryUtilization?: number; enforceEager?: boolean
     maxCudagraphCaptureSize?: number | null; n_gpu_layers?: number | null; cpu_overflow?: boolean
     gguf_path?: string | null; is_moe?: boolean; kv_quant?: 'q8_0' | 'q4_0' | 'bf16'
+    offload_kqv?: boolean; n_batch?: number | null; ctx_mode?: 'adaptive' | 'fixed'
   }
 
   const _doLoad = useCallback(async (modelId: string, req: import('@/types').LoadRequest) => {
@@ -99,6 +100,8 @@ export function useModels() {
       cpu_overflow: config?.cpu_overflow ?? false,
       is_moe: config?.is_moe ?? false,
       kv_quant: config?.kv_quant,
+      offload_kqv: config?.offload_kqv ?? false,
+      n_batch: config?.n_batch ?? null,
     })
   }, [_doLoad])
 

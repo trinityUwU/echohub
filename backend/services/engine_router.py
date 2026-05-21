@@ -199,6 +199,8 @@ def load_model_async(
     cpu_overflow: bool = False,
     is_moe: bool = False,
     kv_quant: Optional[str] = None,
+    offload_kqv: bool = False,
+    n_batch: Optional[int] = None,
 ) -> None:
     from backend.services import llama_service, vllm_service
 
@@ -227,6 +229,8 @@ def load_model_async(
             mmproj_path=mmproj,
             vision_handler=vision_handler,
             kv_quant=kv_quant,
+            offload_kqv=offload_kqv,
+            n_batch_override=n_batch,
         )
         return
 

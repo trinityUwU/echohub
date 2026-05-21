@@ -22,6 +22,7 @@ interface LoadModelModalProps {
     enforceEager: boolean; maxCudagraphCaptureSize: number | null
     nGpuLayers?: number | null; cpuOverflow?: boolean; isMoe?: boolean
     kvQuant?: 'q8_0' | 'q4_0' | 'bf16'
+    offloadKqv?: boolean; nBatch?: number | null
   }) => void
   onCancel: () => void
 }
@@ -45,6 +46,9 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
   const [cpuOverflow, setCpuOverflow] = useState(false)
   const [moeConfig, setMoeConfig] = useState<MoeLoadConfig | null>(null)
   const [kvQuant, setKvQuant] = useState<'q8_0' | 'q4_0' | 'bf16'>('q8_0')
+  const [offloadKqv, setOffloadKqv] = useState(false)
+  const [nBatch, setNBatch] = useState<64 | 128 | 256 | 512>(model.is_moe ? 128 : 512)
+  const [ctxMode, setCtxMode] = useState<'fixed' | 'adaptive'>('fixed')
 
   useEffect(() => {
     getInferenceSettings().then(s => {
@@ -118,7 +122,10 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
   // KV cache VRAM: applies to both vLLM and llama.cpp
   // llama.cpp KV factor: bf16=1.0, q8_0=0.5, q4_0=0.25
   const kvQuantFactor = kvQuant === 'bf16' ? 1.0 : kvQuant === 'q8_0' ? 0.5 : 0.25
-  const kv        = engine === 'vllm' ? kvCacheGb(ctxLen, params) : kvCacheGb(ctxLen, params) * kvQuantFactor
+  const kvTotal   = engine === 'vllm' ? kvCacheGb(ctxLen, params) : kvCacheGb(ctxLen, params) * kvQuantFactor
+  // offload_kqv: KV cache in system RAM instead of VRAM — zero VRAM cost for KV
+  const kv        = (engine === 'llama' && offloadKqv) ? 0 : kvTotal
+  const kvOffloadedGb = (engine === 'llama' && offloadKqv) ? kvTotal : 0
   const overhead  = engine === 'vllm' ? CUDA_OVERHEAD_GB : 0
   const totalNeed = weightsGb + kv + overhead
 
@@ -147,13 +154,16 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
         <Btn variant="primary" disabled={!canSubmit}
           onClick={() => onConfirm({
             gpuMemoryUtilization: gpuUtil,
-            maxModelLen: ctxLen,
+            // adaptive mode: pass null so the backend allocates only what the conversation needs
+            maxModelLen: ctxMode === 'adaptive' ? null : ctxLen,
             enforceEager: cudaGraphs === 'disabled',
             maxCudagraphCaptureSize: cudaGraphs === 'limited' ? maxCaptureSize : null,
             nGpuLayers: resolvedNGpuLayers,
             cpuOverflow: engine === 'llama' ? cpuOverflow : false,
             isMoe: model.is_moe ?? false,
             kvQuant: engine === 'llama' ? kvQuant : undefined,
+            offloadKqv: engine === 'llama' ? offloadKqv : false,
+            nBatch: engine === 'llama' ? nBatch : null,
           })}>
           Load model
         </Btn>
@@ -222,7 +232,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
 
       {/* VRAM preview */}
       <VramBar totalGb={vramTotalGb} usedGb={vramUsedGb} weightsGb={weightsGb}
-        kvGb={kv} overheadGb={overhead} budgetGb={budgetGb}
+        kvGb={kv} kvOffloadedGb={kvOffloadedGb} overheadGb={overhead} budgetGb={budgetGb}
         cudaFreeGib={cudaFreeGib} isOom={isOom} engine={engine} />
 
       {/* Parameters */}
@@ -277,20 +287,73 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
           </div>
         )}
 
-        <Slider label="Context length"
-          value={Math.min(ctxLen, Math.max(2048, ctxMax))}
-          min={2048} max={Math.max(2048, ctxMax)} step={2048}
-          onChange={setCtxLen} formatValue={v => v.toLocaleString('en')} />
-        {engine === 'vllm' && ctxMax < (model.max_context_window ?? 131072) && (
-          <div className="text-xs text-yellow">
-            Max safe ctx at {gpuUtilPct}% util: {ctxMax.toLocaleString('en')} tokens
+        {/* Context mode — llama.cpp only */}
+        {engine === 'llama' && (
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-2.5">Context length</div>
+            <div className="flex gap-2 mb-2.5">
+              {([
+                {
+                  id: 'fixed' as const,
+                  label: 'Fixed',
+                  pros: 'Predictable VRAM, best for long conversations',
+                  cons: 'Allocates full KV cache at load even if unused',
+                },
+                {
+                  id: 'adaptive' as const,
+                  label: 'Adaptive',
+                  pros: 'Allocates only what each conversation needs',
+                  cons: 'May OOM mid-conversation if context grows unexpectedly',
+                },
+              ]).map(opt => {
+                const active = ctxMode === opt.id
+                return (
+                  <button key={opt.id} onClick={() => setCtxMode(opt.id)}
+                    className={`flex-1 flex flex-col gap-1 px-3 py-2.5 rounded-sm border cursor-pointer transition-colors text-left ${
+                      active ? 'border-accent/40 bg-accent-dim' : 'bg-elevated border-border hover:border-border-hover'
+                    }`}>
+                    <div className={`text-sm font-semibold ${active ? 'text-accent' : 'text-text-primary'}`}>{opt.label}</div>
+                    <div className="text-2xs text-green leading-tight">+ {opt.pros}</div>
+                    <div className="text-2xs text-text-muted leading-tight">− {opt.cons}</div>
+                  </button>
+                )
+              })}
+            </div>
+            {ctxMode === 'fixed' && (
+              <Slider label="Fixed context"
+                value={Math.min(ctxLen, Math.max(2048, ctxMax))}
+                min={2048} max={Math.max(2048, ctxMax)} step={2048}
+                onChange={setCtxLen} formatValue={v => v.toLocaleString('en')} />
+            )}
+            {ctxMode === 'adaptive' && (
+              <div className="text-xs text-text-muted bg-elevated border border-border rounded-sm px-3 py-2">
+                Context allocated dynamically per conversation — no pre-allocation. VRAM freed after unload.
+              </div>
+            )}
           </div>
         )}
 
-        {/* KV Cache Quantization — llama.cpp only */}
+        {/* Context length — vLLM */}
+        {engine === 'vllm' && (
+          <>
+            <Slider label="Context length"
+              value={Math.min(ctxLen, Math.max(2048, ctxMax))}
+              min={2048} max={Math.max(2048, ctxMax)} step={2048}
+              onChange={setCtxLen} formatValue={v => v.toLocaleString('en')} />
+            {ctxMax < (model.max_context_window ?? 131072) && (
+              <div className="text-xs text-yellow">
+                Max safe ctx at {gpuUtilPct}% util: {ctxMax.toLocaleString('en')} tokens
+              </div>
+            )}
+          </>
+        )}
+
+        {/* KV Cache — llama.cpp only */}
         {engine === 'llama' && (
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-2.5">KV Cache</div>
+          <div className="flex flex-col gap-3">
+            <div className="text-xs font-semibold uppercase tracking-widest text-text-muted">KV Cache</div>
+
+            {/* Quantization */}
             <div className="flex gap-2">
               {([
                 { id: 'q8_0' as const, label: 'Q8_0', sub: '×0.5 VRAM · recommended', color: 'accent' },
@@ -298,6 +361,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
                 { id: 'bf16' as const, label: 'BF16', sub: '×1.0 VRAM · max precision', color: 'text-muted' },
               ]).map(opt => {
                 const active = kvQuant === opt.id
+                const optKvGb = kvCacheGb(ctxMode === 'fixed' ? ctxLen : 2048, params) * (opt.id === 'bf16' ? 1 : opt.id === 'q8_0' ? 0.5 : 0.25)
                 return (
                   <button key={opt.id} onClick={() => setKvQuant(opt.id)}
                     className={`flex-1 flex flex-col items-center gap-0.5 px-2 py-2 rounded-sm border cursor-pointer transition-colors text-center ${
@@ -306,8 +370,92 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
                     <span className={`text-sm font-semibold ${active ? 'text-accent' : 'text-text-primary'}`}>{opt.label}</span>
                     <span className="text-2xs text-text-muted leading-tight">{opt.sub}</span>
                     <span className={`text-2xs font-medium mt-0.5 ${active ? 'text-accent' : 'text-text-muted'}`}>
-                      ~{(kv / kvQuantFactor * (opt.id === 'bf16' ? 1 : opt.id === 'q8_0' ? 0.5 : 0.25)).toFixed(1)} GB
+                      ~{optKvGb.toFixed(1)} GB
                     </span>
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* offload_kqv toggle */}
+            <button onClick={() => setOffloadKqv(v => !v)}
+              className={`flex items-start gap-2.5 w-full px-3 py-2.5 rounded-sm border cursor-pointer transition-colors text-left ${
+                offloadKqv ? 'border-green/40 bg-green/8' : 'border-border bg-elevated hover:border-border-hover'
+              }`}>
+              <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                offloadKqv ? 'border-green bg-green' : 'border-border'
+              }`}>
+                {offloadKqv && <svg className="w-2.5 h-2.5 text-black" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`text-sm font-medium ${offloadKqv ? 'text-green' : 'text-text-primary'}`}>
+                    KV cache in system RAM
+                  </span>
+                  {offloadKqv && kvTotal > 0 && (
+                    <span className="text-xs font-mono text-green flex-shrink-0">−{kvTotal.toFixed(1)} GB VRAM</span>
+                  )}
+                </div>
+                <div className="text-xs text-text-muted mt-0.5">
+                  + Frees VRAM equal to the full KV cache — big win on long context
+                </div>
+                <div className="text-xs text-text-muted">
+                  − PCIe transfer per attention step — latency +5–15% on GPU-heavy workloads
+                </div>
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* Batch size — llama.cpp only */}
+        {engine === 'llama' && (
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-2.5">Batch size</div>
+            <div className="grid grid-cols-4 gap-2">
+              {([
+                {
+                  val: 512 as const,
+                  label: '512',
+                  pros: 'Max prefill speed — ideal for long prompts',
+                  cons: 'Highest activation memory (~0.5 GB extra)',
+                  recommended: !model.is_moe,
+                },
+                {
+                  val: 256 as const,
+                  label: '256',
+                  pros: 'Good balance — prefill stays fast',
+                  cons: 'Slight memory reduction',
+                  recommended: false,
+                },
+                {
+                  val: 128 as const,
+                  label: '128',
+                  pros: 'Low VRAM — recommended for MoE',
+                  cons: '~30% slower prefill on long prompts',
+                  recommended: model.is_moe === true,
+                },
+                {
+                  val: 64 as const,
+                  label: '64',
+                  pros: 'Minimal VRAM — last resort on tight budgets',
+                  cons: '~50% slower prefill, visible on long prompts',
+                  recommended: false,
+                },
+              ]).map(opt => {
+                const active = nBatch === opt.val
+                return (
+                  <button key={opt.val} onClick={() => setNBatch(opt.val)}
+                    className={`flex flex-col gap-1 px-2 py-2 rounded-sm border cursor-pointer transition-colors text-left ${
+                      active ? 'border-accent/40 bg-accent-dim' : 'bg-elevated border-border hover:border-border-hover'
+                    }`}>
+                    <div className="flex items-center justify-between gap-1">
+                      <span className={`text-sm font-semibold font-mono ${active ? 'text-accent' : 'text-text-primary'}`}>{opt.label}</span>
+                      {opt.recommended && (
+                        <span className="text-2xs px-1 py-px rounded bg-accent/15 text-accent">rec</span>
+                      )}
+                    </div>
+                    <div className="text-2xs text-green leading-tight">+ {opt.pros}</div>
+                    <div className="text-2xs text-text-muted leading-tight">− {opt.cons}</div>
                   </button>
                 )
               })}
@@ -416,8 +564,8 @@ function HardwareSection({ gpu }: { gpu: GpuStats | null }): React.ReactElement 
   )
 }
 
-function VramBar({ totalGb, usedGb, weightsGb, kvGb, overheadGb, budgetGb, cudaFreeGib, isOom, engine }: {
-  totalGb: number; usedGb: number; weightsGb: number; kvGb: number
+function VramBar({ totalGb, usedGb, weightsGb, kvGb, kvOffloadedGb, overheadGb, budgetGb, cudaFreeGib, isOom, engine }: {
+  totalGb: number; usedGb: number; weightsGb: number; kvGb: number; kvOffloadedGb: number
   overheadGb: number; budgetGb: number; cudaFreeGib: number; isOom: boolean; engine: string
 }): React.ReactElement {
   const pct = (gb: number): number => Math.min((gb / totalGb) * 100, 100)
@@ -445,7 +593,8 @@ function VramBar({ totalGb, usedGb, weightsGb, kvGb, overheadGb, budgetGb, cudaF
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
         <Leg color="bg-white/20"       label="System"   val={`${usedGb.toFixed(1)} GB`} />
         <Leg color={modelColor}        label="Weights"  val={`${weightsGb.toFixed(1)} GB`} />
-        {kvGb > 0    && <Leg color={`${modelColor} opacity-60`} label="KV cache" val={`~${kvGb.toFixed(1)} GB`} />}
+        {kvGb > 0    && <Leg color={`${modelColor} opacity-60`} label="KV cache (VRAM)" val={`~${kvGb.toFixed(1)} GB`} />}
+        {kvOffloadedGb > 0 && <Leg color="bg-green/60" label="KV cache (RAM)" val={`~${kvOffloadedGb.toFixed(1)} GB`} />}
         {overheadGb > 0 && <Leg color={`${modelColor} opacity-30`} label="Overhead" val={`${overheadGb.toFixed(1)} GB`} />}
         <Leg color="bg-overlay border border-border" label="Free" val={`${freeGb.toFixed(1)} GB`} />
         {engine === 'vllm' && <Leg color="bg-yellow" label="GPU util limit" val={`${budgetGb.toFixed(1)} GB`} />}
@@ -459,7 +608,7 @@ function VramBar({ totalGb, usedGb, weightsGb, kvGb, overheadGb, budgetGb, cudaF
       )}
       {isOom && engine === 'llama' && (
         <div className="mt-2 text-xs text-yellow font-medium">
-          ⚠ Model may exceed VRAM — enable "Overflow to CPU" to avoid crash
+          ⚠ Model may exceed VRAM — enable "Overflow to CPU" or KV offload to avoid crash
         </div>
       )}
     </div>
