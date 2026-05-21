@@ -3,7 +3,7 @@ import { Modal } from '@/components/shared/Modal'
 import { Slider } from '@/components/shared/Slider'
 import { Btn } from '@/components/shared/Btn'
 import { Badge } from '@/components/shared/Badge'
-import { getInferenceSettings, getMoeLoadConfig, getMultiGpuConfig } from '@/api/client'
+import { getInferenceSettings, getMoeLoadConfig, getMultiGpuConfig, checkMtpSupport } from '@/api/client'
 import type { MoeLoadConfig } from '@/api/client'
 import type { GpuStats, ModelInfo, MultiGpuConfig } from '@/types'
 
@@ -25,6 +25,8 @@ interface LoadModelModalProps {
     offloadKqv?: boolean; nBatch?: number | null
     tensorParallelSize?: number | null; pipelineParallelSize?: number | null
     tensorSplit?: number[] | null; mainGpu?: number | null
+    speculativeMode?: 'off' | 'ngram' | 'mtp' | 'draft_model'
+    draftModelPath?: string | null; nPredTokens?: number
   }) => void
   onCancel: () => void
 }
@@ -136,6 +138,11 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
   const [nBatch, setNBatch] = useState<64 | 128 | 256 | 512>(model.is_moe ? 128 : 512)
   const [ctxMode, setCtxMode] = useState<'fixed' | 'adaptive'>('fixed')
   const [activeProfile, setActiveProfile] = useState<LoadProfile | null>(null)
+  // Speculative decoding
+  const [speculativeMode, setSpeculativeMode] = useState<'off' | 'ngram' | 'mtp' | 'draft_model'>('ngram')
+  const [nPredTokens, setNPredTokens] = useState(10)
+  const [draftModelPath, setDraftModelPath] = useState<string>('')
+  const [mtpSupported, setMtpSupported] = useState<boolean | null>(null)
   // Multi-GPU state (vLLM only)
   const [gpuCount, setGpuCount] = useState(1)
   const [tensorParallelSize, setTensorParallelSize] = useState<number>(1)
@@ -180,6 +187,8 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
     setOffloadKqv(prof.offloadKqv)
     setNBatch(prof.nBatch)
     setCtxMode(prof.ctxMode)
+    // All profiles enable n-gram by default — zero cost, always beneficial
+    setSpeculativeMode('ngram')
     setActiveProfile(profileId)
   }
 
@@ -242,6 +251,10 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
       }
     }).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    checkMtpSupport(model.id).then(r => setMtpSupported(r.mtp_supported)).catch(() => setMtpSupported(false))
+  }, [model.id])
 
   const gpuUtil = gpuUtilPct / 100
   const _qUpper = (model.quantization ?? '').toUpperCase()
@@ -333,6 +346,9 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
             pipelineParallelSize: null,
             tensorSplit: engine === 'llama' ? tensorSplit : null,
             mainGpu: engine === 'llama' && tensorSplit ? 0 : null,
+            speculativeMode: engine === 'llama' ? speculativeMode : undefined,
+            draftModelPath: engine === 'llama' && speculativeMode === 'draft_model' ? (draftModelPath || null) : null,
+            nPredTokens: engine === 'llama' ? nPredTokens : undefined,
           })}>
           Load model
         </Btn>
@@ -714,6 +730,106 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
           </div>
         )}
       </div>
+
+      {/* Speculative decoding — llama.cpp only */}
+      {engine === 'llama' && (
+        <div className="flex flex-col gap-3">
+          <div className="text-xs font-semibold uppercase tracking-widest text-text-muted">Speculative decoding</div>
+          <div className="flex flex-col gap-1.5">
+            {([
+              {
+                id: 'ngram' as const,
+                label: 'N-gram lookup',
+                badge: '~1.3x',
+                pros: 'Zero VRAM, zero extra model — works on all hardware',
+                cons: 'Only helps on repetitive / structured outputs',
+                available: true,
+              },
+              {
+                id: 'mtp' as const,
+                label: 'MTP self-speculative',
+                badge: '~1.5x',
+                pros: 'Uses built-in prediction heads — no extra model or VRAM',
+                cons: 'Requires MTP-capable GGUF (Qwen3, DeepSeek-V3)',
+                available: mtpSupported === true,
+                unavailableReason: mtpSupported === false ? 'GGUF does not contain MTP heads' : 'Checking…',
+              },
+              {
+                id: 'draft_model' as const,
+                label: 'Draft model',
+                badge: '~2x',
+                pros: 'Best speedup on coding & RAG tasks',
+                cons: 'Requires a compatible smaller GGUF loaded in VRAM',
+                available: true,
+              },
+              {
+                id: 'off' as const,
+                label: 'Disabled',
+                badge: null,
+                pros: 'Pure autoregressive — predictable behavior',
+                cons: 'No speedup',
+                available: true,
+              },
+            ]).map(opt => {
+              const active = speculativeMode === opt.id
+              const disabled = !opt.available
+              return (
+                <button key={opt.id}
+                  onClick={() => !disabled && withProfileClear(setSpeculativeMode)(opt.id)}
+                  className={`flex items-start gap-3 px-3 py-2.5 rounded-sm border text-left transition-colors ${
+                    disabled ? 'opacity-40 cursor-not-allowed border-border bg-elevated' :
+                    active ? 'border-accent/40 bg-accent-dim cursor-pointer' :
+                    'border-border bg-elevated hover:border-border-hover cursor-pointer'
+                  }`}>
+                  <div className={`w-3.5 h-3.5 rounded-full border-2 mt-0.5 flex-shrink-0 ${
+                    active ? 'border-accent bg-accent' : 'border-border'
+                  }`} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm font-medium ${active ? 'text-accent' : 'text-text-primary'}`}>
+                        {opt.label}
+                      </span>
+                      {opt.badge && (
+                        <span className={`text-2xs px-1.5 py-px rounded font-mono font-semibold ${
+                          active ? 'bg-accent/15 text-accent' : 'bg-elevated border border-border text-text-muted'
+                        }`}>{opt.badge}</span>
+                      )}
+                    </div>
+                    <div className="text-2xs text-green mt-0.5">+ {opt.pros}</div>
+                    <div className="text-2xs text-text-muted">
+                      {disabled ? `⚠ ${opt.unavailableReason}` : `− ${opt.cons}`}
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Draft model path input */}
+          {speculativeMode === 'draft_model' && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs text-text-muted">Draft model path (absolute GGUF path)</label>
+              <input
+                type="text"
+                value={draftModelPath}
+                onChange={e => setDraftModelPath(e.target.value)}
+                placeholder="/mnt/models/Qwen3-0.6B-Q4_K_M/model.gguf"
+                className="w-full bg-elevated border border-border rounded-sm px-3 py-2 text-xs text-text-primary font-mono placeholder:text-text-muted/50 focus:outline-none focus:border-accent/50"
+              />
+              <div className="text-2xs text-text-muted">
+                Use a smaller model from the same family. Ex: Qwen3-0.6B for a Qwen3-8B target.
+              </div>
+            </div>
+          )}
+
+          {/* n_pred_tokens slider — visible for mtp and draft_model */}
+          {(speculativeMode === 'mtp' || speculativeMode === 'draft_model') && (
+            <Slider label="Tokens per speculative step"
+              value={nPredTokens} min={2} max={16} step={2}
+              onChange={setNPredTokens} formatValue={v => `${v} tokens`} />
+          )}
+        </div>
+      )}
 
       {/* CUDA Graphs (vLLM only) */}
       {engine === 'vllm' && (

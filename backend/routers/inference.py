@@ -69,6 +69,9 @@ def load_model(req: LoadRequest) -> dict:
             pipeline_parallel_size=req.pipeline_parallel_size,
             tensor_split=req.tensor_split,
             main_gpu=req.main_gpu,
+            speculative_mode=req.speculative_mode,
+            draft_model_path=req.draft_model_path,
+            n_pred_tokens=req.n_pred_tokens,
         )
         return {"status": "loading", "model_id": req.model_id}
     except FileNotFoundError as e:
@@ -117,6 +120,21 @@ def _get_available_engines() -> list[str]:
     if engine_router.is_vllm_available():
         engines.append("vllm")
     return engines
+
+
+@router.get("/llama/mtp-support")
+def check_mtp_support(model_id: str) -> dict:
+    """Check if a downloaded GGUF has MTP prediction heads (Qwen3, DeepSeek-V3 style)."""
+    try:
+        model_path = _resolve_model_path(model_id)
+        from backend.services.engine_router import find_gguf_file
+        gguf_path = find_gguf_file(model_path)
+        if not gguf_path:
+            return {"mtp_supported": False, "model_id": model_id}
+        from backend.services.llama_service import detect_mtp_support
+        return {"mtp_supported": detect_mtp_support(gguf_path), "model_id": model_id}
+    except Exception:
+        return {"mtp_supported": False, "model_id": model_id}
 
 
 @router.get("/multi-gpu-config")

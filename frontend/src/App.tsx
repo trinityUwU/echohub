@@ -164,6 +164,8 @@ export default function App(): React.ReactElement {
     offloadKqv?: boolean; nBatch?: number | null
     tensorParallelSize?: number | null; pipelineParallelSize?: number | null
     tensorSplit?: number[] | null; mainGpu?: number | null
+    speculativeMode?: 'off' | 'ngram' | 'mtp' | 'draft_model'
+    draftModelPath?: string | null; nPredTokens?: number
   }): void => {
     if (!pendingLoad) return
     loadModel(pendingLoad.id, {
@@ -181,6 +183,9 @@ export default function App(): React.ReactElement {
       pipelineParallelSize: cfg.pipelineParallelSize ?? null,
       tensor_split: cfg.tensorSplit ?? null,
       main_gpu: cfg.mainGpu ?? null,
+      speculative_mode: cfg.speculativeMode ?? 'ngram',
+      draft_model_path: cfg.draftModelPath ?? null,
+      n_pred_tokens: cfg.nPredTokens ?? 10,
     })
     setPendingLoad(null)
   }

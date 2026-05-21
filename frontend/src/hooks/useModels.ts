@@ -70,6 +70,8 @@ export function useModels() {
     offload_kqv?: boolean; n_batch?: number | null; ctx_mode?: 'adaptive' | 'fixed'
     tensorParallelSize?: number | null; pipelineParallelSize?: number | null
     tensor_split?: number[] | null; main_gpu?: number | null
+    speculative_mode?: 'off' | 'ngram' | 'mtp' | 'draft_model'
+    draft_model_path?: string | null; n_pred_tokens?: number
   }
 
   const _doLoad = useCallback(async (modelId: string, req: import('@/types').LoadRequest) => {
@@ -108,6 +110,9 @@ export function useModels() {
       pipeline_parallel_size: config?.pipelineParallelSize ?? null,
       tensor_split: config?.tensor_split ?? null,
       main_gpu: config?.main_gpu ?? null,
+      speculative_mode: config?.speculative_mode ?? 'ngram',
+      draft_model_path: config?.draft_model_path ?? null,
+      n_pred_tokens: config?.n_pred_tokens ?? 10,
     })
   }, [_doLoad])
 

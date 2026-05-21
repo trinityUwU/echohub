@@ -335,6 +335,9 @@ export const getGpuStats = (): Promise<GpuStats> =>
 
 export const downloadModel = startDownload
 
+export const checkMtpSupport = (modelId: string): Promise<{ mtp_supported: boolean; model_id: string }> =>
+  apiRequest(`/inference/llama/mtp-support?model_id=${encodeURIComponent(modelId)}`)
+
 export const getMultiGpuConfig = (): Promise<{
   gpu_count: number
   gpus: Array<{ index: number; name: string; vram_total_mb: number; type: string }>

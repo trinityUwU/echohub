@@ -205,6 +205,9 @@ def load_model_async(
     pipeline_parallel_size: Optional[int] = None,
     tensor_split: Optional[list[float]] = None,
     main_gpu: Optional[int] = None,
+    speculative_mode: str = "ngram",
+    draft_model_path: Optional[str] = None,
+    n_pred_tokens: int = 10,
 ) -> None:
     from backend.services import llama_service, vllm_service
 
@@ -237,6 +240,9 @@ def load_model_async(
             n_batch_override=n_batch,
             tensor_split=tensor_split,
             main_gpu=main_gpu,
+            speculative_mode=speculative_mode,
+            draft_model_path=draft_model_path,
+            n_pred_tokens=n_pred_tokens,
         )
         return
 

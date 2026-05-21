@@ -68,6 +68,9 @@ export interface LoadRequest {
   pipeline_parallel_size?: number | null // vLLM: pipeline parallel for very large models
   tensor_split?: number[] | null
   main_gpu?: number | null
+  speculative_mode?: 'off' | 'ngram' | 'mtp' | 'draft_model'
+  draft_model_path?: string | null
+  n_pred_tokens?: number
 }
 
 export interface MultiGpuConfig {
