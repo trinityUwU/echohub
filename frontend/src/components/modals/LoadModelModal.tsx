@@ -29,6 +29,7 @@ interface LoadModelModalProps {
     tensorSplit?: number[] | null; mainGpu?: number | null
     speculativeMode?: 'off' | 'ngram' | 'mtp' | 'draft_model'
     draftModelPath?: string | null; nPredTokens?: number
+    ctxMode?: 'fixed' | 'adaptive'
   }) => void
   onCancel: () => void
 }
@@ -362,6 +363,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, conversati
             speculativeMode: engine === 'llama' ? speculativeMode : undefined,
             draftModelPath: engine === 'llama' && speculativeMode === 'draft_model' ? (draftModelPath || null) : null,
             nPredTokens: engine === 'llama' ? nPredTokens : undefined,
+            ctxMode,
           })}>
           Load model
         </Btn>

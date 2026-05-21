@@ -378,7 +378,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
                 title: `Context too small (${Math.round(cur / 1024)}K)`,
                 message: `Reload the model with ${Math.round(next / 1024)}K context to continue.`,
                 duration: 0,
-                action: { label: `Reload ${Math.round(next / 1024)}K`, onClick: () => window.dispatchEvent(new CustomEvent('echohub:reload-ctx', { detail: { nextCtx: next } })) },
+                action: { label: `Reload ${Math.round(next / 1024)}K`, onClick: () => window.dispatchEvent(new CustomEvent('echohub:reload-ctx', { detail: { nextCtx: next, loadConfig: optionsRef.current.loadConfig } })) },
               })
               // Remove the empty assistant message
               setMessages(prev => prev.slice(0, -1))
