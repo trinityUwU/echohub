@@ -17,6 +17,7 @@ interface LoadModelModalProps {
   vramTotalGb: number
   vramUsedGb: number
   gpu?: GpuStats | null
+  conversationTokens?: number
   onConfirm: (cfg: {
     gpuMemoryUtilization: number; maxModelLen: number | null
     enforceEager: boolean; maxCudagraphCaptureSize: number | null
@@ -122,10 +123,17 @@ function computeGpuLayersPct(
   return Math.max(0, pct)
 }
 
-export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm, onCancel }: LoadModelModalProps): React.ReactElement {
+export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, conversationTokens, onConfirm, onCancel }: LoadModelModalProps): React.ReactElement {
   const [gpuUtilPct, setGpuUtilPct] = useState(72)
   const [vramLimitGb, setVramLimitGb] = useState<number | null>(null)
-  const [ctxLen, setCtxLen] = useState(Math.min(model.max_context_window ?? 16384, 16384))
+  const [ctxLen, setCtxLen] = useState(() => {
+    // Smart initial ctx: start small, grow with conversation history
+    // New conv → 4K. Existing conv → max(4K, tokens×2) capped at 32K
+    const baseCtx = conversationTokens && conversationTokens > 1024
+      ? Math.min(32768, Math.max(4096, Math.pow(2, Math.ceil(Math.log2(conversationTokens * 2)))))
+      : 4096
+    return Math.min(baseCtx, model.max_context_window ?? 32768)
+  })
   const [cudaGraphs, setCudaGraphs] = useState<'default' | 'limited' | 'disabled'>('default')
   const [maxCaptureSize, setMaxCaptureSize] = useState(512)
   const [check, setCheck] = useState<CanLoadResult | null>(null)

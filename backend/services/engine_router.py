@@ -205,7 +205,7 @@ def load_model_async(
     pipeline_parallel_size: Optional[int] = None,
     tensor_split: Optional[list[float]] = None,
     main_gpu: Optional[int] = None,
-    speculative_mode: str = "ngram",
+    speculative_mode: str = "off",
     draft_model_path: Optional[str] = None,
     n_pred_tokens: int = 10,
 ) -> None:

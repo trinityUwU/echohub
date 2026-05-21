@@ -115,17 +115,19 @@ pub fn run() {
 }
 
 fn spawn_backend(app: &AppHandle, port: u16) {
+    spawn_backend_with_retries(app, port, 0);
+}
+
+fn spawn_backend_with_retries(app: &AppHandle, port: u16, attempt: u32) {
     use tauri_plugin_shell::ShellExt;
 
     let root = locate_project_root(app);
     let python = format!("{}/backend/.venv/bin/python", root);
     let log_path = format!("{}/logs/backend.log", root);
 
-    // Ensure logs directory exists
     let _ = std::fs::create_dir_all(format!("{}/logs", root));
 
-    log::info!("Spawning backend on port {} (python: {})", port, python);
-    log::info!("Backend logs -> {}", log_path);
+    log::info!("Spawning backend on port {} (attempt {}) (python: {})", port, attempt + 1, python);
 
     let result = app.shell()
         .command(&python)
@@ -137,15 +139,15 @@ fn spawn_backend(app: &AppHandle, port: u16) {
     match result {
         Ok((mut rx, child)) => {
             let child_arc = get_child_arc(app);
-            let mut guard = child_arc.lock().unwrap();
-            *guard = Some(child);
+            *child_arc.lock().unwrap() = Some(child);
             log::info!("Backend spawned successfully");
 
-            // Forward backend stdout/stderr to log file via Tauri's event stream
             let log_path_clone = log_path.clone();
+            let app_handle = app.clone();
             tauri::async_runtime::spawn(async move {
                 use tauri_plugin_shell::process::CommandEvent;
                 use std::io::Write;
+                use tokio::time::{sleep, Duration};
 
                 let file = std::fs::OpenOptions::new()
                     .create(true).append(true).open(&log_path_clone);
@@ -158,8 +160,10 @@ fn spawn_backend(app: &AppHandle, port: u16) {
                                 let _ = f.write_all(b"\n");
                             }
                         }
-                        CommandEvent::Terminated(_) => {
-                            log::info!("Backend process terminated");
+                        CommandEvent::Terminated(status) => {
+                            log::warn!("Backend terminated (status: {:?}) — restarting in 2s (attempt {})", status, attempt + 1);
+                            sleep(Duration::from_secs(2)).await;
+                            spawn_backend_with_retries(&app_handle, port, attempt + 1);
                             break;
                         }
                         _ => {}
@@ -167,7 +171,15 @@ fn spawn_backend(app: &AppHandle, port: u16) {
                 }
             });
         }
-        Err(e) => log::error!("Failed to spawn backend: {}", e),
+        Err(e) => {
+            log::error!("Failed to spawn backend (attempt {}): {}", attempt + 1, e);
+            // Retry after 3s if spawn itself failed
+            let app_handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+                spawn_backend_with_retries(&app_handle, port, attempt + 1);
+            });
+        }
     }
 }
 
