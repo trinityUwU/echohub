@@ -111,7 +111,7 @@ export function useModels() {
       pipeline_parallel_size: config?.pipelineParallelSize ?? null,
       tensor_split: config?.tensor_split ?? null,
       main_gpu: config?.main_gpu ?? null,
-      speculative_mode: config?.speculative_mode ?? 'ngram',
+      speculative_mode: config?.speculative_mode ?? 'off',
       draft_model_path: config?.draft_model_path ?? null,
       n_pred_tokens: config?.n_pred_tokens ?? 10,
     })

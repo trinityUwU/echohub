@@ -541,21 +541,24 @@ async def generate(
             nonlocal completion_tokens, prompt_tokens
 
             def _safe_chunks():
-                """Yield chunks, falling back to no speculative on numpy shape errors."""
-                _kwargs = dict(common_kwargs)
-                for _attempt in range(2):
-                    try:
-                        for c in _llm.create_chat_completion(stream=True, **_kwargs):
-                            yield c
-                        return
-                    except Exception as _spec_err:
-                        _msg = str(_spec_err).lower()
-                        if _attempt == 0 and ("broadcast" in _msg or "shape" in _msg or "ngram" in _msg):
-                            _log(f"[llama] speculative error ({_spec_err}) — retrying without draft model", "warn")
-                            if hasattr(_llm, 'draft_model'):
-                                _llm.draft_model = None
-                            continue
-                        raise
+                """Yield chunks. If speculative/N-gram crashes, disable and raise a clear error."""
+                _has_draft = hasattr(_llm, 'draft_model') and _llm.draft_model is not None
+                if not _has_draft:
+                    yield from _llm.create_chat_completion(stream=True, **common_kwargs)
+                    return
+                # With speculative active: catch shape/broadcast errors and surface them clearly
+                try:
+                    yield from _llm.create_chat_completion(stream=True, **common_kwargs)
+                except Exception as _spec_err:
+                    _msg = str(_spec_err).lower()
+                    if any(k in _msg for k in ("broadcast", "shape", "ngram", "draft")):
+                        _llm.draft_model = None
+                        _log(f"[llama] N-gram speculative error — disabled: {_spec_err}", "warn")
+                        raise RuntimeError(
+                            "N-gram speculative decoding is incompatible with this model. "
+                            "Reload the model with speculative mode OFF."
+                        ) from _spec_err
+                    raise
 
             try:
                 for chunk in _safe_chunks():  # type: ignore[assignment]

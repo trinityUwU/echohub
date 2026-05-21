@@ -200,8 +200,8 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, conversati
     setOffloadKqv(prof.offloadKqv)
     setNBatch(prof.nBatch)
     setCtxMode(prof.ctxMode)
-    // All profiles enable n-gram by default — zero cost, always beneficial
-    setSpeculativeMode('ngram')
+    // N-gram disabled by default — causes segfaults on some models (numpy shape error)
+    setSpeculativeMode('off')
     setActiveProfile(profileId)
   }
 
