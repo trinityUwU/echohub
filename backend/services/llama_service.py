@@ -230,9 +230,11 @@ def load_model(
     # KV cache quantization — user-selectable
     # q8_0=8, q4_0=2 (llama-cpp-python numeric type IDs)
     # None = don't pass type_k/type_v → llama.cpp native default (F16)
-    _KV_TYPE = {"q8_0": 8, "q4_0": 2}
-    kv_type_id = _KV_TYPE.get(kv_quant or "", None) if kv_quant else None
-    _log(f"[llama] KV cache: {kv_quant or 'f16/default'} (type_k=type_v={kv_type_id or 'default'})")
+    _KV_TYPE = {"q8_0": 8, "q4_0": 2, "bf16": 1}
+    # Default to Q4_0 — best speed/quality tradeoff. Only skip if explicitly None.
+    effective_kv = kv_quant if kv_quant is not None else "q4_0"
+    kv_type_id = _KV_TYPE.get(effective_kv, 2)
+    _log(f"[llama] KV cache: {effective_kv} (type_k=type_v={kv_type_id})")
 
     llama_kwargs: dict = dict(
         model_path=gguf_path,
@@ -244,11 +246,10 @@ def load_model(
         verbose=False,
         use_mmap=True,
         use_mlock=False,
+        type_k=kv_type_id,
+        type_v=kv_type_id,
         offload_kqv=offload_kqv,
     )
-    if kv_type_id is not None:
-        llama_kwargs["type_k"] = kv_type_id
-        llama_kwargs["type_v"] = kv_type_id
     # split_mode: ROW for dense cpu_overflow, LAYER for MoE (MoE does not support tensor parallelism)
     if is_moe:
         try:
