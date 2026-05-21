@@ -397,6 +397,7 @@ class ToolChatRequest(BaseModel):
     messages: list[dict]
     project_id: str
     conv_id: str = "global"
+    project_mode: str = ""   # "dev" | "docs" | "research" | "" (chat normal)
     system_prompt: str = ""
     temperature: float = 0.2
     max_tokens: int = 8192
@@ -467,17 +468,45 @@ async def tool_chat(req: ToolChatRequest):
         skill_awareness = (req.awareness_block or "").strip()
         all_awareness_parts = [p for p in [skill_awareness] + _mcp_awareness_blocks if p]
         awareness = "\n".join(all_awareness_parts)
-        # Only inject dev system prompt when filesystem tools are actually enabled
-        _fs_tools = {"create_file", "edit_file", "read_file", "delete_file", "list_files",
-                     "get_workspace_info", "run_command"}
-        _active_tools = set(req.enabled_tools or [t["function"]["name"] for t in tools])
-        _has_fs_tools = bool(_active_tools & _fs_tools)
+        _DOCS_SYSTEM_PROMPT = (
+            "You are a document analysis assistant. You help read, summarize, analyze, and extract "
+            "information from documents and files in the workspace.\n\n"
+            "RULES:\n"
+            "- Use read_file and list_files to access documents. Never invent file content.\n"
+            "- Cite the source file and section when referencing document content.\n"
+            "- Be precise and factual. Flag uncertainty explicitly."
+        )
+        _RESEARCH_SYSTEM_PROMPT = (
+            "You are a research assistant with access to web search and browsing tools.\n\n"
+            "RULES:\n"
+            "- Use web_search to find sources, fetch_url to read them.\n"
+            "- Always verify claims with at least one source before stating them as facts.\n"
+            "- Cite URLs for all factual claims.\n"
+            "- Synthesize findings into a clear, structured answer."
+        )
 
-        combined_system = (_DEV_SYSTEM_PROMPT if _has_fs_tools else "You are a helpful assistant.")
+        # Select base system prompt by project mode
+        _mode = req.project_mode or ""
+        if _mode == "dev":
+            base_system = _DEV_SYSTEM_PROMPT
+        elif _mode == "docs":
+            base_system = _DOCS_SYSTEM_PROMPT
+        elif _mode == "research":
+            base_system = _RESEARCH_SYSTEM_PROMPT
+        else:
+            # Chat normal — only inject dev prompt if filesystem tools are explicitly enabled
+            _fs_tools = {"create_file", "edit_file", "read_file", "delete_file", "list_files",
+                         "get_workspace_info", "run_command"}
+            _active_tools = set(req.enabled_tools or [t["function"]["name"] for t in tools])
+            base_system = _DEV_SYSTEM_PROMPT if (_active_tools & _fs_tools) else ""
+
+        combined_system = base_system
         if awareness:
-            combined_system += f"\n\n---\nACTIVE SKILLS:\n{awareness}"
+            combined_system += f"\n\n---\nACTIVE SKILLS:\n{awareness}" if combined_system else f"ACTIVE SKILLS:\n{awareness}"
         if user_system:
-            combined_system += f"\n\n---\nADDITIONAL INSTRUCTIONS:\n{user_system}"
+            combined_system += f"\n\n---\nADDITIONAL INSTRUCTIONS:\n{user_system}" if combined_system else user_system
+        if not combined_system:
+            combined_system = "You are a helpful assistant."
         messages.append({"role": "system", "content": combined_system})
 
         # Inject memory context if memory is enabled for this conversation

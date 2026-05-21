@@ -573,6 +573,7 @@ function ProjectWorkspace({
 
   const toolChatHook = useToolChat(project.id, {
     conversationId: convHook.activeId,
+    projectMode: project.mode,
     onSaveMessage: convHook.saveMessage,
     maxContextTokens: loadedModel?.max_context_window ?? undefined,
   })
