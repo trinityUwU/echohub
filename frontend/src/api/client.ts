@@ -1,4 +1,5 @@
 import { apiRequest, apiUrl } from './base'
+import { emitTimings } from './engineTimings'
 import type {
   ChatMessage, ChatParams, ChatRequest, ConversationSummary,
   DownloadJob, DownloadRequest, GenerationStats, GpuStats,
@@ -222,6 +223,9 @@ export async function chatStream(
               onError(new Error(json.error))
             }
             return
+          }
+          if (json?.timings) {
+            emitTimings(json.timings)
           }
           if (json?.usage) {
             completionTokens = json.usage.completion_tokens ?? completionTokens
