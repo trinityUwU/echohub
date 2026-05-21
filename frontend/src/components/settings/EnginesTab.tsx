@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { listEngines, deleteEngine, installEngineStream, getLlamaCppStatus, getInstallerDiagnose, recompileLlamaStreamUrl } from '@/api/client'
+import { listEngines, deleteEngine, installEngineStream, getLlamaCppStatus, getInstallerDiagnose, recompileLlamaStreamUrl, getLlamaCppCapabilities, upgradeLlamaCppStreamUrl } from '@/api/client'
 import { useDialog } from '@/components/shared/Dialog'
 import { apiUrl } from '@/api/base'
 
@@ -50,6 +50,11 @@ export function EnginesTab(): React.ReactElement {
   const [recompileLogs, setRecompileLogs] = useState<Array<{ level: string; msg: string }>>([])
   const recompileLogsRef = useRef<HTMLDivElement>(null)
 
+  const [llamaCaps, setLlamaCaps] = useState<{ ngram: boolean; mtp: boolean; version: string } | null>(null)
+  const [upgrading, setUpgrading] = useState(false)
+  const [upgradeLogs, setUpgradeLogs] = useState<Array<{ level: string; msg: string }>>([])
+  const upgradeLogsRef = useRef<HTMLDivElement>(null)
+
   const refresh = useCallback(async (): Promise<void> => {
     try {
       const d = await listEngines()
@@ -77,6 +82,9 @@ export function EnginesTab(): React.ReactElement {
   useEffect(() => { refreshLlama() }, [refreshLlama])
   useEffect(() => { refreshDiagnose() }, [refreshDiagnose])
   useEffect(() => {
+    getLlamaCppCapabilities().then(c => setLlamaCaps(c)).catch(() => {})
+  }, [])
+  useEffect(() => {
     logsRef.current?.scrollTo({ top: logsRef.current.scrollHeight, behavior: 'smooth' })
   }, [installLogs])
   useEffect(() => {
@@ -85,6 +93,9 @@ export function EnginesTab(): React.ReactElement {
   useEffect(() => {
     recompileLogsRef.current?.scrollTo({ top: recompileLogsRef.current.scrollHeight, behavior: 'smooth' })
   }, [recompileLogs])
+  useEffect(() => {
+    upgradeLogsRef.current?.scrollTo({ top: upgradeLogsRef.current.scrollHeight, behavior: 'smooth' })
+  }, [upgradeLogs])
 
   const handleLlamaUpgrade = async (): Promise<void> => {
     setLlamaUpgrading(true)
@@ -137,6 +148,42 @@ export function EnginesTab(): React.ReactElement {
       setRecompileLogs(prev => [...prev, { level: 'error', msg: String(err) }])
     }
     setRecompiling(false)
+  }
+
+  const handleUpgradeFromGithub = async (): Promise<void> => {
+    setUpgrading(true)
+    setUpgradeLogs([])
+    try {
+      const url = await upgradeLlamaCppStreamUrl()
+      const res = await fetch(url)
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (value) buf += decoder.decode(value, { stream: !done })
+        const blocks = buf.split('\n\n')
+        buf = done ? '' : (blocks.pop() ?? '')
+        for (const block of blocks) {
+          if (!block.startsWith('data: ')) continue
+          try {
+            const d = JSON.parse(block.slice(6).trim())
+            if (d.done) {
+              setUpgrading(false)
+              refreshLlama()
+              getLlamaCppCapabilities().then(c => setLlamaCaps(c)).catch(() => {})
+              return
+            }
+            if (d.msg) setUpgradeLogs(prev => [...prev, { level: d.level ?? 'info', msg: d.msg }])
+          } catch { /* ignore */ }
+        }
+        if (done) break
+      }
+    } catch (err) {
+      setUpgradeLogs(prev => [...prev, { level: 'error', msg: String(err) }])
+    }
+    setUpgrading(false)
   }
 
   const handleInstall = (version: string): void => {
@@ -201,6 +248,54 @@ export function EnginesTab(): React.ReactElement {
             className="px-3 py-1.5 rounded-sm bg-yellow/15 hover:bg-yellow/25 border border-yellow/30 text-yellow text-xs font-semibold cursor-pointer transition-colors disabled:opacity-40 flex-shrink-0">
             {recompiling ? 'Compiling…' : `Recompile for ${gpuLabel[diagnose!.gpu_type]}`}
           </button>
+        </div>
+      )}
+
+      {/* Speculative decoding unavailable banner */}
+      {llamaCaps && !llamaCaps.ngram && (
+        <div className="flex items-start gap-3 bg-blue/7 border border-blue/25 rounded-md px-4 py-3">
+          <svg className="w-4 h-4 text-blue flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-blue mb-0.5">Speculative decoding unavailable</div>
+            <div className="text-xs text-text-muted leading-relaxed">
+              llama-cpp-python <span className="font-mono">{llamaCaps.version}</span> doesn't support n-gram speculative decoding.
+              Upgrading from GitHub adds ~1.3× faster generation at zero VRAM cost.
+              Requires recompilation (~5–15 min).
+            </div>
+          </div>
+          <button
+            onClick={handleUpgradeFromGithub}
+            disabled={upgrading}
+            className="px-3 py-1.5 rounded-sm bg-blue/15 hover:bg-blue/25 border border-blue/30 text-blue text-xs font-semibold cursor-pointer transition-colors disabled:opacity-40 flex-shrink-0">
+            {upgrading ? 'Upgrading…' : 'Upgrade from GitHub'}
+          </button>
+        </div>
+      )}
+
+      {/* Upgrade log */}
+      {(upgrading || upgradeLogs.length > 0) && (
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-2 flex items-center gap-2">
+            {upgrading
+              ? <><span className="w-1.5 h-1.5 rounded-full bg-blue animate-pulse" />Upgrading llama-cpp-python from GitHub…</>
+              : 'Upgrade log'
+            }
+          </div>
+          <div ref={upgradeLogsRef}
+            className="bg-[#0a0a0d] border border-border rounded-sm p-3 font-mono text-xs leading-relaxed h-[180px] overflow-y-auto">
+            {upgradeLogs.map((line, i) => (
+              <div key={i} className={
+                line.level === 'error' ? 'text-red' :
+                line.level === 'ok' || line.level === 'success' ? 'text-green' :
+                line.level === 'warn' ? 'text-yellow' :
+                line.level === 'step' ? 'text-accent font-semibold' :
+                'text-[#6b7280]'
+              }>{line.level === 'step' ? `▶ ${line.msg}` : line.msg}</div>
+            ))}
+            {upgrading && <span className="text-blue animate-blink">█</span>}
+          </div>
         </div>
       )}
 

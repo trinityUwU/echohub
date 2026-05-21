@@ -342,6 +342,13 @@ export const downloadModel = startDownload
 export const checkMtpSupport = (modelId: string): Promise<{ mtp_supported: boolean; model_id: string }> =>
   apiRequest(`/inference/llama/mtp-support?model_id=${encodeURIComponent(modelId)}`)
 
+export const getLlamaCppCapabilities = (): Promise<{
+  version: string
+  ngram: boolean
+  mtp: boolean
+  draft_model: boolean
+}> => apiRequest('/inference/llama/capabilities')
+
 export const getMultiGpuConfig = (): Promise<{
   gpu_count: number
   gpus: Array<{ index: number; name: string; vram_total_mb: number; type: string }>
@@ -666,6 +673,9 @@ export const getInstallerDiagnose = (): Promise<{
 
 export const recompileLlamaStreamUrl = (): Promise<string> =>
   apiUrl('/installer/recompile-llama')
+
+export const upgradeLlamaCppStreamUrl = (): Promise<string> =>
+  apiUrl('/installer/upgrade-llama-cpp')
 
 export async function evalRunStreamUrl(): Promise<string> {
   return apiUrl('/finetune/eval-run/stream')

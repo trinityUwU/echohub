@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useModels } from '@/hooks/useModels'
 import { useGpu } from '@/hooks/useGpu'
 import { useConversations } from '@/hooks/useConversations'
-import { subscribeDownloads, cancelDownload, deleteModel, listFinetunedModels, deleteFinetunedModel, getInstallerDiagnose } from '@/api/client'
+import { subscribeDownloads, cancelDownload, deleteModel, listFinetunedModels, deleteFinetunedModel, getInstallerDiagnose, getLlamaCppCapabilities } from '@/api/client'
 import type { DownloadJob, FinetunedModel, ModelInfo, LoadConfig } from '@/types'
 import { NavRail } from '@/components/nav/NavRail'
 import { ChatPage } from '@/components/chat/ChatPage'
@@ -88,6 +88,30 @@ export default function App(): React.ReactElement {
     getOnboardingStatus()
       .then(r => { if (!r.complete) setShowOnboarding(true) })
       .catch(() => {})
+  }, [])
+
+  // llama-cpp capabilities check — toast if speculative decoding unavailable
+  useEffect(() => {
+    getLlamaCppCapabilities()
+      .then(caps => {
+        if (!caps.ngram) {
+          addToast({
+            type: 'warning',
+            title: 'Speculative decoding unavailable',
+            message: `llama-cpp-python ${caps.version} doesn't support n-gram speculative decoding. Upgrade in Settings → Engines for 1.3× faster generation.`,
+            duration: 0,
+            action: {
+              label: 'Upgrade',
+              onClick: () => {
+                setPage('settings')
+                setSettingsInitialTab('engines')
+              },
+            },
+          })
+        }
+      })
+      .catch(() => {})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // GPU backend health check — toast if llama-cpp compiled for wrong backend
