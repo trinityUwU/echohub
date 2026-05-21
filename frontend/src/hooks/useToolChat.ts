@@ -77,6 +77,7 @@ export interface UseToolChatReturn {
 
 interface UseToolChatOptions {
   conversationId: string | null
+  projectMode?: 'dev' | 'docs' | 'research' | ''
   onSaveMessage?: (convId: string, role: string, content: string) => Promise<void>
   maxContextTokens?: number
 }
@@ -243,6 +244,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
       messages: historyToSend,
       project_id: projectId,
       conv_id: options.conversationId ?? 'global',
+      project_mode: options.projectMode ?? '',
       system_prompt: systemPrompt,
       enabled_tools: skills?.enabledTools,
       awareness_block: skills?.awarenessBlock,
