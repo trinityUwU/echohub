@@ -147,7 +147,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, conversati
   const [ctxMode, setCtxMode] = useState<'fixed' | 'adaptive'>('fixed')
   const [activeProfile, setActiveProfile] = useState<LoadProfile | null>(null)
   // Speculative decoding
-  const [speculativeMode, setSpeculativeMode] = useState<'off' | 'ngram' | 'mtp' | 'draft_model'>('ngram')
+  const [speculativeMode, setSpeculativeMode] = useState<'off' | 'ngram' | 'mtp' | 'draft_model'>('off')
   const [nPredTokens, setNPredTokens] = useState(10)
   const [draftModelPath, setDraftModelPath] = useState<string>('')
   const [mtpSupported, setMtpSupported] = useState<boolean | null>(null)
