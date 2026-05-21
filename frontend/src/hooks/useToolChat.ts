@@ -79,6 +79,7 @@ export interface UseToolChatReturn {
 interface UseToolChatOptions {
   conversationId: string | null
   projectMode?: 'dev' | 'docs' | 'research' | ''
+  loadConfig?: import('@/types').LoadConfig | null
   onSaveMessage?: (convId: string, role: string, content: string, stats?: import('@/types').MessageStats | null) => Promise<void>
   maxContextTokens?: number
 }
@@ -350,12 +351,13 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
                 modelName: msgStats.model_name ?? null,
               })
             }
-            // Attach stats to the assistant message in state so footer persists after streaming
+            // Attach stats + loadConfig to the assistant message so footer persists
+            const currentLoadConfig = optionsRef.current.loadConfig ?? null
             setMessages(prev => {
               const updated = [...prev]
               const last = updated[updated.length - 1]
               if (last?.role === 'assistant') {
-                updated[updated.length - 1] = { ...last, stats: msgStats ?? undefined }
+                updated[updated.length - 1] = { ...last, stats: msgStats ?? undefined, loadConfig: currentLoadConfig ?? undefined }
                 messagesRef.current = updated
               }
               return updated
