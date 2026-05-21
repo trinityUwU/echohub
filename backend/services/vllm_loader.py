@@ -77,15 +77,26 @@ def build_vllm_cmd(
     return cmd
 
 
+def _parse_suggested_max_len(log_content: str) -> Optional[int]:
+    import re
+    m = re.search(r'estimated maximum model length is (\d+)', log_content)
+    if m:
+        suggested = int(m.group(1))
+        p2 = 1
+        while p2 * 2 <= suggested:
+            p2 *= 2
+        return p2
+    return None
+
+
 def parse_load_error(log_content: str) -> tuple[Optional[int], bool, str]:
-    """Returns (suggested_len, is_util_oom, root_cause)."""
-    from backend.services.vllm_service import _parse_suggested_max_len, _vllm_version
+    """Returns (suggested_len, is_util_oom, root_cause). No circular imports."""
     suggested = _parse_suggested_max_len(log_content)
     is_util_oom = ("Free memory on device" in log_content
                    and "is less than desired GPU memory utilization" in log_content)
     if "input size is not aligned with the quantized weight shape" in log_content:
         raise RuntimeError(
-            f"AWQ alignment error: multimodal architecture incompatible with AWQ in vLLM {_vllm_version()}. "
+            "AWQ alignment error: multimodal architecture incompatible with AWQ in this vLLM build. "
             "Use a GGUF version instead."
         )
     root_cause = next(
