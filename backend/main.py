@@ -10,7 +10,7 @@ from loguru import logger
 
 load_dotenv()
 
-from backend.routers import conversations, finetune, inference, installer, models, projects, settings, skills, system
+from backend.routers import conversations, finetune, inference, installer, memory, models, projects, settings, skills, system
 from backend.services import db, engine_router, vllm_service
 
 
@@ -60,6 +60,7 @@ app.include_router(conversations.router)
 app.include_router(finetune.router)
 app.include_router(projects.router)
 app.include_router(skills.router)
+app.include_router(memory.router)
 
 
 @app.get("/health")

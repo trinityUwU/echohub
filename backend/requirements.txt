@@ -16,3 +16,4 @@ pyyaml>=6.0
 #   CPU only     : pip install llama-cpp-python
 llama-cpp-python
 psutil>=5.9.0
+chromadb>=1.5.0
