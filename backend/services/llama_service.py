@@ -538,21 +538,23 @@ async def generate(
 
             def _safe_chunks():
                 """Yield chunks, falling back to no speculative on numpy shape errors."""
-                try:
-                    for c in _llm.create_chat_completion(stream=True, **common_kwargs):
-                        yield c
-                except Exception as _spec_err:
-                    if "broadcast" in str(_spec_err).lower() or "shape" in str(_spec_err).lower():
-                        _log("[llama] ngram speculative numpy bug — retrying without speculative", "warn")
-                        if hasattr(_llm, 'draft_model'):
-                            _llm.draft_model = None
-                        for c in _llm.create_chat_completion(stream=True, **common_kwargs):
+                _kwargs = dict(common_kwargs)
+                for _attempt in range(2):
+                    try:
+                        for c in _llm.create_chat_completion(stream=True, **_kwargs):
                             yield c
-                    else:
+                        return
+                    except Exception as _spec_err:
+                        _msg = str(_spec_err).lower()
+                        if _attempt == 0 and ("broadcast" in _msg or "shape" in _msg or "ngram" in _msg):
+                            _log(f"[llama] speculative error ({_spec_err}) — retrying without draft model", "warn")
+                            if hasattr(_llm, 'draft_model'):
+                                _llm.draft_model = None
+                            continue
                         raise
 
             try:
-                for chunk in _safe_chunks():
+                for chunk in _safe_chunks():  # type: ignore[assignment]
                     if _eject_requested:
                         break
                     choice = chunk.get("choices", [{}])[0]
