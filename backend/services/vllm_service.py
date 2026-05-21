@@ -26,15 +26,15 @@ def _get_vllm_python(version: Optional[str] = None) -> Path:
         return get_default_python()
     except Exception:
         # Fallback to legacy path relative to project root
-        legacy = Path(__file__).resolve().parents[3] / ".venv-vllm" / "bin" / "python"
+        legacy = Path(__file__).resolve().parents[2] / ".venv-vllm" / "bin" / "python"
         if legacy.exists():
             return legacy
         raise FileNotFoundError("No vLLM installation found")
 
 
 # Kept for backward compat — actual path resolved dynamically
-VLLM_PYTHON = Path(__file__).resolve().parents[3] / ".venv-vllm" / "bin" / "python"
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+VLLM_PYTHON = Path(__file__).resolve().parents[2] / ".venv-vllm" / "bin" / "python"
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 VRAM_SAFETY_MARGIN = 0.03   # 3% of total reserved
 VRAM_FIXED_OVERHEAD_MB = 1536  # 1.5GB fixed: vLLM process startup, NCCL, CUDA graphs
 VRAM_SAMPLE_WINDOW = 10    # last N nvidia-smi samples for baseline
