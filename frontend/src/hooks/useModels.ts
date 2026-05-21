@@ -8,6 +8,7 @@ export function useModels() {
   const [loadingModelId, setLoadingModelId] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [unloading, setUnloading] = useState(false)
+  const [activeLoadConfig, setActiveLoadConfig] = useState<import('@/types').LoadConfig | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -68,7 +69,7 @@ export function useModels() {
     maxModelLen?: number; gpuMemoryUtilization?: number; enforceEager?: boolean
     maxCudagraphCaptureSize?: number | null; n_gpu_layers?: number | null; cpu_overflow?: boolean
     gguf_path?: string | null; is_moe?: boolean; kv_quant?: 'q8_0' | 'q4_0' | 'bf16'
-    offload_kqv?: boolean; n_batch?: number | null; ctx_mode?: 'adaptive' | 'fixed'
+    offload_kqv?: boolean; n_batch?: number | null; ctxMode?: 'adaptive' | 'fixed'
     tensorParallelSize?: number | null; pipelineParallelSize?: number | null
     tensor_split?: number[] | null; main_gpu?: number | null
     speculative_mode?: 'off' | 'ngram' | 'mtp' | 'draft_model'
@@ -95,6 +96,7 @@ export function useModels() {
   }, [startPolling, stopPolling, refresh])
 
   const loadModel = useCallback(async (modelId: string, config?: LoadConfig) => {
+    setActiveLoadConfig(config ? { model_id: modelId, engine: undefined, ctx_mode: config.ctxMode, n_ctx: config.maxModelLen } : null)
     await _doLoad(modelId, {
       model_id: modelId,
       max_model_len: config?.maxModelLen ?? null,
@@ -152,6 +154,7 @@ export function useModels() {
     loadingModelId,
     loadError,
     unloading,
+    activeLoadConfig,
     refresh,
     loadModel,
     loadModelFromPath,

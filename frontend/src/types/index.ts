@@ -139,6 +139,7 @@ export interface LoadConfig {
   gguf_path?: string | null
   tensor_parallel_size?: number | null
   pipeline_parallel_size?: number | null
+  ctx_mode?: 'adaptive' | 'fixed'
 }
 
 export interface StoredMessage {

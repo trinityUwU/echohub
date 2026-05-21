@@ -254,7 +254,7 @@ export function useChat(
           title: `Context too small (${Math.round(currentCtx / 1024)}K)`,
           message: `Reload the model with ${Math.round(nextCtx / 1024)}K context to continue.`,
           duration: 0,
-          action: { label: `Reload ${Math.round(nextCtx / 1024)}K`, onClick: () => window.dispatchEvent(new CustomEvent('echohub:reload-ctx', { detail: { nextCtx } })) },
+          action: { label: `Reload ${Math.round(nextCtx / 1024)}K`, onClick: () => window.dispatchEvent(new CustomEvent('echohub:reload-ctx', { detail: { nextCtx, loadConfig: loadConfigSnapshot } })) },
         })
       },
     )

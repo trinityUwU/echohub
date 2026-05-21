@@ -38,7 +38,7 @@ export default function App(): React.ReactElement {
   const notifiedComplete = useRef<Set<string>>(new Set())
   const loadPctTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const { downloaded, loadedModel, loadingModelId, loadError, unloading, refresh, loadModel, loadModelFromPath, unloadModel } = useModels()
+  const { downloaded, loadedModel, loadingModelId, loadError, unloading, activeLoadConfig, refresh, loadModel, loadModelFromPath, unloadModel } = useModels()
   const gpu = useGpu()
   const { conversations, archivedConversations, activeId, activeMessages, newConversation, selectConversation, deleteConversation, archiveConversation, unarchiveConversation, renameConversation, toggleMemory, setActiveMessages } = useConversations()
 
@@ -155,16 +155,24 @@ export default function App(): React.ReactElement {
     setPendingLoad(model)
   }
 
-  // Listen for ctx_exceeded reload requests from useChat
+  // Listen for ctx_exceeded reload requests from useChat / useToolChat
   useEffect(() => {
     const handler = (e: Event) => {
-      const nextCtx = (e as CustomEvent).detail?.nextCtx
+      const nextCtx = (e as CustomEvent).detail?.nextCtx as number | undefined
+      const srcLoadConfig = (e as CustomEvent).detail?.loadConfig as import('@/types').LoadConfig | undefined
       if (!loadedModel) return
-      setPendingLoad({ ...loadedModel, _suggestedCtx: nextCtx } as ModelInfo & { _suggestedCtx?: number })
+      const effectiveLoadConfig = srcLoadConfig ?? activeLoadConfig
+      const isAdaptive = effectiveLoadConfig?.ctx_mode === 'adaptive'
+      if (isAdaptive && nextCtx) {
+        // Auto-reload without showing the modal
+        loadModel(loadedModel.id, { ...effectiveLoadConfig, maxModelLen: nextCtx }).catch(console.error)
+      } else {
+        setPendingLoad({ ...loadedModel, _suggestedCtx: nextCtx } as ModelInfo & { _suggestedCtx?: number })
+      }
     }
     window.addEventListener('echohub:reload-ctx', handler)
     return () => window.removeEventListener('echohub:reload-ctx', handler)
-  }, [loadedModel])
+  }, [loadedModel, loadModel])
 
   const handleLoadFinetuned = (model: FinetunedModel): void => {
     loadModelFromPath(model.id, model.path).catch(console.error)
@@ -201,6 +209,7 @@ export default function App(): React.ReactElement {
     tensorSplit?: number[] | null; mainGpu?: number | null
     speculativeMode?: 'off' | 'ngram' | 'mtp' | 'draft_model'
     draftModelPath?: string | null; nPredTokens?: number
+    ctxMode?: 'fixed' | 'adaptive'
   }): void => {
     if (!pendingLoad) return
     loadModel(pendingLoad.id, {
@@ -221,6 +230,7 @@ export default function App(): React.ReactElement {
       speculative_mode: cfg.speculativeMode ?? 'off',
       draft_model_path: cfg.draftModelPath ?? null,
       n_pred_tokens: cfg.nPredTokens ?? 10,
+      ctxMode: cfg.ctxMode,
     })
     setPendingLoad(null)
   }
