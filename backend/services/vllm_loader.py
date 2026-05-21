@@ -48,6 +48,19 @@ def _has_chat_template(model_path: str) -> bool:
         return False
 
 
+def _detect_tool_parser(model_id: str) -> str:
+    """Pick the vLLM tool-call-parser for this model family."""
+    name = model_id.lower()
+    if any(k in name for k in ("qwen", "hermes", "nous")):
+        return "hermes"
+    if any(k in name for k in ("mistral", "mixtral")):
+        return "mistral"
+    if any(k in name for k in ("internlm",)):
+        return "internlm"
+    # Llama-3, Phi-3, and most others — llama3_json is the safest default
+    return "llama3_json"
+
+
 def build_vllm_cmd(
     model_path: str, model_id: str, gpu_memory_utilization: float,
     max_model_len: int, is_vision: bool, enforce_eager: bool,
@@ -68,6 +81,8 @@ def build_vllm_cmd(
         elif max_cudagraph_capture_size is not None:
             cmd += ["--max-cudagraph-capture-size", str(max_cudagraph_capture_size)]
     cmd += ["--no-enable-flashinfer-autotune"]
+    # Tool use: enable auto tool choice with the appropriate parser for this model family
+    cmd += ["--enable-auto-tool-choice", "--tool-call-parser", _detect_tool_parser(model_id)]
     if tensor_parallel_size and tensor_parallel_size > 1:
         cmd.extend(["--tensor-parallel-size", str(tensor_parallel_size)])
     if pipeline_parallel_size and pipeline_parallel_size > 1:

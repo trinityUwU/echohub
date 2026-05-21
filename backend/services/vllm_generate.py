@@ -154,7 +154,20 @@ async def generate_with_tools(
         ) as resp:
             if resp.status_code >= 400:
                 body = await resp.aread()
-                logger.error(f"vLLM tools {resp.status_code}: {body.decode(errors='replace')}")
+                err_text = body.decode(errors="replace")
+                # tool choice not enabled — retry without tools (plain chat)
+                if resp.status_code == 400 and "tool choice" in err_text.lower():
+                    logger.warning("vLLM tool choice not enabled — retrying without tools")
+                    plain = {k: v for k, v in payload.items() if k not in ("tools", "tool_choice")}
+                    async with client.stream("POST", f"{VLLM_BASE_URL}/v1/chat/completions", json=plain) as r2:
+                        r2.raise_for_status()
+                        async for line in r2.aiter_lines():
+                            if stop_event and stop_event.is_set():
+                                break
+                            if line:
+                                yield line
+                    return
+                logger.error(f"vLLM tools {resp.status_code}: {err_text}")
                 resp.raise_for_status()
             async for line in resp.aiter_lines():
                 if stop_event and stop_event.is_set():
