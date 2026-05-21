@@ -128,12 +128,13 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, conversati
   const [gpuUtilPct, setGpuUtilPct] = useState(72)
   const [vramLimitGb, setVramLimitGb] = useState<number | null>(null)
   const [ctxLen, setCtxLen] = useState(() => {
-    // suggestedCtx takes priority (ctx_exceeded reload)
     if (suggestedCtx) return Math.min(suggestedCtx, model.max_context_window ?? 32768)
-    // Smart initial ctx: start small, grow with conversation history
+    // Reasoning/thinking models need more ctx — system prompt + thinking tokens eat 1-3K before user input
+    const isReasoning = /reasoning|thinking|distill|qwq|deepseek-r|r1/i.test(model.id + ' ' + model.name)
+    const minCtx = isReasoning ? 8192 : 4096
     const baseCtx = conversationTokens && conversationTokens > 1024
-      ? Math.min(32768, Math.max(4096, Math.pow(2, Math.ceil(Math.log2(conversationTokens * 2)))))
-      : 4096
+      ? Math.min(32768, Math.max(minCtx, Math.pow(2, Math.ceil(Math.log2(conversationTokens * 2)))))
+      : minCtx
     return Math.min(baseCtx, model.max_context_window ?? 32768)
   })
   const [cudaGraphs, setCudaGraphs] = useState<'default' | 'limited' | 'disabled'>('default')

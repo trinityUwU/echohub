@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toolChat, summarizeMessages } from '@/api/client'
 import type { ChatMessage, GenerationStats, SkillsConfig, ToolCall, WorkspaceFile } from '@/types'
 import { emitTimings } from '@/api/engineTimings'
+import { addToast } from '@/hooks/useToast'
 
 // ── SSE event shapes ──────────────────────────────────────────────────────────
 
@@ -336,13 +337,30 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
               void onSave(cid, 'assistant', accumulated)
             }
           } else if (raw.type === 'error') {
-            setMessages(prev => {
-              const updated = [...prev]
-              updated[updated.length - 1] = { role: 'assistant', content: `Error: ${raw.error}`, id: assistantId }
-              messagesRef.current = updated
-              return updated
-            })
-            setStreaming(false)
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const errRaw = raw as any
+            if (errRaw.error_type === 'ctx_exceeded') {
+              setStreaming(false)
+              const cur = errRaw.current_ctx ?? 4096
+              const next = errRaw.next_ctx ?? 8192
+              addToast({
+                type: 'warning',
+                title: `Context too small (${Math.round(cur / 1024)}K)`,
+                message: `Reload the model with ${Math.round(next / 1024)}K context to continue.`,
+                duration: 0,
+                action: { label: `Reload ${Math.round(next / 1024)}K`, onClick: () => window.dispatchEvent(new CustomEvent('echohub:reload-ctx', { detail: { nextCtx: next } })) },
+              })
+              // Remove the empty assistant message
+              setMessages(prev => prev.slice(0, -1))
+            } else {
+              setMessages(prev => {
+                const updated = [...prev]
+                updated[updated.length - 1] = { role: 'assistant', content: `Error: ${raw.error}`, id: assistantId }
+                messagesRef.current = updated
+                return updated
+              })
+              setStreaming(false)
+            }
           }
         }
       } catch (e) {
