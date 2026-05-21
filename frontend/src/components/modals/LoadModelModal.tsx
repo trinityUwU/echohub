@@ -252,6 +252,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
 
   // KV cache VRAM: applies to both vLLM and llama.cpp
   // llama.cpp KV factor: bf16=1.0, q8_0=0.5, q4_0=0.25
+  // For smart cap mode we don't know resolvedCtx yet (circular dep) — use ctxLen as upper bound estimate
   const kvQuantFactor = kvQuant === 'bf16' ? 1.0 : kvQuant === 'q8_0' ? 0.5 : 0.25
   const kvTotal   = engine === 'vllm' ? kvCacheGb(ctxLen, params) : kvCacheGb(ctxLen, params) * kvQuantFactor
   // offload_kqv: KV cache in system RAM instead of VRAM — zero VRAM cost for KV
@@ -270,11 +271,21 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
     ? Math.min(model.max_context_window ?? 131072, Math.floor(safeCtxK) * 1000)
     : (model.max_context_window ?? 131072)
 
-  // For llama: n_gpu_layers — -1=full GPU, 0=CPU only
-  // gpuLayersPct 100 → -1, 0 → 0, middle → proportional
+  // For llama: convert gpuLayersPct to actual layer count
+  // 100% → -1 (full GPU), 0% → 0 (CPU only), middle → estimated real count
   const resolvedNGpuLayers = engine === 'llama'
-    ? (gpuLayersPct === 100 ? -1 : gpuLayersPct === 0 ? 0 : null)
+    ? (gpuLayersPct === 100 ? -1 : gpuLayersPct === 0 ? 0 : Math.round(estimateLayers(_params) * gpuLayersPct / 100))
     : null
+
+  // Smart ctx: max ctx that fits in remaining VRAM after partial GPU weights
+  // Used in "smart" mode — much safer than null (which breaks llama.cpp)
+  const gpuWeightsGb = weightsGb * (gpuLayersPct / 100)
+  const vramAfterWeights = Math.max(0, cudaFreeGib - gpuWeightsGb - SAFETY_MARGIN_GB)
+  const kvGbPerToken = (kvQuantFactor * 0.025 * params / 8) / 1000
+  const smartCtxTokens = offloadKqv
+    ? Math.min(model.max_context_window ?? 131072, 32768) // KV in RAM — can go big
+    : Math.max(2048, Math.floor(vramAfterWeights / kvGbPerToken / 1024) * 1024)
+  const resolvedCtx = ctxMode === 'fixed' ? ctxLen : Math.min(smartCtxTokens, model.max_context_window ?? 131072)
 
   const canSubmit = (check?.feasible ?? false) && (!isOom || engine === 'llama')
 
@@ -285,8 +296,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
         <Btn variant="primary" disabled={!canSubmit}
           onClick={() => onConfirm({
             gpuMemoryUtilization: gpuUtil,
-            // adaptive mode: pass null so the backend allocates only what the conversation needs
-            maxModelLen: ctxMode === 'adaptive' ? null : ctxLen,
+            maxModelLen: resolvedCtx,
             enforceEager: cudaGraphs === 'disabled',
             maxCudagraphCaptureSize: cudaGraphs === 'limited' ? maxCaptureSize : null,
             nGpuLayers: resolvedNGpuLayers,
@@ -484,9 +494,9 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
                 },
                 {
                   id: 'adaptive' as const,
-                  label: 'Adaptive',
-                  pros: 'Allocates only what each conversation needs',
-                  cons: 'May OOM mid-conversation if context grows unexpectedly',
+                  label: 'Smart cap',
+                  pros: 'Auto-calculates max ctx that fits in remaining VRAM',
+                  cons: 'Cap is fixed at load — grows only if KV offload is on',
                 },
               ]).map(opt => {
                 const active = ctxMode === opt.id
@@ -509,8 +519,12 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
                 onChange={withProfileClear(setCtxLen)} formatValue={v => v.toLocaleString('en')} />
             )}
             {ctxMode === 'adaptive' && (
-              <div className="text-xs text-text-muted bg-elevated border border-border rounded-sm px-3 py-2">
-                Context allocated dynamically per conversation — no pre-allocation. VRAM freed after unload.
+              <div className="flex items-center justify-between bg-elevated border border-border rounded-sm px-3 py-2">
+                <span className="text-xs text-text-muted">Auto ctx cap:</span>
+                <span className="text-xs font-mono text-accent font-semibold">
+                  {resolvedCtx.toLocaleString('en')} tokens
+                  {offloadKqv && <span className="text-green ml-1">(KV in RAM — larger ctx possible)</span>}
+                </span>
               </div>
             )}
           </div>
