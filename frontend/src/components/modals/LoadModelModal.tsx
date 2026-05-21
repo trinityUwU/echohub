@@ -34,6 +34,90 @@ function kvCacheGb(ctxLen: number, paramsBillion: number): number {
   return (ctxLen / 1000) * 0.025 * (paramsBillion / 8)
 }
 
+// Estimate total model layers from params_billion — approximation based on common architectures
+function estimateLayers(paramsBillion: number): number {
+  if (paramsBillion <= 1.5) return 28
+  if (paramsBillion <= 3)   return 36
+  if (paramsBillion <= 8)   return 32
+  if (paramsBillion <= 14)  return 40
+  if (paramsBillion <= 32)  return 64
+  return 80
+}
+
+type LoadProfile = 'performance' | 'balanced' | 'gaming' | 'minimal'
+
+interface ProfileDef {
+  id: LoadProfile
+  label: string
+  icon: string
+  desc: string
+  vramTarget: (total: number) => number  // GB
+  kvQuant: 'q8_0' | 'q4_0' | 'bf16'
+  offloadKqv: boolean
+  nBatch: 64 | 128 | 256 | 512
+  ctxMode: 'fixed' | 'adaptive'
+}
+
+const PROFILES: ProfileDef[] = [
+  {
+    id: 'performance',
+    label: 'Performance',
+    icon: '⚡',
+    desc: 'Full GPU — max speed, uses all available VRAM',
+    vramTarget: (t) => t * 0.92,
+    kvQuant: 'q8_0',
+    offloadKqv: false,
+    nBatch: 512,
+    ctxMode: 'fixed',
+  },
+  {
+    id: 'balanced',
+    label: 'Balanced',
+    icon: '⚖',
+    desc: 'Half VRAM — model runs fast, leaves room for the OS and light tasks',
+    vramTarget: (t) => t * 0.5,
+    kvQuant: 'q8_0',
+    offloadKqv: false,
+    nBatch: 256,
+    ctxMode: 'fixed',
+  },
+  {
+    id: 'gaming',
+    label: 'Gaming',
+    icon: '🎮',
+    desc: '~3 GB VRAM — model stays loaded while playing most games',
+    vramTarget: (_) => 3.0,
+    kvQuant: 'q4_0',
+    offloadKqv: true,
+    nBatch: 128,
+    ctxMode: 'adaptive',
+  },
+  {
+    id: 'minimal',
+    label: 'Minimal',
+    icon: '🪶',
+    desc: '~1.5 GB VRAM — leaves as much as possible free, slower generation',
+    vramTarget: (_) => 1.5,
+    kvQuant: 'q4_0',
+    offloadKqv: true,
+    nBatch: 64,
+    ctxMode: 'adaptive',
+  },
+]
+
+// Compute n_gpu_layers for a given VRAM budget and model weights size
+function computeGpuLayersPct(
+  vramBudgetGb: number,
+  weightsGb: number,
+  paramsBillion: number,
+): number {
+  const totalLayers = estimateLayers(paramsBillion)
+  const gbPerLayer = weightsGb / totalLayers
+  const fitsLayers = Math.floor(vramBudgetGb / gbPerLayer)
+  const pct = Math.round(Math.min(fitsLayers / totalLayers, 1) * 100)
+  return Math.max(0, pct)
+}
+
 export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm, onCancel }: LoadModelModalProps): React.ReactElement {
   const [gpuUtilPct, setGpuUtilPct] = useState(72)
   const [vramLimitGb, setVramLimitGb] = useState<number | null>(null)
@@ -49,6 +133,53 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
   const [offloadKqv, setOffloadKqv] = useState(false)
   const [nBatch, setNBatch] = useState<64 | 128 | 256 | 512>(model.is_moe ? 128 : 512)
   const [ctxMode, setCtxMode] = useState<'fixed' | 'adaptive'>('fixed')
+  const [activeProfile, setActiveProfile] = useState<LoadProfile | null>(null)
+
+  // Pre-compute weightsGb here so applyProfile can use it
+  const _qUpperEarly = (model.quantization ?? '').toUpperCase()
+  const _nameLEarly  = (model.id ?? model.name ?? '').toLowerCase()
+  const _isGgufEarly =
+    _qUpperEarly.startsWith('GGUF') ||
+    _nameLEarly.includes('gguf') ||
+    _qUpperEarly.includes('Q4') || _qUpperEarly.includes('Q5') || _qUpperEarly.includes('Q6') ||
+    _qUpperEarly.includes('Q8') || _qUpperEarly.includes('IQ') ||
+    /[-_]i[1-4][-_.]/.test(_nameLEarly) || _nameLEarly.endsWith('-i1') || _nameLEarly.endsWith('-i2')
+  const _engineEarly = _isGgufEarly ? 'llama' : 'vllm'
+  const _params = model.params_billion ?? 8
+  const _ggufFactor = (() => {
+    const q = _qUpperEarly; const n = _nameLEarly
+    if (q.includes('Q3') || n.includes('q3')) return 0.42
+    if (q.includes('Q4') || n.includes('q4')) return 0.55
+    if (q.includes('Q5') || n.includes('q5')) return 0.67
+    if (q.includes('Q6') || n.includes('q6')) return 0.80
+    if (q.includes('Q8') || n.includes('q8')) return 1.1
+    if (q.includes('F16') || n.includes('f16')) return 2.0
+    if (/i[1-4][-_.]/.test(n) || n.endsWith('-i1') || n.endsWith('-i2')) return 0.52
+    return 0.55
+  })()
+  const _be = model.vram_estimate_gb
+  const _weightsGb = _engineEarly === 'llama'
+    ? (_be && _be < _params * 1.2 ? _be : _params * _ggufFactor)
+    : (_be ?? _params * 0.6)
+
+  const applyProfile = (profileId: LoadProfile): void => {
+    const prof = PROFILES.find(p => p.id === profileId)
+    if (!prof) return
+    const vramBudget = prof.vramTarget(vramTotalGb)
+    const layersPct = computeGpuLayersPct(vramBudget, _weightsGb, _params)
+    setGpuLayersPct(layersPct)
+    setKvQuant(prof.kvQuant)
+    setOffloadKqv(prof.offloadKqv)
+    setNBatch(prof.nBatch)
+    setCtxMode(prof.ctxMode)
+    setActiveProfile(profileId)
+  }
+
+  // Any manual tweak after a profile clears the "active" highlight
+  const withProfileClear = <T,>(setter: (v: T) => void) => (v: T): void => {
+    setActiveProfile(null)
+    setter(v)
+  }
 
   useEffect(() => {
     getInferenceSettings().then(s => {
@@ -235,6 +366,58 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
         kvGb={kv} kvOffloadedGb={kvOffloadedGb} overheadGb={overhead} budgetGb={budgetGb}
         cudaFreeGib={cudaFreeGib} isOom={isOom} engine={engine} />
 
+      {/* Load profiles — llama.cpp only */}
+      {engine === 'llama' && (
+        <div className="flex flex-col gap-2">
+          <div className="text-xs font-semibold uppercase tracking-widest text-text-muted">Load profile</div>
+          <div className="grid grid-cols-2 gap-2">
+            {PROFILES.map(prof => {
+              const vramBudget = prof.vramTarget(vramTotalGb)
+              const layersPct  = computeGpuLayersPct(vramBudget, _weightsGb, _params)
+              const freeGb     = Math.max(0, vramTotalGb - vramUsedGb - Math.min(vramBudget, _weightsGb))
+              const active     = activeProfile === prof.id
+              return (
+                <button key={prof.id} onClick={() => applyProfile(prof.id)}
+                  className={`flex flex-col gap-1.5 px-3 py-2.5 rounded-sm border cursor-pointer transition-all text-left ${
+                    active
+                      ? 'border-accent/50 bg-accent/8 ring-1 ring-accent/20'
+                      : 'border-border bg-elevated hover:border-border-hover'
+                  }`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-base leading-none">{prof.icon}</span>
+                      <span className={`text-sm font-semibold ${active ? 'text-accent' : 'text-text-primary'}`}>
+                        {prof.label}
+                      </span>
+                    </div>
+                    {active && (
+                      <span className="text-2xs px-1.5 py-px rounded bg-accent/15 text-accent font-medium">active</span>
+                    )}
+                  </div>
+                  <div className="text-2xs text-text-muted leading-tight">{prof.desc}</div>
+                  <div className="flex items-center gap-3 mt-0.5 text-2xs font-mono">
+                    <span className={`${active ? 'text-accent' : 'text-text-secondary'}`}>
+                      {layersPct === 100 ? 'Full GPU' : layersPct === 0 ? 'CPU only' : `${layersPct}% GPU`}
+                    </span>
+                    <span className="text-text-muted">
+                      ~{freeGb.toFixed(1)} GB free
+                    </span>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+          {activeProfile !== null && (
+            <div className="flex items-center justify-between text-xs text-text-muted">
+              <span>Profile applied — tweak parameters below if needed</span>
+              <button onClick={() => setActiveProfile(null)} className="text-text-muted hover:text-text-primary underline underline-offset-2 cursor-pointer">
+                clear
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Parameters */}
       <div className="flex flex-col gap-3">
         <div className="text-xs font-semibold uppercase tracking-widest text-text-muted">Parameters</div>
@@ -256,7 +439,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
             <div className="flex items-center gap-2 mb-1">
               <span className="text-2xs text-text-muted/60 w-8 text-right">CPU</span>
               <input type="range" min={0} max={100} step={10} value={gpuLayersPct}
-                onChange={e => setGpuLayersPct(Number(e.target.value))}
+                onChange={e => withProfileClear(setGpuLayersPct)(Number(e.target.value))}
                 className="flex-1 accent-accent cursor-pointer" />
               <span className="text-2xs text-text-muted/60 w-8">GPU</span>
             </div>
@@ -266,7 +449,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
               {gpuLayersPct > 0 && gpuLayersPct < 100 && 'Hybrid — GPU handles most layers, CPU handles overflow'}
             </div>
             {/* CPU overflow toggle */}
-            <button onClick={() => setCpuOverflow(v => !v)}
+            <button onClick={() => withProfileClear(setCpuOverflow)(!cpuOverflow)}
               className={`mt-3 flex items-center gap-2.5 w-full px-3 py-2.5 rounded-sm border cursor-pointer transition-colors text-left ${
                 cpuOverflow ? 'border-yellow/40 bg-yellow/8' : 'border-border bg-elevated hover:border-border-hover'
               }`}>
@@ -308,7 +491,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
               ]).map(opt => {
                 const active = ctxMode === opt.id
                 return (
-                  <button key={opt.id} onClick={() => setCtxMode(opt.id)}
+                  <button key={opt.id} onClick={() => withProfileClear(setCtxMode)(opt.id)}
                     className={`flex-1 flex flex-col gap-1 px-3 py-2.5 rounded-sm border cursor-pointer transition-colors text-left ${
                       active ? 'border-accent/40 bg-accent-dim' : 'bg-elevated border-border hover:border-border-hover'
                     }`}>
@@ -323,7 +506,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
               <Slider label="Fixed context"
                 value={Math.min(ctxLen, Math.max(2048, ctxMax))}
                 min={2048} max={Math.max(2048, ctxMax)} step={2048}
-                onChange={setCtxLen} formatValue={v => v.toLocaleString('en')} />
+                onChange={withProfileClear(setCtxLen)} formatValue={v => v.toLocaleString('en')} />
             )}
             {ctxMode === 'adaptive' && (
               <div className="text-xs text-text-muted bg-elevated border border-border rounded-sm px-3 py-2">
@@ -363,7 +546,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
                 const active = kvQuant === opt.id
                 const optKvGb = kvCacheGb(ctxMode === 'fixed' ? ctxLen : 2048, params) * (opt.id === 'bf16' ? 1 : opt.id === 'q8_0' ? 0.5 : 0.25)
                 return (
-                  <button key={opt.id} onClick={() => setKvQuant(opt.id)}
+                  <button key={opt.id} onClick={() => withProfileClear(setKvQuant)(opt.id)}
                     className={`flex-1 flex flex-col items-center gap-0.5 px-2 py-2 rounded-sm border cursor-pointer transition-colors text-center ${
                       active ? 'border-accent/40 bg-accent-dim' : 'bg-elevated border-border hover:border-border-hover'
                     }`}>
@@ -378,7 +561,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
             </div>
 
             {/* offload_kqv toggle */}
-            <button onClick={() => setOffloadKqv(v => !v)}
+            <button onClick={() => withProfileClear(setOffloadKqv)(!offloadKqv)}
               className={`flex items-start gap-2.5 w-full px-3 py-2.5 rounded-sm border cursor-pointer transition-colors text-left ${
                 offloadKqv ? 'border-green/40 bg-green/8' : 'border-border bg-elevated hover:border-border-hover'
               }`}>
@@ -444,7 +627,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
               ]).map(opt => {
                 const active = nBatch === opt.val
                 return (
-                  <button key={opt.val} onClick={() => setNBatch(opt.val)}
+                  <button key={opt.val} onClick={() => withProfileClear(setNBatch)(opt.val)}
                     className={`flex flex-col gap-1 px-2 py-2 rounded-sm border cursor-pointer transition-colors text-left ${
                       active ? 'border-accent/40 bg-accent-dim' : 'bg-elevated border-border hover:border-border-hover'
                     }`}>
