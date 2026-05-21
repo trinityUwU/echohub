@@ -19,6 +19,25 @@ from loguru import logger
 
 from backend.models.schemas import ModelInfo
 
+def _gguf_has_mtp_heads(gguf_path: str) -> bool:
+    """Return True if GGUF metadata contains MTP head markers (Qwen3, DeepSeek-V3 style)."""
+    try:
+        with open(gguf_path, 'rb') as f:
+            magic = f.read(4)
+            if magic != b'GGUF':
+                return False
+            f.seek(0)
+            header = f.read(65536)
+        return b'mtp' in header.lower() or b'num_nextn_predict' in header
+    except Exception:
+        return False
+
+
+def detect_mtp_support(gguf_path: str) -> bool:
+    """Return True if this GGUF has MTP heads (Qwen3, DeepSeek-V3 style)."""
+    return _gguf_has_mtp_heads(gguf_path)
+
+
 def _flash_attn_enabled() -> bool:
     try:
         from backend.services.config_service import get_inference_settings
@@ -111,6 +130,11 @@ def load_model(
     kv_quant: Optional[str] = None,
     offload_kqv: bool = False,
     n_batch_override: int | None = None,
+    speculative_mode: str = "ngram",
+    draft_model_path: Optional[str] = None,
+    n_pred_tokens: int = 10,
+    tensor_split: list[float] | None = None,
+    main_gpu: int | None = None,
 ) -> None:
     """Charge le modèle GGUF. Bloquant — appelé depuis un thread."""
     global _llm, _current_model, _load_error, _eject_requested, _load_config
@@ -210,6 +234,43 @@ def load_model(
             pass  # param not supported — n_batch=128 is the fallback mitigation
         _log("[llama] MoE + cpu_overflow: n_batch=128, no_perf=True to avoid CUDA graph OOM")
 
+    # Speculative decoding — must be set in llama_kwargs before Llama() is constructed
+    if speculative_mode == "ngram":
+        try:
+            from llama_cpp import LlamaPromptLookupDecoding
+            llama_kwargs["draft_model"] = LlamaPromptLookupDecoding(num_pred_tokens=n_pred_tokens)
+            _log(f"[llama] Speculative ngram: num_pred_tokens={n_pred_tokens}")
+        except (ImportError, Exception) as _e:
+            _log(f"[llama] Speculative ngram not available ({_e}) — disabled")
+    elif speculative_mode == "mtp":
+        try:
+            from llama_cpp import Llama as _LlamaInner, LlamaDraftModel
+            _draft = _LlamaInner(
+                model_path=gguf_path, n_ctx=n_ctx, n_gpu_layers=n_gpu,
+                n_batch=32, verbose=False,
+            )
+            llama_kwargs["draft_model"] = LlamaDraftModel(llm=_draft, n_pred=n_pred_tokens)
+            _log(f"[llama] Speculative MTP: LlamaDraftModel n_pred={n_pred_tokens}")
+        except (ImportError, Exception) as _e:
+            _log(f"[llama] MTP draft failed ({_e}), falling back to ngram")
+            try:
+                from llama_cpp import LlamaPromptLookupDecoding
+                llama_kwargs["draft_model"] = LlamaPromptLookupDecoding(num_pred_tokens=n_pred_tokens)
+            except (ImportError, Exception):
+                pass
+    elif speculative_mode == "draft_model" and draft_model_path:
+        try:
+            from llama_cpp import Llama as _LlamaInner, LlamaDraftModel
+            _draft = _LlamaInner(
+                model_path=draft_model_path, n_ctx=n_ctx, n_gpu_layers=n_gpu,
+                n_batch=32, verbose=False,
+            )
+            llama_kwargs["draft_model"] = LlamaDraftModel(llm=_draft, n_pred=n_pred_tokens)
+            _log(f"[llama] Speculative draft model: {draft_model_path}")
+        except (ImportError, Exception) as _e:
+            _log(f"[llama] Draft model failed ({_e})")
+    # speculative_mode == "off" → nothing added
+
     # Vision: load multimodal projector if present
     if mmproj_path and vision_handler:
         try:
@@ -219,6 +280,13 @@ def load_model(
             _log(f"[llama] Vision handler: {vision_handler} + {mmproj_path}")
         except Exception as e:
             _log(f"[llama] Vision handler load failed ({e}) — falling back to text-only")
+
+    # Multi-GPU tensor split — only for dense models (MoE uses LAYER split, incompatible)
+    if tensor_split is not None and not is_moe:
+        llama_kwargs["tensor_split"] = tensor_split
+        _log(f"[llama] Multi-GPU tensor_split={tensor_split}")
+    if main_gpu is not None:
+        llama_kwargs["main_gpu"] = main_gpu
 
     _llm = Llama(**llama_kwargs)
 
@@ -246,6 +314,10 @@ def load_model(
         "offload_kqv": offload_kqv,
         "kv_quant": kv_quant or "q8_0",
         "gguf_path": gguf_path,
+        "speculative_mode": speculative_mode,
+        "n_pred_tokens": n_pred_tokens,
+        "tensor_split": tensor_split,
+        "main_gpu": main_gpu,
     }
     logger.info(f"llama model loaded: {model_id} ({elapsed:.1f}s)")
 
@@ -263,6 +335,11 @@ def load_model_async(
     kv_quant: Optional[str] = None,
     offload_kqv: bool = False,
     n_batch_override: int | None = None,
+    speculative_mode: str = "ngram",
+    draft_model_path: Optional[str] = None,
+    n_pred_tokens: int = 10,
+    tensor_split: list[float] | None = None,
+    main_gpu: int | None = None,
 ) -> None:
     """Lance le chargement dans un thread background — retourne immédiatement."""
     global _loading_model_id, _load_error, _eject_requested
@@ -273,7 +350,12 @@ def load_model_async(
     def _run() -> None:
         global _loading_model_id, _load_error
         try:
-            load_model(gguf_path, model_id, n_ctx, gpu_type, n_gpu_layers_override, cpu_overflow, is_moe, mmproj_path, vision_handler, kv_quant, offload_kqv, n_batch_override)
+            load_model(
+                gguf_path, model_id, n_ctx, gpu_type, n_gpu_layers_override,
+                cpu_overflow, is_moe, mmproj_path, vision_handler, kv_quant,
+                offload_kqv, n_batch_override, speculative_mode, draft_model_path,
+                n_pred_tokens, tensor_split, main_gpu,
+            )
         except Exception as e:
             if not _eject_requested:
                 _load_error = str(e)

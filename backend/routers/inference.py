@@ -67,6 +67,8 @@ def load_model(req: LoadRequest) -> dict:
             n_batch=req.n_batch,
             tensor_parallel_size=req.tensor_parallel_size,
             pipeline_parallel_size=req.pipeline_parallel_size,
+            tensor_split=req.tensor_split,
+            main_gpu=req.main_gpu,
         )
         return {"status": "loading", "model_id": req.model_id}
     except FileNotFoundError as e:
@@ -115,6 +117,13 @@ def _get_available_engines() -> list[str]:
     if engine_router.is_vllm_available():
         engines.append("vllm")
     return engines
+
+
+@router.get("/multi-gpu-config")
+def get_multi_gpu_config_endpoint() -> dict:
+    """Retourne la config multi-GPU détectée : gpu_count, gpus, tensor_split suggéré."""
+    from backend.services.multi_gpu import get_multi_gpu_config
+    return get_multi_gpu_config()
 
 
 @router.post("/chat")

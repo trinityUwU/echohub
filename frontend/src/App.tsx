@@ -163,6 +163,7 @@ export default function App(): React.ReactElement {
     kvQuant?: 'q8_0' | 'q4_0' | 'bf16'
     offloadKqv?: boolean; nBatch?: number | null
     tensorParallelSize?: number | null; pipelineParallelSize?: number | null
+    tensorSplit?: number[] | null; mainGpu?: number | null
   }): void => {
     if (!pendingLoad) return
     loadModel(pendingLoad.id, {
@@ -178,6 +179,8 @@ export default function App(): React.ReactElement {
       n_batch: cfg.nBatch ?? null,
       tensorParallelSize: cfg.tensorParallelSize ?? null,
       pipelineParallelSize: cfg.pipelineParallelSize ?? null,
+      tensor_split: cfg.tensorSplit ?? null,
+      main_gpu: cfg.mainGpu ?? null,
     })
     setPendingLoad(null)
   }

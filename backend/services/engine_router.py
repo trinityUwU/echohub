@@ -203,6 +203,8 @@ def load_model_async(
     n_batch: Optional[int] = None,
     tensor_parallel_size: Optional[int] = None,
     pipeline_parallel_size: Optional[int] = None,
+    tensor_split: Optional[list[float]] = None,
+    main_gpu: Optional[int] = None,
 ) -> None:
     from backend.services import llama_service, vllm_service
 
@@ -233,6 +235,8 @@ def load_model_async(
             kv_quant=kv_quant,
             offload_kqv=offload_kqv,
             n_batch_override=n_batch,
+            tensor_split=tensor_split,
+            main_gpu=main_gpu,
         )
         return
 

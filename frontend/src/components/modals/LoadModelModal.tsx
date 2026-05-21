@@ -5,7 +5,7 @@ import { Btn } from '@/components/shared/Btn'
 import { Badge } from '@/components/shared/Badge'
 import { getInferenceSettings, getMoeLoadConfig, getMultiGpuConfig } from '@/api/client'
 import type { MoeLoadConfig } from '@/api/client'
-import type { GpuStats, ModelInfo } from '@/types'
+import type { GpuStats, ModelInfo, MultiGpuConfig } from '@/types'
 
 interface CanLoadResult {
   engine: string; format: string; feasible: boolean; reason: string | null
@@ -24,6 +24,7 @@ interface LoadModelModalProps {
     kvQuant?: 'q8_0' | 'q4_0' | 'bf16'
     offloadKqv?: boolean; nBatch?: number | null
     tensorParallelSize?: number | null; pipelineParallelSize?: number | null
+    tensorSplit?: number[] | null; mainGpu?: number | null
   }) => void
   onCancel: () => void
 }
@@ -138,6 +139,9 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
   // Multi-GPU state (vLLM only)
   const [gpuCount, setGpuCount] = useState(1)
   const [tensorParallelSize, setTensorParallelSize] = useState<number>(1)
+  // Multi-GPU state (llama.cpp)
+  const [multiGpuConfig, setMultiGpuConfig] = useState<MultiGpuConfig | null>(null)
+  const [tensorSplit, setTensorSplit] = useState<number[] | null>(null)
 
   // Pre-compute weightsGb here so applyProfile can use it
   const _qUpperEarly = (model.quantization ?? '').toUpperCase()
@@ -230,6 +234,15 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
                gpu_type: 'nvidia', vllm_available: true })
   }, [model.id])
 
+  useEffect(() => {
+    getMultiGpuConfig().then(cfg => {
+      setMultiGpuConfig(cfg)
+      if (cfg.tensor_split && cfg.tensor_split.length > 1) {
+        setTensorSplit(cfg.tensor_split)
+      }
+    }).catch(() => {})
+  }, [])
+
   const gpuUtil = gpuUtilPct / 100
   const _qUpper = (model.quantization ?? '').toUpperCase()
   const _nameL  = (model.id ?? model.name ?? '').toLowerCase()
@@ -318,6 +331,8 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
             nBatch: engine === 'llama' ? nBatch : null,
             tensorParallelSize: engine === 'vllm' && tensorParallelSize > 1 ? tensorParallelSize : null,
             pipelineParallelSize: null,
+            tensorSplit: engine === 'llama' ? tensorSplit : null,
+            mainGpu: engine === 'llama' && tensorSplit ? 0 : null,
           })}>
           Load model
         </Btn>
@@ -385,7 +400,11 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
       <HardwareSection gpu={gpu ?? null} />
 
       {/* VRAM preview */}
-      <VramBar totalGb={vramTotalGb} usedGb={vramUsedGb} weightsGb={weightsGb}
+      <VramBar
+        totalGb={multiGpuConfig && multiGpuConfig.gpu_count > 1 && engine === 'llama'
+          ? multiGpuConfig.total_vram_mb / 1024
+          : vramTotalGb}
+        usedGb={vramUsedGb} weightsGb={weightsGb}
         kvGb={kv} kvOffloadedGb={kvOffloadedGb} overheadGb={overhead} budgetGb={budgetGb}
         cudaFreeGib={cudaFreeGib} isOom={isOom} engine={engine} />
 
@@ -490,6 +509,28 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
                 </div>
               </div>
             </button>
+          </div>
+        )}
+
+        {/* Multi-GPU — llama.cpp only, shown when > 1 GPU detected */}
+        {engine === 'llama' && multiGpuConfig && multiGpuConfig.gpu_count > 1 && (
+          <div className="flex items-start gap-2 bg-green/8 border border-green/30 rounded-sm px-3 py-2.5">
+            <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-green" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            <div>
+              <div className="text-sm font-medium text-green">
+                {multiGpuConfig.gpu_count} GPUs detected — tensor split enabled
+              </div>
+              <div className="flex gap-3 mt-1 text-xs font-mono text-text-muted">
+                {multiGpuConfig.gpus.map(g => (
+                  <span key={g.index}>{g.name}: {((tensorSplit?.[g.index] ?? 1 / multiGpuConfig.gpu_count) * 100).toFixed(0)}%</span>
+                ))}
+              </div>
+              <div className="text-xs text-text-muted mt-0.5">
+                Split proportional to VRAM — total {(multiGpuConfig.total_vram_mb / 1024).toFixed(0)} GB
+              </div>
+            </div>
           </div>
         )}
 

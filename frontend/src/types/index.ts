@@ -66,6 +66,15 @@ export interface LoadRequest {
   n_batch?: number | null
   tensor_parallel_size?: number | null   // vLLM: number of GPUs in tensor parallel
   pipeline_parallel_size?: number | null // vLLM: pipeline parallel for very large models
+  tensor_split?: number[] | null
+  main_gpu?: number | null
+}
+
+export interface MultiGpuConfig {
+  gpu_count: number
+  gpus: Array<{ index: number; name: string; vram_total_mb: number; type: string }>
+  tensor_split: number[] | null
+  total_vram_mb: number
 }
 
 export interface FinetunedModel {

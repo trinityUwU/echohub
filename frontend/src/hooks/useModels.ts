@@ -69,6 +69,7 @@ export function useModels() {
     gguf_path?: string | null; is_moe?: boolean; kv_quant?: 'q8_0' | 'q4_0' | 'bf16'
     offload_kqv?: boolean; n_batch?: number | null; ctx_mode?: 'adaptive' | 'fixed'
     tensorParallelSize?: number | null; pipelineParallelSize?: number | null
+    tensor_split?: number[] | null; main_gpu?: number | null
   }
 
   const _doLoad = useCallback(async (modelId: string, req: import('@/types').LoadRequest) => {
@@ -105,6 +106,8 @@ export function useModels() {
       n_batch: config?.n_batch ?? null,
       tensor_parallel_size: config?.tensorParallelSize ?? null,
       pipeline_parallel_size: config?.pipelineParallelSize ?? null,
+      tensor_split: config?.tensor_split ?? null,
+      main_gpu: config?.main_gpu ?? null,
     })
   }, [_doLoad])
 
