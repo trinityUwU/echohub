@@ -627,6 +627,21 @@ async def generate(
                         "out of memory", "cuda error", "cuda out", "ggml_cuda",
                         "failed to allocate", "memory allocation", "killed",
                     ))
+                    is_speculative_err = any(k in err_str for k in (
+                        "broadcast", "shape", "ngram", "draft model",
+                    ))
+                    if is_speculative_err:
+                        # Speculative decoding error that survived the retry — disable and report clearly
+                        global _load_config
+                        if _load_config:
+                            _load_config["speculative_mode"] = None
+                        if hasattr(_llm, "draft_model"):
+                            _llm.draft_model = None
+                        _log(f"[llama] Speculative decoding error (disabling): {e}", "warn")
+                        payload = json.dumps({"error": "Speculative decoding incompatible with this model — disabled. Please retry.", "error_type": "error"})
+                        asyncio.run_coroutine_threadsafe(queue.put(f"data: {payload}"), loop)
+                        asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+                        return
                     if is_ctx_exceeded:
                         current_ctx = _load_config.get("n_ctx", 4096) if _load_config else 4096
                         next_ctx = min(current_ctx * 2, 32768)
