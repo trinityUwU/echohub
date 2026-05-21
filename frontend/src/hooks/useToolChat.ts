@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toolChat, summarizeMessages } from '@/api/client'
 import type { ChatMessage, GenerationStats, SkillsConfig, ToolCall, WorkspaceFile } from '@/types'
+import { emitTimings } from '@/api/engineTimings'
 
 // ── SSE event shapes ──────────────────────────────────────────────────────────
 
@@ -249,6 +250,12 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
       try {
         for await (const raw of toolChat(req)) {
           if (controller.signal.aborted) break
+          // Handle timings before the typed SseEvent check
+          if (typeof raw === 'object' && raw !== null && 'timings' in raw) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            emitTimings((raw as any).timings)
+            continue
+          }
           if (!isSseEvent(raw)) continue
 
           // Helper — update message + token counter after every content change
