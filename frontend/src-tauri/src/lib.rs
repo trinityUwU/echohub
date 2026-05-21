@@ -147,7 +147,6 @@ fn spawn_backend_with_retries(app: &AppHandle, port: u16, attempt: u32) {
             tauri::async_runtime::spawn(async move {
                 use tauri_plugin_shell::process::CommandEvent;
                 use std::io::Write;
-                use tokio::time::{sleep, Duration};
 
                 let file = std::fs::OpenOptions::new()
                     .create(true).append(true).open(&log_path_clone);
@@ -162,7 +161,7 @@ fn spawn_backend_with_retries(app: &AppHandle, port: u16, attempt: u32) {
                         }
                         CommandEvent::Terminated(status) => {
                             log::warn!("Backend terminated (status: {:?}) — restarting in 2s (attempt {})", status, attempt + 1);
-                            sleep(Duration::from_secs(2)).await;
+                            std::thread::sleep(std::time::Duration::from_secs(2));
                             spawn_backend_with_retries(&app_handle, port, attempt + 1);
                             break;
                         }
@@ -175,8 +174,8 @@ fn spawn_backend_with_retries(app: &AppHandle, port: u16, attempt: u32) {
             log::error!("Failed to spawn backend (attempt {}): {}", attempt + 1, e);
             // Retry after 3s if spawn itself failed
             let app_handle = app.clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(3));
                 spawn_backend_with_retries(&app_handle, port, attempt + 1);
             });
         }
