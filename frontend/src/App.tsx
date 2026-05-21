@@ -218,7 +218,7 @@ export default function App(): React.ReactElement {
       pipelineParallelSize: cfg.pipelineParallelSize ?? null,
       tensor_split: cfg.tensorSplit ?? null,
       main_gpu: cfg.mainGpu ?? null,
-      speculative_mode: cfg.speculativeMode ?? 'ngram',
+      speculative_mode: cfg.speculativeMode ?? 'off',
       draft_model_path: cfg.draftModelPath ?? null,
       n_pred_tokens: cfg.nPredTokens ?? 10,
     })
