@@ -2,6 +2,7 @@ import React from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import type { ModelInfo } from '@/types'
 import type { ChatView, ProjectMode } from '@/hooks/useChatMode'
+import { onTimings } from '@/api/engineTimings'
 
 interface ChatTopBarProps {
   loadedModel: ModelInfo | null
@@ -249,6 +250,7 @@ function LoadingBar({ pct, modelName, onEject }: {
 /** Logs panel — rendered in the content area, between left/right sidebars */
 export function LogsPanel({ active }: { active: boolean }): React.ReactElement {
   const [logs, setLogs] = React.useState<string>('')
+  const [timingsLines, setTimingsLines] = React.useState<string[]>([])
   const endRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
@@ -266,8 +268,25 @@ export function LogsPanel({ active }: { active: boolean }): React.ReactElement {
   }, [active])
 
   React.useEffect(() => {
+    return onTimings(t => {
+      const sep = '─'.repeat(60)
+      const ppt = t.n_prompt > 0 ? (t.prompt_ms / t.n_prompt).toFixed(2) : '0.00'
+      const ept = t.n_eval > 0 ? (t.eval_ms / t.n_eval).toFixed(2) : '0.00'
+      setTimingsLines(prev => [
+        ...prev,
+        sep,
+        `prompt eval time = ${t.prompt_ms.toFixed(2).padStart(10)} ms / ${String(t.n_prompt).padStart(5)} tokens  (${ppt} ms per token, ${t.prompt_tps.toFixed(2)} tokens per second)`,
+        `       eval time = ${t.eval_ms.toFixed(2).padStart(10)} ms / ${String(t.n_eval).padStart(5)} tokens  (${ept} ms per token, ${t.eval_tps.toFixed(2)} tokens per second)`,
+        `      total time = ${(t.prompt_ms + t.eval_ms).toFixed(2).padStart(10)} ms / ${String(t.n_prompt + t.n_eval).padStart(5)} tokens`,
+      ])
+    })
+  }, [])
+
+  React.useEffect(() => {
     if (active) endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [logs, active])
+  }, [logs, timingsLines, active])
+
+  const allLines = [...logs.split('\n'), ...timingsLines]
 
   return (
     <AnimatePresence initial={false}>
@@ -280,14 +299,15 @@ export function LogsPanel({ active }: { active: boolean }): React.ReactElement {
           className="overflow-hidden bg-[#0a0a0c] border-b border-border flex-shrink-0"
         >
           <div className="h-full overflow-y-auto p-3 font-mono text-[11px] leading-relaxed">
-            {logs
-              ? logs.split('\n').map((line, i) => (
+            {allLines.some(l => l.trim())
+              ? allLines.map((line, i) => (
                   <div key={i} className={
                     /error/i.test(line) ? 'text-red' :
                     /warn/i.test(line) ? 'text-yellow' :
                     /loaded|success|\bOK\b/i.test(line) ? 'text-green' :
+                    /prompt eval|eval time|total time|─{10,}/.test(line) ? 'text-cyan-400' :
                     'text-text-muted'
-                  }>{line || ' '}</div>
+                  }>{line || ' '}</div>
                 ))
               : <span className="animate-pulse text-text-muted/50">Waiting for log output…</span>
             }
