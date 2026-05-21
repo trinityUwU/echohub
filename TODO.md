@@ -1,9 +1,10 @@
 # TODO — EchoHub
-*Dernière mise à jour : 2026-05-21 (session 22)*
+*Dernière mise à jour : 2026-05-21 (session 23)*
 
 ## En cours
 - [ ] Construction karma Reddit (r/LocalLLaMA) — 1-2 commentaires/jour, sujets perfs/vLLM/GGUF/CUDA
-- [ ] Rédiger post Reddit/HN avec Chris (matériel prêt — démo Skills/MCP + Projects + agent)
+- [ ] Rédiger post Reddit/HN avec Chris (matériel prêt — démo Skills/MCP + Projects + agent + perf v0.9)
+- [ ] Valider résultats perf profil Minimal après fix n_threads (TTFT et tok/s attendus)
 
 ## À faire (priorité)
 
@@ -27,10 +28,20 @@
   - Instruction : format
   - Résumé : couverture mots-clés
 - [ ] **Profils benchmark conversation** — minimal/medium/long context avec scoring auto
+- [ ] **Draft model browser** dans le modal — actuellement path manuel, faudrait un dropdown des GGUFs téléchargés
+
+### P2 — Performance GPU (backlog actif)
+
+- [ ] **Speculative MTP** — mesurer gain réel sur Qwen3 (têtes présentes vs gain effectif)
+- [ ] **N-gram n_pred_tokens auto** — ajuster selon type de task (coding → 16, chat → 6)
+- [ ] **EAGLE-3 via vLLM** — 4090/5090, ~6x speedup. Nécessite modèle EAGLE3 Qwen3. Blocker : vLLM only
+- [ ] **ExLlamaV3 backend** — Ada Lovelace (4090/5090). Ampere encore second-class
+- [ ] **Bandwidth-aware profils** — adapter calcul selon bandwidth GPU (4090 = 1008 GB/s vs 3060 = 360 GB/s)
+- [ ] **LMDeploy backend optionnel** — claims 1.8x vs vLLM, évaluer sur 4090
+- [ ] **Blackwell/5090 compat** — PDL llama.cpp = Hopper+ only pour l'instant, surveiller updates
 
 ### P2 — Backlog actif
 
-- [ ] MTP — détection GGUF + badge Discover + export fine-tune préservant tenseurs MTP
 - [ ] Fix indicateur `~` après fin de stream (race condition liveTokens/streaming)
 - [ ] web_search DDG sélecteurs brittle — fallback si DDG change layout
 - [ ] OOM kernel SIGKILL non détectable — watchdog process
@@ -45,62 +56,47 @@
 
 ## Backlog
 
+- [ ] **Multi-node cluster** — Ray + vLLM distribué (plan dans `docs/cluster-integration-plan.md`)
 - [ ] Tool calling natif vLLM dans generate_with_tools
-- [ ] Scrapling MCP server natif (alternative aux tools custom)
+- [ ] Scrapling MCP server natif
 - [ ] MCP server EchoHub → Claude Code pilote modèles locaux (Phase 2)
 - [ ] EchoForge ↔ EchoHub API locale (Phase 3)
 - [ ] Automatisation fine-tuning (boucle finetune→test→finetune)
 - [ ] Modèle juge fiable (après fine-tuning + évaluation itérative)
-- [ ] Multi-GPU support vLLM
 - [ ] Valider .AppImage + .deb
 - [ ] Supprimer vieux composants héritage (ChatPanel.tsx, LoadConfigModal.tsx)
 
+## Terminé ✅ (session 23 — 2026-05-21)
+
+- [x] 4 profils de chargement (Performance / Balanced / Gaming / Minimal) — calcul auto layers
+- [x] `offload_kqv` — KV cache → RAM système, preview VRAM temps réel
+- [x] `n_batch` selector 64/128/256/512 avec pour/contre
+- [x] Smart cap context — remplace adaptive cassé (null → crash)
+- [x] Fix `resolvedNGpuLayers` null → full GPU malgré profil Gaming (bug critique)
+- [x] Multi-GPU llama.cpp : `multi_gpu.py`, `tensor_split` proportionnel, banner modal, endpoint
+- [x] Multi-GPU vLLM : `tensor_parallel_size`, selector modal
+- [x] Speculative decoding : n-gram (défaut) / MTP (auto-détection GGUF) / draft model (path + slider)
+- [x] `GET /inference/llama/mtp-support` — scan metadata GGUF
+- [x] n_threads adaptatif : CPU-heavy → threads logiques complets (6→12 sur machine Chris)
+- [x] n_batch=512 pour CPU-heavy (fin du 64 inutile en mode Minimal)
+- [x] Notifications persistantes via localStorage (`echohub:notifications`)
+- [x] docs/v0.9-perf-gpu-speculative.md + README.md mis à jour
+
 ## Terminé ✅ (session 22 — 2026-05-21)
 
-- [x] GPU detection stricte : `nvidia-smi -L` (faux positif drivers sans GPU corrigé)
-- [x] AMD ROCm support dans `_compile_llama_async` (`-DGGML_HIPBLAS=on`, détection `/opt/rocm`)
-- [x] Mismatch auto-recompile au setup (backend ≠ GPU détecté → recompile automatique)
-- [x] `GET /installer/diagnose` : gpu_type, actual_backend, backend_ok, issues
-- [x] `GET /installer/recompile-llama` : SSE stream depuis Settings sans reset install_complete
-- [x] `/llama-cpp/status` : hipblas_enabled, metal_enabled, backend_type exposés
-- [x] EnginesTab : banner mismatch + bouton recompile + log inline
-- [x] App.tsx : toast warning startup GPU détecté mais CPU utilisé, action "Fix in Settings"
+- [x] GPU detection stricte : `nvidia-smi -L`
+- [x] AMD ROCm support dans `_compile_llama_async`
+- [x] Mismatch auto-recompile au setup
+- [x] `GET /installer/diagnose` + `GET /installer/recompile-llama`
+- [x] EnginesTab : banner mismatch + bouton recompile
+- [x] App.tsx : toast warning startup GPU détecté mais CPU utilisé
 
-## Terminé ✅ (session 21 — 2026-05-20)
+## Terminé ✅ (sessions 19-21 — 2026-05-20)
 
-- [x] MCP stdio transport — McpStdioClient, pool, JSON-RPC 2.0 over stdin/stdout
-- [x] Venv isolé par skill Python (plus de contamination du backend venv)
-- [x] detect_mcp_server : smithery.yaml, StdioServerTransport Node, monorepos exclus
-- [x] Auto-redetect transport manquant au start + patch registry.json
-- [x] Context budget awareness dans tool results (75% warn, 92% hard stop)
-- [x] Synthesis on tool cap (plus de coupure mid-response)
-- [x] Cap warning → set_tool_limit explicite
-- [x] Timeout 60s call_mcp_tool (plus de deadlock LLM)
-- [x] Persistance messages MCP (onSaveMessage sur skillChatHook)
-- [x] Context bar projets (usedTokens depuis historique)
-- [x] Déduplication messages (deduplicateMessages)
-- [x] Tool call blocks animés (Framer Motion, ouvert pendant exec, fermé done)
-- [x] 5 profils chat avec vrais system prompts + permanent rules + langue mirroring
-- [x] Testé end-to-end : paper-search-mcp (57 tools) + mcp-fetch-server (6 tools)
-
-## Terminé ✅ (session 20 — 2026-05-20)
-
-- [x] Native skills : Web Search, Code Runner, File System, Calculator
-- [x] Community skills installables depuis GitHub (clone + install + toggle)
-- [x] Awareness blocks injectés dans system prompt selon skills actifs
-- [x] MCP HTTP servers fonctionnels
-- [x] Notifications SSE (toasts temps réel)
-- [x] Modularisation backend routers/services
-
-## Terminé ✅ (session 19 — 2026-05-20)
-- [x] Streaming interleaved tool execution (stop_event, mid-stream tool call)
-- [x] Parser MessageContent à état (think/tool_call/tool_result imbriqués)
-- [x] Auto-compact 98% + set_tool_limit
-- [x] fetch_url + web_search via Scrapling
-- [x] Slash commands /clear /compact /tokens /model /files /limit
-- [x] Capabilities détectées au load modèle
+- [x] MCP stdio transport, venv isolé par skill, context budget, synthesis on cap, 5 profils chat
+- [x] Native skills + community skills + MCP HTTP + notifications SSE
+- [x] Streaming interleaved, MessageContent parser, auto-compact, fetch_url + web_search
 
 ## Terminé ✅ (sessions 1-18)
-- [x] Dual-engine inference (llama.cpp + vLLM), VRAM management, model discovery
-- [x] Multi-vLLM versions, benchmark suite, fine-tuning QLoRA complet
-- [x] MTP support, vision GGUF, Projects workspace + tool calling
+- [x] Dual-engine inference, VRAM management, model discovery, multi-vLLM
+- [x] Benchmark suite, fine-tuning QLoRA, MTP support, vision GGUF, Projects workspace
