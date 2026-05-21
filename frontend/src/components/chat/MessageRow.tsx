@@ -203,8 +203,8 @@ function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRe
           </div>
         )}
 
-        {/* Footer */}
-        {!editing && !streaming && (
+        {/* Footer — hide only while the current message is actively streaming */}
+        {!editing && !(streaming && isLast) && (
           <div className={`flex items-center gap-0.5 transition-opacity ${isUser ? 'flex-row-reverse' : ''}`}>
             {/* Stats — left side for assistant */}
             {!isUser && (genStats || message.stats) && (
