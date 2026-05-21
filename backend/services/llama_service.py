@@ -19,6 +19,25 @@ from loguru import logger
 
 from backend.models.schemas import ModelInfo
 
+def _model_params_from_path(gguf_path: str) -> float:
+    """Estimate params_billion from GGUF filename — fast, no metadata read."""
+    import re
+    name = Path(gguf_path).stem.upper()
+    m = re.search(r'(\d+\.?\d*)B', name)
+    return float(m.group(1)) if m else 8.0
+
+
+def estimateLayers_backend(params_billion: float) -> int:
+    """Estimate total transformer layers from param count — mirrors frontend logic."""
+    p = params_billion
+    if p <= 1.5: return 28
+    if p <= 3:   return 36
+    if p <= 8:   return 32
+    if p <= 14:  return 40
+    if p <= 32:  return 64
+    return 80
+
+
 def _gguf_has_mtp_heads(gguf_path: str) -> bool:
     """Return True if GGUF metadata contains MTP head markers (Qwen3, DeepSeek-V3 style)."""
     try:
@@ -72,12 +91,21 @@ def _n_gpu_layers(gpu_type: str) -> int:
     return 0        # CPU only
 
 
-def _detect_n_threads() -> int:
-    """Utilise tous les cores physiques pour le prefill CPU."""
+def _detect_n_threads(gpu_layers: int = -1, total_layers: int = 32) -> int:
+    """
+    Thread count adapté à la charge CPU réelle.
+    Quand la majorité des layers est sur CPU (profils Gaming/Minimal),
+    utiliser tous les threads logiques disponibles — le bottleneck est CPU.
+    Sinon, les cores physiques suffisent (GPU fait le vrai travail).
+    """
     try:
-        count = os.cpu_count() or 4
-        # Sur systèmes avec HT : préférer les cores physiques
-        return max(4, count // 2)
+        logical = os.cpu_count() or 4
+        physical = max(4, logical // 2)
+        if gpu_layers >= 0:
+            gpu_pct = gpu_layers / max(total_layers, 1)
+            # Plus de 80% des layers sur CPU → tous les threads logiques
+            return logical if gpu_pct < 0.2 else physical
+        return physical  # -1 = full GPU → cores physiques suffisent
     except Exception:
         return 4
 
@@ -172,12 +200,23 @@ def load_model(
         import os as _os
         _os.environ.setdefault("GGML_CUDA_ENABLE_UNIFIED_MEMORY", "1")
 
-    n_threads = _detect_n_threads()
+    total_layers = estimateLayers_backend(_model_params_from_path(gguf_path))
+    n_threads = _detect_n_threads(gpu_layers=n_gpu, total_layers=total_layers)
 
-    # n_batch: user override > MoE constraint > default 512
-    # MoE gets 128 to reduce activation memory — see comment below
-    default_batch = 128 if is_moe else 512
-    n_batch = n_batch_override if n_batch_override is not None else default_batch
+    # n_batch:
+    # - User override always wins
+    # - MoE: 128 to reduce GPU activation memory
+    # - CPU-heavy (< 20% layers on GPU): 512 — no VRAM pressure, bigger batch = faster prefill
+    # - Default: 512
+    if n_batch_override is not None:
+        n_batch = n_batch_override
+    elif is_moe:
+        n_batch = 128
+    elif n_gpu >= 0 and n_gpu < max(4, total_layers // 5):
+        # Most layers on CPU — maximize batch for prefill throughput
+        n_batch = 512
+    else:
+        n_batch = 512
 
     _log(f"[llama] Loading {model_id}")
     _log(f"[llama] File: {gguf_path}")
