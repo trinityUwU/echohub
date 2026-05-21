@@ -18,6 +18,7 @@ interface LoadModelModalProps {
   vramUsedGb: number
   gpu?: GpuStats | null
   conversationTokens?: number
+  suggestedCtx?: number
   onConfirm: (cfg: {
     gpuMemoryUtilization: number; maxModelLen: number | null
     enforceEager: boolean; maxCudagraphCaptureSize: number | null
@@ -123,12 +124,13 @@ function computeGpuLayersPct(
   return Math.max(0, pct)
 }
 
-export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, conversationTokens, onConfirm, onCancel }: LoadModelModalProps): React.ReactElement {
+export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, conversationTokens, suggestedCtx, onConfirm, onCancel }: LoadModelModalProps): React.ReactElement {
   const [gpuUtilPct, setGpuUtilPct] = useState(72)
   const [vramLimitGb, setVramLimitGb] = useState<number | null>(null)
   const [ctxLen, setCtxLen] = useState(() => {
+    // suggestedCtx takes priority (ctx_exceeded reload)
+    if (suggestedCtx) return Math.min(suggestedCtx, model.max_context_window ?? 32768)
     // Smart initial ctx: start small, grow with conversation history
-    // New conv → 4K. Existing conv → max(4K, tokens×2) capped at 32K
     const baseCtx = conversationTokens && conversationTokens > 1024
       ? Math.min(32768, Math.max(4096, Math.pow(2, Math.ceil(Math.log2(conversationTokens * 2)))))
       : 4096

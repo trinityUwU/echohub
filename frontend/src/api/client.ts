@@ -138,6 +138,7 @@ export async function chatStream(
   signal?: AbortSignal,
   onTokensUpdate?: (prompt: number, completion: number) => void,
   onOom?: () => void,
+  onCtxExceeded?: (currentCtx: number, nextCtx: number) => void,
 ): Promise<void> {
   const stopList = params.stop.trim()
     ? params.stop.split(',').map(s => s.trim()).filter(Boolean)
@@ -206,6 +207,10 @@ export async function chatStream(
             continue
           }
           if (json?.error) {
+            if (json.error_type === 'ctx_exceeded') {
+              onCtxExceeded?.(json.current_ctx ?? 4096, json.next_ctx ?? 8192)
+              return
+            }
             if (json.error_type === 'oom') {
               onOom?.()
               // Flush any remaining chunks then call onDone with oom flag
