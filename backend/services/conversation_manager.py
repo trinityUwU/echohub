@@ -368,110 +368,91 @@ def project_to_context(conv_id: str, max_tokens: int = 4096) -> list[dict]:
 # Migration SQLite → JSON (one-shot)
 # ---------------------------------------------------------------------------
 
+def _migrate_chat_convs(_db: object) -> int:  # type: ignore[return]
+    """Migrate chat conversations from SQLite. Returns count."""
+    rows = _db.get_conversations()  # type: ignore[attr-defined]
+    count = 0
+    for row in rows:
+        conv_id = row["id"]
+        if _conv_path(conv_id).exists():
+            continue
+        messages = _db.get_messages(conv_id)  # type: ignore[attr-defined]
+        now = _now()
+        conv = {
+            "id": conv_id,
+            "title": row.get("title", ""),
+            "model_id": row.get("model_id"),
+            "memory_enabled": False,
+            "archived": bool(row.get("archived", False)),
+            "created_at": row.get("created_at", now),
+            "updated_at": row.get("updated_at", now),
+            "messages": [
+                {
+                    "id": m["id"], "role": m["role"], "content": m["content"],
+                    "stats": m.get("stats"), "load_config": m.get("load_config"),
+                    "created_at": m.get("created_at", now),
+                }
+                for m in messages
+            ],
+        }
+        _conv_path(conv_id).write_text(json.dumps(conv, ensure_ascii=False, indent=2), encoding="utf-8")
+        meta = {k: conv[k] for k in ("id", "title", "model_id", "archived", "created_at", "updated_at")}
+        meta.update({"memory_enabled": False, "message_count": len(messages)})
+        _upsert_index(_index_path(), _index_lock, meta)
+        count += 1
+    return count
+
+
+def _write_proj_conv(row: object, msgs: list) -> None:  # type: ignore[type-arg]
+    conv_id = row["id"]  # type: ignore[index]
+    now = _now()
+    conv = {
+        "id": conv_id, "project_id": row["project_id"], "title": row["title"],  # type: ignore[index]
+        "memory_enabled": False, "created_at": row["created_at"], "updated_at": row["updated_at"],  # type: ignore[index]
+        "messages": [{"id": m["id"], "conversation_id": conv_id, "role": m["role"],  # type: ignore[index]
+                      "content": m["content"], "created_at": m["created_at"]} for m in msgs],  # type: ignore[index]
+    }
+    _proj_conv_path(conv_id).write_text(json.dumps(conv, ensure_ascii=False, indent=2), encoding="utf-8")
+    meta = {k: conv[k] for k in ("id", "project_id", "title", "created_at", "updated_at")}
+    meta.update({"memory_enabled": False, "message_count": len(msgs)})
+    _upsert_index(_proj_index_path(), _proj_index_lock, meta)
+
+
+def _migrate_project_convs(db_path: str) -> int:
+    """Migrate project conversations from SQLite. Returns count."""
+    import sqlite3
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    count = 0
+    try:
+        for row in conn.execute("SELECT * FROM project_conversations ORDER BY updated_at DESC").fetchall():
+            if _proj_conv_path(row["id"]).exists():
+                continue
+            msgs = conn.execute(
+                "SELECT * FROM project_messages WHERE conversation_id = ? ORDER BY created_at ASC",
+                (row["id"],),
+            ).fetchall()
+            _write_proj_conv(row, msgs)
+            count += 1
+    finally:
+        conn.close()
+    return count
+
+
 def migrate_from_sqlite() -> None:
     """Run once at startup. No-op if already migrated."""
     marker = get_user_data_dir() / ".conv_migrated"
     if marker.exists():
         return
-
     try:
         from backend.services import db as _db
-
-        # Chat conversations
-        rows = _db.get_conversations()
-        migrated_chat = 0
-        for row in rows:
-            conv_id = row["id"]
-            if _conv_path(conv_id).exists():
-                continue
-            messages = _db.get_messages(conv_id)
-            now = _now()
-            conv = {
-                "id": conv_id,
-                "title": row.get("title", ""),
-                "model_id": row.get("model_id"),
-                "memory_enabled": False,
-                "archived": bool(row.get("archived", False)),
-                "created_at": row.get("created_at", now),
-                "updated_at": row.get("updated_at", now),
-                "messages": [
-                    {
-                        "id": m["id"],
-                        "role": m["role"],
-                        "content": m["content"],
-                        "stats": m.get("stats"),
-                        "load_config": m.get("load_config"),
-                        "created_at": m.get("created_at", now),
-                    }
-                    for m in messages
-                ],
-            }
-            _conv_path(conv_id).write_text(json.dumps(conv, ensure_ascii=False, indent=2), encoding="utf-8")
-            meta = {
-                "id": conv_id,
-                "title": conv["title"],
-                "model_id": conv["model_id"],
-                "memory_enabled": False,
-                "archived": conv["archived"],
-                "created_at": conv["created_at"],
-                "updated_at": conv["updated_at"],
-                "message_count": len(messages),
-            }
-            _upsert_index(_index_path(), _index_lock, meta)
-            migrated_chat += 1
-
-        # Project conversations
-        migrated_proj = 0
+        chat_count = _migrate_chat_convs(_db)
+        proj_count = 0
         try:
-            import sqlite3
-            conn = sqlite3.connect(str(_db.get_db_path()), check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            proj_rows = conn.execute("SELECT * FROM project_conversations ORDER BY updated_at DESC").fetchall()
-            for row in proj_rows:
-                conv_id = row["id"]
-                if _proj_conv_path(conv_id).exists():
-                    continue
-                msgs = conn.execute(
-                    "SELECT * FROM project_messages WHERE conversation_id = ? ORDER BY created_at ASC",
-                    (conv_id,),
-                ).fetchall()
-                now = _now()
-                conv = {
-                    "id": conv_id,
-                    "project_id": row["project_id"],
-                    "title": row["title"],
-                    "memory_enabled": False,
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"],
-                    "messages": [
-                        {
-                            "id": m["id"],
-                            "conversation_id": conv_id,
-                            "role": m["role"],
-                            "content": m["content"],
-                            "created_at": m["created_at"],
-                        }
-                        for m in msgs
-                    ],
-                }
-                _proj_conv_path(conv_id).write_text(json.dumps(conv, ensure_ascii=False, indent=2), encoding="utf-8")
-                meta = {
-                    "id": conv_id,
-                    "project_id": row["project_id"],
-                    "title": row["title"],
-                    "memory_enabled": False,
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"],
-                    "message_count": len(msgs),
-                }
-                _upsert_index(_proj_index_path(), _proj_index_lock, meta)
-                migrated_proj += 1
-            conn.close()
+            proj_count = _migrate_project_convs(str(_db.get_db_path()))
         except Exception as e:
             logger.warning("Project migration partial: {}", e)
-
         marker.touch()
-        logger.info("Migration SQLite → JSON: {} chat convs, {} project convs", migrated_chat, migrated_proj)
-
+        logger.info("Migration SQLite → JSON: {} chat convs, {} project convs", chat_count, proj_count)
     except Exception as e:
         logger.error("Migration failed: {}", e)

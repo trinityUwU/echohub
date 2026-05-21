@@ -108,6 +108,38 @@ def store(
     return mem_id
 
 
+def _build_where(
+    conv_id: str | None,
+    project_id: str | None,
+    memory_type: MemoryType | None,
+) -> dict:
+    where: dict = {}
+    if conv_id is not None:
+        where["conv_id"] = conv_id
+    if project_id is not None:
+        where["project_id"] = project_id
+    if memory_type is not None:
+        where["type"] = memory_type
+    return where
+
+
+def _rows_to_results(results: dict, distances: list[float] | None = None) -> list[MemoryResult]:
+    memories: list[MemoryResult] = []
+    for i, mem_id in enumerate(results["ids"]):
+        meta = results["metadatas"][i]
+        memories.append(MemoryResult(
+            id=mem_id,
+            content=results["documents"][i],
+            type=meta.get("type", "fact"),
+            conv_id=meta.get("conv_id", "global"),
+            project_id=meta.get("project_id", "global"),
+            importance=int(meta.get("importance", 5)),
+            distance=float(distances[i]) if distances else 0.0,
+            created_at=meta.get("created_at", ""),
+        ))
+    return memories
+
+
 def search(
     query: str,
     conv_id: str | None = None,
@@ -117,51 +149,21 @@ def search(
 ) -> list[MemoryResult]:
     """Semantic search. No filters = global cross-session search."""
     coll = _get_collection("echohub_memory")
-    embedding = _embed(query)
-
-    where: dict = {}
-    if conv_id is not None:
-        where["conv_id"] = conv_id
-    if project_id is not None:
-        where["project_id"] = project_id
-    if memory_type is not None:
-        where["type"] = memory_type
-
+    where = _build_where(conv_id, project_id, memory_type)
     kwargs: dict = {
-        "query_embeddings": [embedding],
+        "query_embeddings": [_embed(query)],
         "n_results": limit,
         "include": ["documents", "metadatas", "distances"],
     }
     if where:
         kwargs["where"] = where
-
     try:
-        results = coll.query(**kwargs)
+        raw = coll.query(**kwargs)
     except Exception as e:
-        # Collection empty or no results
         logger.debug("Memory search returned no results: {}", e)
         return []
-
-    memories: list[MemoryResult] = []
-    ids = results["ids"][0]
-    docs = results["documents"][0]
-    metas = results["metadatas"][0]
-    distances = results["distances"][0]
-
-    for i, mem_id in enumerate(ids):
-        meta = metas[i]
-        memories.append(MemoryResult(
-            id=mem_id,
-            content=docs[i],
-            type=meta.get("type", "fact"),
-            conv_id=meta.get("conv_id", "global"),
-            project_id=meta.get("project_id", "global"),
-            importance=int(meta.get("importance", 5)),
-            distance=float(distances[i]),
-            created_at=meta.get("created_at", ""),
-        ))
-
-    return memories
+    page = {"ids": raw["ids"][0], "documents": raw["documents"][0], "metadatas": raw["metadatas"][0]}
+    return _rows_to_results(page, distances=raw["distances"][0])
 
 
 def delete(memory_id: str) -> bool:
@@ -192,36 +194,15 @@ def get_all(
     limit: int = 200,
 ) -> list[MemoryResult]:
     coll = _get_collection("echohub_memory")
-    where: dict = {}
-    if conv_id is not None:
-        where["conv_id"] = conv_id
-    if project_id is not None:
-        where["project_id"] = project_id
-    if memory_type is not None:
-        where["type"] = memory_type
-
+    where = _build_where(conv_id, project_id, memory_type)
     kwargs: dict = {"include": ["documents", "metadatas"], "limit": limit}
     if where:
         kwargs["where"] = where
-
     try:
-        results = coll.get(**kwargs)
+        raw = coll.get(**kwargs)
     except Exception:
         return []
-
-    memories: list[MemoryResult] = []
-    for i, mem_id in enumerate(results["ids"]):
-        meta = results["metadatas"][i]
-        memories.append(MemoryResult(
-            id=mem_id,
-            content=results["documents"][i],
-            type=meta.get("type", "fact"),
-            conv_id=meta.get("conv_id", "global"),
-            project_id=meta.get("project_id", "global"),
-            importance=int(meta.get("importance", 5)),
-            distance=0.0,
-            created_at=meta.get("created_at", ""),
-        ))
+    memories = _rows_to_results(raw)
 
     return sorted(memories, key=lambda m: m.created_at, reverse=True)
 
