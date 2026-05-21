@@ -1,6 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
 
 let resolvedBase: string | null = null
+let lastHealthCheck = 0
+const HEALTH_TTL = 10_000 // re-verify every 10s
 
 async function tryInvokePort(): Promise<string | null> {
   if (!window.__TAURI_INTERNALS__) return null
@@ -13,26 +15,33 @@ async function tryInvokePort(): Promise<string | null> {
 }
 
 async function resolveBase(): Promise<string> {
-  if (resolvedBase) return resolvedBase
+  // Re-verify cached base periodically so a backend restart is picked up
+  if (resolvedBase && Date.now() - lastHealthCheck < HEALTH_TTL) return resolvedBase
+
+  if (resolvedBase) {
+    try {
+      const r = await fetch(`${resolvedBase}/health`, { signal: AbortSignal.timeout(1500) })
+      if (r.ok) { lastHealthCheck = Date.now(); return resolvedBase }
+    } catch { /* backend died — invalidate cache */ }
+    resolvedBase = null
+  }
 
   const tauriBase = await tryInvokePort()
 
   if (tauriBase) {
-    // Verify backend is actually reachable on this port
     try {
       const r = await fetch(`${tauriBase}/health`, { signal: AbortSignal.timeout(3000) })
       if (r.ok) {
         resolvedBase = tauriBase
+        lastHealthCheck = Date.now()
         return resolvedBase
       }
-    } catch {
-      // Backend not ready yet — don't cache, will retry on next call
-    }
-    // Backend not ready — return but don't cache so next call retries
+    } catch { /* not ready yet */ }
     return tauriBase
   }
 
   resolvedBase = '/api'
+  lastHealthCheck = Date.now()
   return resolvedBase
 }
 
