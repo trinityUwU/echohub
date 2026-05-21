@@ -73,6 +73,7 @@ export interface UseToolChatReturn {
   compact: () => Promise<void>
   loadHistory: (msgs: Array<{ role: string; content: string }>) => void
   clearAndResend: (history: ChatMessage[], newText: string, systemPrompt?: string, skills?: SkillsConfig) => void
+  sendFromHistory: (history: ChatMessage[]) => void
 }
 
 interface UseToolChatOptions {
@@ -400,5 +401,12 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     send(newText, systemPrompt, skills)
   }, [send])
 
-  return { messages, toolCalls, workspaceFiles, streaming, genStats, usedTokens, send, stop, clear, compact, loadHistory, clearAndResend }
+  const sendFromHistory = useCallback((history: ChatMessage[]): void => {
+    const lastUser = [...history].reverse().find(m => m.role === 'user')
+    if (!lastUser) return
+    const historyWithoutLast = history.slice(0, history.lastIndexOf(lastUser))
+    clearAndResend(historyWithoutLast, typeof lastUser.content === 'string' ? lastUser.content : '')
+  }, [clearAndResend])
+
+  return { messages, toolCalls, workspaceFiles, streaming, genStats, usedTokens, send, stop, clear, compact, loadHistory, clearAndResend, sendFromHistory }
 }

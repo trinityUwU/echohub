@@ -115,7 +115,7 @@ export function ChatPage({
         stats: skillChatHook.genStats,
         send: (text: string, _loaded: boolean, _attachments?: Attachment[]) =>
           skillChatHook.send(text, buildChatSystemPrompt(params), skillsHook),
-        sendFromHistory: (_history: ChatMessage[]) => {},
+        sendFromHistory: (history: ChatMessage[]) => skillChatHook.sendFromHistory(history),
         stop: skillChatHook.stop,
         setMessages: (msgs: ChatMessage[]) => { skillChatHook.loadHistory(msgs.map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content : '' }))) },
         usedTokens: skillChatHook.usedTokens,
