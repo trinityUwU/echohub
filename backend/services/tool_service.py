@@ -210,6 +210,67 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_memory",
+            "description": "Search your semantic memory for relevant past knowledge across conversations. Use before answering questions about past decisions, preferences, or recurring topics.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "What to look for"},
+                    "scope": {
+                        "type": "string",
+                        "enum": ["global", "conversation", "project"],
+                        "description": "Search scope. 'global' searches across all sessions. 'conversation' limits to current conv. 'project' limits to current project. Default: global.",
+                        "default": "global",
+                    },
+                    "limit": {"type": "integer", "description": "Max results to return (1-10). Default: 5.", "default": 5},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "store_memory",
+            "description": "Save an important fact, decision, preference, or lesson to your persistent memory. Use when the user shares something worth remembering across sessions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "What to remember"},
+                    "type": {
+                        "type": "string",
+                        "enum": ["user_trait", "decision", "fact", "context", "error_learned"],
+                        "description": "Memory category: user_trait (preferences/habits), decision (technical/product choices), fact (factual knowledge), context (project context), error_learned (mistakes to avoid)",
+                    },
+                    "importance": {"type": "integer", "description": "Importance 1-10. Use 7+ for things that should surface often.", "default": 5},
+                },
+                "required": ["content", "type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "invoke_agent",
+            "description": "Delegate an isolated subtask to a sub-agent running on the same loaded model with a clean context. Use for tasks that are self-contained: reading/analyzing files, producing a structured output, running a validation. The sub-agent has no access to the current conversation context — include everything it needs in the task brief.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string", "description": "Complete self-contained brief for the sub-agent. Include all necessary context, expected output format, and constraints."},
+                    "harness": {
+                        "type": "string",
+                        "enum": ["read_strict", "write_validated", "shell_safe"],
+                        "description": "Tool set profile. 'read_strict': read-only (find, read, grep). 'write_validated': read + file edits with validation. 'shell_safe': read + write + restricted shell. Default: read_strict.",
+                        "default": "read_strict",
+                    },
+                },
+                "required": ["task"],
+            },
+        },
+    },
 ]
 
 _MAX_READ_BYTES = 50 * 1024       # 50 KB
@@ -247,7 +308,7 @@ def get_tools(enabled: list[str] | None = None) -> list[dict[str, Any]]:
     return [t for t in TOOLS if t["function"]["name"] in enabled]
 
 
-def execute_tool(name: str, arguments: dict[str, Any], project_id: str) -> str:
+def execute_tool(name: str, arguments: dict[str, Any], project_id: str, conv_id: str = "global") -> str:
     """
     Execute a tool call and return the result as a string.
     Raises ValueError on bad arguments, RuntimeError on execution failure.
@@ -274,6 +335,12 @@ def execute_tool(name: str, arguments: dict[str, Any], project_id: str) -> str:
             return _get_workspace_info(workspace, project_id)
         elif name == "run_command":
             return _run_command(workspace, arguments)
+        elif name == "search_memory":
+            return _search_memory(arguments, conv_id, project_id)
+        elif name == "store_memory":
+            return _store_memory(arguments, conv_id, project_id)
+        elif name == "invoke_agent":
+            return _invoke_agent(arguments, project_id, conv_id)
         else:
             raise ValueError(f"Unknown tool: {name!r}")
     except (ValueError, FileNotFoundError) as e:
@@ -580,3 +647,161 @@ def _get_workspace_info(workspace: Path, project_id: str) -> str:
         f"Files: {len(file_list)}\n"
         f"Total size: {total_size} bytes"
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Memory tools
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _search_memory(args: dict[str, Any], conv_id: str, project_id: str) -> str:
+    from backend.services import memory_service as ms
+    query = args.get("query", "")
+    if not query:
+        return "Error: query is required"
+    scope = args.get("scope", "global")
+    limit = min(int(args.get("limit", 5)), 10)
+
+    scoped_conv = conv_id if scope == "conversation" else None
+    scoped_proj = project_id if scope == "project" else None
+
+    results = ms.search(query=query, conv_id=scoped_conv, project_id=scoped_proj, limit=limit)
+    if not results:
+        return "No relevant memories found."
+
+    lines = [f"Found {len(results)} memories:\n"]
+    for r in results:
+        lines.append(f"[{r.type}] (importance={r.importance}) {r.content}")
+    return "\n".join(lines)
+
+
+def _store_memory(args: dict[str, Any], conv_id: str, project_id: str) -> str:
+    from backend.services import memory_service as ms
+    content = args.get("content", "")
+    mem_type = args.get("type", "fact")
+    importance = min(max(int(args.get("importance", 5)), 1), 10)
+
+    if not content:
+        return "Error: content is required"
+
+    mem_id = ms.store(
+        content=content,
+        type=mem_type,
+        conv_id=conv_id,
+        project_id=project_id,
+        importance=importance,
+    )
+    return f"Memory stored (id={mem_id[:8]}...)."
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# invoke_agent — recursive inference on the loaded model, isolated context
+# ──────────────────────────────────────────────────────────────────────────────
+
+_HARNESS_TOOLS: dict[str, list[str]] = {
+    "read_strict":    ["read_file", "list_files", "get_workspace_info", "web_search"],
+    "write_validated": ["read_file", "list_files", "create_file", "edit_file", "delete_file",
+                        "get_workspace_info", "web_search"],
+    "shell_safe":     ["read_file", "list_files", "create_file", "edit_file", "delete_file",
+                        "get_workspace_info", "web_search", "run_command"],
+}
+
+_SUB_AGENT_SYSTEM = (
+    "You are a sub-agent running in an isolated context. "
+    "You have been given a precise task. Complete it using the available tools. "
+    "When done, output a structured result in this exact JSON format:\n"
+    '{"status": "success|partial|failed", "summary": "...", "findings": {}, "actions_taken": []}\n'
+    "Do not include anything outside this JSON in your final response. "
+    "Be concise. If you cannot complete the task, set status to 'failed' and explain why in summary."
+)
+
+_MAX_AGENT_TOOL_CALLS = 15
+
+
+def _invoke_agent(args: dict[str, Any], project_id: str, conv_id: str) -> str:
+    task = args.get("task", "")
+    harness = args.get("harness", "read_strict")
+    if not task:
+        return json.dumps({"status": "failed", "summary": "task is required", "findings": {}, "actions_taken": []})
+    if harness not in _HARNESS_TOOLS:
+        harness = "read_strict"
+
+    from backend.services import engine_router
+    status = engine_router.get_status()
+    if status is None:
+        return json.dumps({"status": "failed", "summary": "No model loaded", "findings": {}, "actions_taken": []})
+
+    enabled = _HARNESS_TOOLS[harness]
+    agent_tools = get_tools(enabled)
+
+    messages: list[dict] = [
+        {"role": "system", "content": _SUB_AGENT_SYSTEM},
+        {"role": "user", "content": task},
+    ]
+
+    actions_taken: list[str] = []
+    tool_calls_count = 0
+    max_tokens = 2048
+
+    try:
+        while tool_calls_count < _MAX_AGENT_TOOL_CALLS:
+            response = engine_router.chat_completion(
+                messages=messages,
+                tools=agent_tools,
+                temperature=0.1,
+                max_tokens=max_tokens,
+            )
+            if response is None:
+                break
+
+            choice = response.get("choices", [{}])[0]
+            msg = choice.get("message", {})
+            tool_calls = msg.get("tool_calls") or []
+            content = msg.get("content") or ""
+
+            messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+
+            if not tool_calls:
+                # Final response — parse JSON result
+                try:
+                    result = json.loads(content)
+                    result.setdefault("actions_taken", actions_taken)
+                    return json.dumps(result)
+                except (json.JSONDecodeError, ValueError):
+                    return json.dumps({
+                        "status": "success",
+                        "summary": content,
+                        "findings": {},
+                        "actions_taken": actions_taken,
+                    })
+
+            for tc in tool_calls:
+                tool_calls_count += 1
+                fn = tc.get("function", {})
+                t_name = fn.get("name", "")
+                try:
+                    t_args = json.loads(fn.get("arguments", "{}"))
+                except (json.JSONDecodeError, ValueError):
+                    t_args = {}
+
+                if t_name not in enabled:
+                    tool_result = f"Error: tool '{t_name}' not available in harness '{harness}'"
+                else:
+                    tool_result = execute_tool(t_name, t_args, project_id, conv_id)
+
+                actions_taken.append(f"{t_name}({list(t_args.keys())})")
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.get("id", ""),
+                    "content": tool_result,
+                })
+
+        return json.dumps({
+            "status": "partial",
+            "summary": f"Reached tool call limit ({_MAX_AGENT_TOOL_CALLS})",
+            "findings": {},
+            "actions_taken": actions_taken,
+        })
+
+    except Exception as e:
+        logger.error(f"[invoke_agent] error: {e}")
+        return json.dumps({"status": "failed", "summary": str(e), "findings": {}, "actions_taken": actions_taken})

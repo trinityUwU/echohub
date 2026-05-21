@@ -242,6 +242,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     const req = {
       messages: historyToSend,
       project_id: projectId,
+      conv_id: options.conversationId ?? 'global',
       system_prompt: systemPrompt,
       enabled_tools: skills?.enabledTools,
       awareness_block: skills?.awarenessBlock,

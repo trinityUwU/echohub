@@ -396,6 +396,7 @@ async def chat_ws(ws: WebSocket):
 class ToolChatRequest(BaseModel):
     messages: list[dict]
     project_id: str
+    conv_id: str = "global"
     system_prompt: str = ""
     temperature: float = 0.2
     max_tokens: int = 8192
@@ -583,7 +584,7 @@ async def tool_chat(req: ToolChatRequest):
                 pass
             except Exception as e:
                 logger.warning(f"[tool-chat] MCP routing check failed: {e}")
-            result = execute_tool(tool_name, tool_args, req.project_id)
+            result = execute_tool(tool_name, tool_args, req.project_id, req.conv_id)
             result += _context_footer(messages)
             if _estimate_tokens(messages) / _ctx_window >= _CTX_STOP_PCT:
                 _context_exhausted = True
