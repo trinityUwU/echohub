@@ -7,7 +7,17 @@ from typing import Optional
 import httpx
 from loguru import logger
 
-from backend.services.vllm_service import VLLM_BASE_URL, _current_model
+VLLM_BASE_URL = "http://127.0.0.1:37823"
+
+
+def _model():
+    """Always read _current_model from the live vllm_service module."""
+    import sys
+    vs = sys.modules.get("backend.services.vllm_service")
+    if vs is None:
+        import backend.services.vllm_service as _vs
+        vs = _vs
+    return vs._current_model
 
 
 async def generate(
@@ -27,7 +37,8 @@ async def generate(
     When stream=True, yields raw SSE data strings.
     When stream=False, returns the full response dict.
     """
-    if _current_model is None:
+    current_model = _model()
+    if current_model is None:
         raise RuntimeError("No model loaded")
 
     # Ask vLLM what model name it's actually serving (path vs HF id depends on version)
@@ -36,19 +47,18 @@ async def generate(
             r = await c.get(f"{VLLM_BASE_URL}/v1/models")
             actual_model_id = r.json()["data"][0]["id"]
     except Exception:
-        actual_model_id = _current_model.id
+        actual_model_id = current_model.id
 
     # Clip max_tokens to avoid vLLM 400 when prompt + max_tokens > max_model_len
     safe_max_tokens = max_tokens
-    if _current_model and _current_model.max_context_window:
-        # Estimate prompt token count conservatively (4 chars ~ 1 token)
+    if current_model.max_context_window:
         prompt_chars = sum(len(str(m.get("content", ""))) for m in messages)
-        estimated_prompt_tokens = prompt_chars // 4 + 64  # 64 = overhead for roles/special tokens
-        budget = _current_model.max_context_window - estimated_prompt_tokens
+        estimated_prompt_tokens = prompt_chars // 4 + 64
+        budget = current_model.max_context_window - estimated_prompt_tokens
         if budget > 0:
             safe_max_tokens = min(max_tokens, budget)
         else:
-            safe_max_tokens = 128  # context full — allow short reply
+            safe_max_tokens = 128
 
     payload: dict = {
         "model": actual_model_id,
@@ -107,7 +117,8 @@ async def generate_with_tools(
     **kwargs,
 ):
     """vLLM tool-use via OpenAI-compatible API. Yields raw SSE lines (streaming)."""
-    if _current_model is None:
+    current_model = _model()
+    if current_model is None:
         raise RuntimeError("No model loaded")
 
     try:
@@ -115,13 +126,13 @@ async def generate_with_tools(
             r = await c.get(f"{VLLM_BASE_URL}/v1/models")
             actual_model_id = r.json()["data"][0]["id"]
     except Exception:
-        actual_model_id = _current_model.id
+        actual_model_id = current_model.id
 
     safe_max_tokens = max_tokens
-    if _current_model and _current_model.max_context_window:
+    if current_model.max_context_window:
         prompt_chars = sum(len(str(m.get("content", ""))) for m in messages)
         estimated_prompt_tokens = prompt_chars // 4 + 64
-        budget = _current_model.max_context_window - estimated_prompt_tokens
+        budget = current_model.max_context_window - estimated_prompt_tokens
         safe_max_tokens = min(max_tokens, budget) if budget > 0 else 128
 
     payload: dict = {
