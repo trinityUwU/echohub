@@ -88,14 +88,23 @@ Calcul layers : `estimateLayers(paramsBillion) × gpuLayersPct / 100`. Profils a
 
 ## Prochaines étapes (session 24)
 
-1. **Types de projets Dev/Docs/Research** — layouts fonctionnels (P0 depuis session 22)
+1. **Tester logs timings** dans LogsPanel — vérifier que `llama_perf_context` émet correctement (commit 5ce2699)
+2. **Types de projets Dev/Docs/Research** — layouts fonctionnels (P0 depuis session 22)
    - Dev : arborescence fichiers réelle + IDE-like (file tree, tabs)
    - Docs : injection contexte fichiers drag & drop
    - Research : gestion sources URL/documents
-2. **RAG natif dans les projets** — ChromaDB par projet, PDF/DOCX/MD/CSV, retrieval injecté contexte
-3. Valider résultats perf Minimal après fix n_threads (Chris teste actuellement)
-4. **Logs MCP** dans la card skill (GET /skills/{id}/mcp/logs?lines=50)
-5. **Scoring qualité benchmarks** — algo sans LLM juge
+3. **RAG natif dans les projets** — ChromaDB par projet, PDF/DOCX/MD/CSV, retrieval injecté contexte
+4. **Harness + sous-agents orchestrateur** — `invoke_agent` tool, validation pipeline, result normalizer
+5. **Remote Access** — Settings > Remote Access, Cloudflare Tunnel toggle, Telegram Bot API (premier)
+6. Valider résultats perf Minimal après fix n_threads
+7. **Logs MCP** dans la card skill (GET /skills/{id}/mcp/logs?lines=50)
+8. **Scoring qualité benchmarks** — algo sans LLM juge
+
+## Roadmap long terme (voir docs/roadmap.md)
+
+- Parallélisme multi-modèles → Model routing autonome dans les sous-agents
+- Remote Access complet (WhatsApp, Signal après Telegram validé)
+- Multi-node cluster (Ray + vLLM)
 
 ## Points en suspens
 

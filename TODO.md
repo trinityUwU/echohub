@@ -5,6 +5,7 @@
 - [ ] Construction karma Reddit (r/LocalLLaMA) — 1-2 commentaires/jour, sujets perfs/vLLM/GGUF/CUDA
 - [ ] Rédiger post Reddit/HN avec Chris (matériel prêt — démo Skills/MCP + Projects + agent + perf v0.9)
 - [ ] Valider résultats perf profil Minimal après fix n_threads (TTFT et tok/s attendus)
+- [ ] Tester logs timings llama.cpp dans LogsPanel (SSE timings event, commit 5ce2699)
 
 ## À faire (priorité)
 
@@ -18,6 +19,11 @@
   - PDF (pdfplumber), DOCX (python-docx), PPTX, XLSX, MD, CSV, JSON
   - ChromaDB par projet, retrieval injecté dans contexte à chaque message
   - Chat normal = pas de RAG
+- [ ] **Harness + sous-agents orchestrateur** (voir `docs/agent-harness-architecture.md`)
+  - `invoke_agent` tool — inférence isolée sur le modèle chargé
+  - Language detector + validation pipeline (syntax → lint → types → tests)
+  - Result normalizer injecté dans le contexte du sub-agent
+  - Séquentiel pour l'instant (un seul modèle) — routing multi-modèles après parallélisme
 
 ### P1 — Session suivante
 
@@ -28,7 +34,12 @@
   - Instruction : format
   - Résumé : couverture mots-clés
 - [ ] **Profils benchmark conversation** — minimal/medium/long context avec scoring auto
-- [ ] **Draft model browser** dans le modal — actuellement path manuel, faudrait un dropdown des GGUFs téléchargés
+- [ ] **Draft model browser** dans le modal — dropdown des GGUFs téléchargés
+- [ ] **Remote Access — Settings > Remote Access** (voir `docs/roadmap.md`)
+  - Cloudflare Tunnel toggle (déjà dans la stack)
+  - Telegram Bot API — premier adaptateur messaging
+  - Credentials saisis dans l'app, jamais en config manuelle
+  - Session routing → modèle chargé + dernière conv < 5 min
 
 ### P2 — Performance GPU (backlog actif)
 
@@ -54,13 +65,16 @@
 - [ ] Finaliser posts avec Chris — /humanizer obligatoire avant publication
 - [ ] Préparer Show HN (mardi-jeudi 14h-16h Paris)
 
-## Backlog
+## Backlog — Roadmap long terme (voir `docs/roadmap.md`)
 
+- [ ] **Parallélisme multi-modèles** — load plusieurs modèles simultanément, discussions avec N modèles
+- [ ] **Model routing autonome** — sub-agent choisit le meilleur modèle chargé selon la tâche
+- [ ] **Remote Access complet** — WhatsApp Business API, Signal via signal-cli (après Telegram validé)
 - [ ] **Multi-node cluster** — Ray + vLLM distribué (plan dans `docs/cluster-integration-plan.md`)
 - [ ] Tool calling natif vLLM dans generate_with_tools
 - [ ] Scrapling MCP server natif
-- [ ] MCP server EchoHub → Claude Code pilote modèles locaux (Phase 2)
-- [ ] EchoForge ↔ EchoHub API locale (Phase 3)
+- [ ] MCP server EchoHub → Claude Code pilote modèles locaux
+- [ ] EchoForge ↔ EchoHub API locale
 - [ ] Automatisation fine-tuning (boucle finetune→test→finetune)
 - [ ] Modèle juge fiable (après fine-tuning + évaluation itérative)
 - [ ] Valider .AppImage + .deb
