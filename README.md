@@ -35,6 +35,7 @@ cd echohub
 - Load profiles (Performance / Balanced / Gaming / Minimal) that configure all GPU parameters automatically
 - Multi-GPU support: tensor split across N GPUs for llama.cpp, tensor parallel for vLLM — automatic detection, no config needed
 - Speculative decoding: n-gram (zero cost), MTP self-speculative, and draft model — selectable per load
+- Live generation timings in the log panel: `prompt eval time`, `eval time`, `total time` — same format as llama-server, updates after each inference
 - Export any conversation as Markdown
 - Once a model is downloaded, everything works offline
 
@@ -100,6 +101,10 @@ Full technical breakdown:
 - [v0.8 — MCP Skills Intelligence & Agent Polish](docs/v0.8-mcp-skills-intelligence.md)
 - [v0.9 — Perf, Multi-GPU & Speculative](docs/v0.9-perf-gpu-speculative.md)
 
+Architecture docs:
+- [Agent Harness — multi-agent orchestration & validation pipeline](docs/agent-harness-architecture.md)
+- [Roadmap — remote access, parallel models, model routing](docs/roadmap.md)
+
 ---
 
 ## Releases
@@ -115,6 +120,7 @@ Full technical breakdown:
 | [v0.7 — Projects workspace](docs/v0.7-projects-workspace.md) | ✅ Stable | Projects hub (Dev/Docs/Research), per-project profiles, tool calling detection & filter, collapsible panels |
 | [v0.8 — MCP Skills Intelligence](docs/v0.8-mcp-skills-intelligence.md) | ✅ Stable | stdio MCP transport (Python + Node), auto-install from GitHub, isolated venvs, context budget, synthesis on cap, 5 built-in chat profiles |
 | [v0.9 — Perf, Multi-GPU & Speculative](docs/v0.9-perf-gpu-speculative.md) | ✅ Stable | Load profiles, offload_kqv, multi-GPU tensor split/parallel, speculative decoding |
+| v1.0 — Agent Harness & Remote Access | 🗓 Planned | Sub-agent orchestration, validation pipeline, Telegram/remote access from any device |
 
 ---
 
