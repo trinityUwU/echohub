@@ -788,6 +788,21 @@ def _invoke_agent(args: dict[str, Any], project_id: str, conv_id: str) -> str:
                 else:
                     tool_result = execute_tool(t_name, t_args, project_id, conv_id)
 
+                    # Harness validation after file mutations
+                    if t_name in ("create_file", "edit_file") and "Error:" not in tool_result:
+                        file_path = t_args.get("path", "")
+                        if file_path:
+                            try:
+                                from backend.services.harness_service import validate_and_format_for_agent
+                                workspace = get_workspace_path(project_id)
+                                full_path = workspace / file_path
+                                if full_path.exists():
+                                    content_str = full_path.read_text(encoding="utf-8", errors="replace")
+                                    harness_feedback = validate_and_format_for_agent(file_path, content_str)
+                                    tool_result = f"{tool_result}\n{harness_feedback}"
+                            except Exception as he:
+                                logger.warning("[invoke_agent] harness error: {}", he)
+
                 actions_taken.append(f"{t_name}({list(t_args.keys())})")
                 messages.append({
                     "role": "tool",
