@@ -71,7 +71,7 @@ const PROFILES: ProfileDef[] = [
     icon: '⚡',
     desc: 'Full GPU — max speed, uses all available VRAM',
     vramTarget: (t) => t * 0.92,
-    kvQuant: 'q8_0',
+    kvQuant: 'q4_0',
     offloadKqv: false,
     nBatch: 512,
     ctxMode: 'fixed',
@@ -82,7 +82,7 @@ const PROFILES: ProfileDef[] = [
     icon: '⚖',
     desc: 'Half VRAM — model runs fast, leaves room for the OS and light tasks',
     vramTarget: (t) => t * 0.5,
-    kvQuant: 'q8_0',
+    kvQuant: 'q4_0',
     offloadKqv: false,
     nBatch: 256,
     ctxMode: 'fixed',
@@ -144,7 +144,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, conversati
   const [gpuLayersPct, setGpuLayersPct] = useState(100) // 0=CPU, 100=full GPU
   const [cpuOverflow, setCpuOverflow] = useState(false)
   const [moeConfig, setMoeConfig] = useState<MoeLoadConfig | null>(null)
-  const [kvQuant, setKvQuant] = useState<'q8_0' | 'q4_0' | 'bf16'>('q8_0')
+  const [kvQuant, setKvQuant] = useState<'q8_0' | 'q4_0' | 'bf16'>('q4_0')
   const [offloadKqv, setOffloadKqv] = useState(false)
   const [nBatch, setNBatch] = useState<64 | 128 | 256 | 512>(model.is_moe ? 128 : 512)
   const [ctxMode, setCtxMode] = useState<'fixed' | 'adaptive'>('fixed')
@@ -634,8 +634,8 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, conversati
             {/* Quantization */}
             <div className="flex gap-2">
               {([
-                { id: 'q8_0' as const, label: 'Q8_0', sub: '×0.5 VRAM · recommended', color: 'accent' },
-                { id: 'q4_0' as const, label: 'Q4_0', sub: '×0.25 VRAM · long context', color: 'green' },
+                { id: 'q8_0' as const, label: 'Q8_0', sub: '×0.5 VRAM · balanced', color: 'accent' },
+                { id: 'q4_0' as const, label: 'Q4_0', sub: '×0.25 VRAM · recommended · best speed', color: 'green' },
                 { id: 'bf16' as const, label: 'BF16', sub: '×1.0 VRAM · max precision', color: 'text-muted' },
               ]).map(opt => {
                 const active = kvQuant === opt.id
