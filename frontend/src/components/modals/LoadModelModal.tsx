@@ -146,7 +146,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, conversati
   const [gpuLayersPct, setGpuLayersPct] = useState(100) // 0=CPU, 100=full GPU
   const [cpuOverflow, setCpuOverflow] = useState(false)
   const [moeConfig, setMoeConfig] = useState<MoeLoadConfig | null>(null)
-  const [kvQuant, setKvQuant] = useState<'q8_0' | 'q4_0' | 'bf16' | null>(null)
+  const [kvQuant, setKvQuant] = useState<'q8_0' | 'q4_0' | 'bf16' | null>('q4_0')
   const [offloadKqv, setOffloadKqv] = useState(false)
   const [nBatch, setNBatch] = useState<64 | 128 | 256 | 512>(model.is_moe ? 128 : 512)
   const [ctxMode, setCtxMode] = useState<'fixed' | 'adaptive'>('fixed')
