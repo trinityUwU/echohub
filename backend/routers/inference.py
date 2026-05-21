@@ -467,8 +467,13 @@ async def tool_chat(req: ToolChatRequest):
         skill_awareness = (req.awareness_block or "").strip()
         all_awareness_parts = [p for p in [skill_awareness] + _mcp_awareness_blocks if p]
         awareness = "\n".join(all_awareness_parts)
-        # _DEV_SYSTEM_PROMPT is always prepended — user system prompt appended after, never replacing it
-        combined_system = _DEV_SYSTEM_PROMPT
+        # Only inject dev system prompt when filesystem tools are actually enabled
+        _fs_tools = {"create_file", "edit_file", "read_file", "delete_file", "list_files",
+                     "get_workspace_info", "run_command"}
+        _active_tools = set(req.enabled_tools or [t["function"]["name"] for t in tools])
+        _has_fs_tools = bool(_active_tools & _fs_tools)
+
+        combined_system = (_DEV_SYSTEM_PROMPT if _has_fs_tools else "You are a helpful assistant.")
         if awareness:
             combined_system += f"\n\n---\nACTIVE SKILLS:\n{awareness}"
         if user_system:
