@@ -148,7 +148,7 @@ def get_llama_capabilities() -> dict:
         return {"version": None, "ngram": False, "mtp": False, "draft_model": False}
 
     try:
-        from llama_cpp import LlamaPromptLookupDecoding  # noqa: F401
+        from llama_cpp.llama_speculative import LlamaPromptLookupDecoding  # noqa: F401
         caps["ngram"] = True
     except ImportError:
         caps["ngram"] = False

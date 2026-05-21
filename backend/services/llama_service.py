@@ -276,7 +276,7 @@ def load_model(
     # Speculative decoding — must be set in llama_kwargs before Llama() is constructed
     if speculative_mode == "ngram":
         try:
-            from llama_cpp import LlamaPromptLookupDecoding
+            from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
             llama_kwargs["draft_model"] = LlamaPromptLookupDecoding(num_pred_tokens=n_pred_tokens)
             _log(f"[llama] Speculative ngram: num_pred_tokens={n_pred_tokens}")
         except (ImportError, Exception) as _e:
@@ -293,7 +293,7 @@ def load_model(
         except (ImportError, Exception) as _e:
             _log(f"[llama] MTP draft failed ({_e}), falling back to ngram")
             try:
-                from llama_cpp import LlamaPromptLookupDecoding
+                from llama_cpp.llama_speculative import LlamaPromptLookupDecoding
                 llama_kwargs["draft_model"] = LlamaPromptLookupDecoding(num_pred_tokens=n_pred_tokens)
             except (ImportError, Exception):
                 pass
