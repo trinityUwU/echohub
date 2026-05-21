@@ -116,7 +116,12 @@ async def generate_with_tools(
     stop_event=None,
     **kwargs,
 ):
-    """vLLM tool-use via OpenAI-compatible API. Yields raw SSE lines (streaming)."""
+    """vLLM tool-use. Yields structured dicts compatible with tool-chat handler.
+
+    text_delta  → {"type": "text_delta", "content": str}
+    tool calls  → {"type": "response", "choices": [{"message": {"tool_calls": [...]}}]}
+    """
+    import json as _json
     current_model = _model()
     if current_model is None:
         raise RuntimeError("No model loaded")
@@ -146,31 +151,57 @@ async def generate_with_tools(
         "stream_options": {"include_usage": True},
     }
 
+    # Accumulate tool call deltas (vLLM streams them incrementally)
+    tc_accum: dict[int, dict] = {}
+
+    async def _stream_and_parse(stream_resp) -> None:  # type: ignore[type-arg]
+        async for line in stream_resp.aiter_lines():
+            if stop_event and stop_event.is_set():
+                return
+            if not line or not line.startswith("data: "):
+                continue
+            raw = line[6:].strip()
+            if raw == "[DONE]":
+                # Flush any accumulated tool calls
+                if tc_accum:
+                    tc_list = [tc_accum[i] for i in sorted(tc_accum)]
+                    yield {"type": "response", "choices": [{"message": {"tool_calls": tc_list}}]}
+                return
+            try:
+                chunk = _json.loads(raw)
+            except _json.JSONDecodeError:
+                continue
+            choice = (chunk.get("choices") or [{}])[0]
+            delta = choice.get("delta", {})
+            content = delta.get("content") or ""
+            if content:
+                yield {"type": "text_delta", "content": content}
+            # Accumulate tool call fragments
+            for tc_delta in (delta.get("tool_calls") or []):
+                idx = tc_delta.get("index", 0)
+                if idx not in tc_accum:
+                    tc_accum[idx] = {"id": tc_delta.get("id", ""), "type": "function",
+                                     "function": {"name": "", "arguments": ""}}
+                fn = tc_delta.get("function", {})
+                if fn.get("name"):
+                    tc_accum[idx]["function"]["name"] += fn["name"]
+                if fn.get("arguments"):
+                    tc_accum[idx]["function"]["arguments"] += fn["arguments"]
+
     async with httpx.AsyncClient(timeout=300) as client:
-        async with client.stream(
-            "POST",
-            f"{VLLM_BASE_URL}/v1/chat/completions",
-            json=payload,
-        ) as resp:
+        async with client.stream("POST", f"{VLLM_BASE_URL}/v1/chat/completions", json=payload) as resp:
             if resp.status_code >= 400:
                 body = await resp.aread()
                 err_text = body.decode(errors="replace")
-                # tool choice not enabled — retry without tools (plain chat)
                 if resp.status_code == 400 and "tool choice" in err_text.lower():
-                    logger.warning("vLLM tool choice not enabled — retrying without tools")
+                    logger.warning("vLLM tool choice not enabled — falling back to plain chat")
                     plain = {k: v for k, v in payload.items() if k not in ("tools", "tool_choice")}
                     async with client.stream("POST", f"{VLLM_BASE_URL}/v1/chat/completions", json=plain) as r2:
                         r2.raise_for_status()
-                        async for line in r2.aiter_lines():
-                            if stop_event and stop_event.is_set():
-                                break
-                            if line:
-                                yield line
+                        async for ev in _stream_and_parse(r2):
+                            yield ev
                     return
                 logger.error(f"vLLM tools {resp.status_code}: {err_text}")
                 resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if stop_event and stop_event.is_set():
-                    break
-                if line:
-                    yield line
+            async for ev in _stream_and_parse(resp):
+                yield ev
