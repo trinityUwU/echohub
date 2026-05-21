@@ -320,6 +320,8 @@ export const MessageRow = memo(MessageRowInner, (prev, next) => {
   if (prev.streaming !== next.streaming) return false
   if (prev.isLast !== next.isLast) return false
   if (prev.message.content !== next.message.content) return false
+  if (prev.message.stats !== next.message.stats) return false
+  if (prev.message.loadConfig !== next.message.loadConfig) return false
   if (prev.genStats !== next.genStats) return false
   if (prev.loadedModelId !== next.loadedModelId) return false
   return true
