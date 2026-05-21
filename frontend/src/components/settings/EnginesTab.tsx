@@ -153,37 +153,23 @@ export function EnginesTab(): React.ReactElement {
   const handleUpgradeFromGithub = async (): Promise<void> => {
     setUpgrading(true)
     setUpgradeLogs([])
-    try {
-      const url = await upgradeLlamaCppStreamUrl()
-      const res = await fetch(url)
-      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buf = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (value) buf += decoder.decode(value, { stream: !done })
-        const blocks = buf.split('\n\n')
-        buf = done ? '' : (blocks.pop() ?? '')
-        for (const block of blocks) {
-          if (!block.startsWith('data: ')) continue
-          try {
-            const d = JSON.parse(block.slice(6).trim())
-            if (d.done) {
-              setUpgrading(false)
-              refreshLlama()
-              getLlamaCppCapabilities().then(c => setLlamaCaps(c)).catch(() => {})
-              return
-            }
-            if (d.msg) setUpgradeLogs(prev => [...prev, { level: d.level ?? 'info', msg: d.msg }])
-          } catch { /* ignore */ }
+    const url = await upgradeLlamaCppStreamUrl()
+    const es = new EventSource(url)
+    es.onmessage = (e) => {
+      try {
+        const d = JSON.parse(e.data)
+        if (d.done) {
+          es.close()
+          setUpgrading(false)
+          refreshLlama()
+          getLlamaCppCapabilities().then(c => setLlamaCaps(c)).catch(() => {})
+        } else if (d.msg) {
+          const level = d.level === 'error' ? 'error' : d.level === 'step' ? 'step' : d.level === 'warn' ? 'warn' : d.level === 'success' ? 'ok' : 'info'
+          setUpgradeLogs(prev => [...prev, { level, msg: d.msg }])
         }
-        if (done) break
-      }
-    } catch (err) {
-      setUpgradeLogs(prev => [...prev, { level: 'error', msg: String(err) }])
+      } catch { /* ignore */ }
     }
-    setUpgrading(false)
+    es.onerror = () => { es.close(); setUpgrading(false) }
   }
 
   const handleInstall = (version: string): void => {
