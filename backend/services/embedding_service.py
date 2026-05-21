@@ -12,7 +12,8 @@ _EMBED_FILENAME = "nomic-embed-text-v1.5.Q4_K_M.gguf"
 _EMBED_DIR = Path(os.getenv("MODELS_DIR", "/mnt/models/echohub")) / "_embeddings"
 _EMBED_PATH = _EMBED_DIR / _EMBED_FILENAME
 
-_lock = threading.Lock()
+from backend.services.llama_lock import get_lock as _get_llama_lock
+_lock = _get_llama_lock()
 _model = None  # lazy init
 
 
