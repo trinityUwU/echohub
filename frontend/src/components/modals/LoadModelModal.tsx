@@ -23,7 +23,7 @@ interface LoadModelModalProps {
     gpuMemoryUtilization: number; maxModelLen: number | null
     enforceEager: boolean; maxCudagraphCaptureSize: number | null
     nGpuLayers?: number | null; cpuOverflow?: boolean; isMoe?: boolean
-    kvQuant?: 'q8_0' | 'q4_0' | 'bf16'
+    kvQuant?: 'q8_0' | 'q4_0' | 'bf16' | null
     offloadKqv?: boolean; nBatch?: number | null
     tensorParallelSize?: number | null; pipelineParallelSize?: number | null
     tensorSplit?: number[] | null; mainGpu?: number | null
@@ -58,7 +58,7 @@ interface ProfileDef {
   icon: string
   desc: string
   vramTarget: (total: number) => number  // GB
-  kvQuant: 'q8_0' | 'q4_0' | 'bf16'
+  kvQuant: 'q8_0' | 'q4_0' | 'bf16' | null
   offloadKqv: boolean
   nBatch: 64 | 128 | 256 | 512
   ctxMode: 'fixed' | 'adaptive'
@@ -71,7 +71,7 @@ const PROFILES: ProfileDef[] = [
     icon: '⚡',
     desc: 'Full GPU — max speed, uses all available VRAM',
     vramTarget: (t) => t * 0.92,
-    kvQuant: 'q4_0',
+    kvQuant: null,
     offloadKqv: false,
     nBatch: 512,
     ctxMode: 'fixed',
@@ -82,7 +82,7 @@ const PROFILES: ProfileDef[] = [
     icon: '⚖',
     desc: 'Half VRAM — model runs fast, leaves room for the OS and light tasks',
     vramTarget: (t) => t * 0.5,
-    kvQuant: 'q4_0',
+    kvQuant: null,
     offloadKqv: false,
     nBatch: 256,
     ctxMode: 'fixed',
@@ -146,7 +146,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, conversati
   const [gpuLayersPct, setGpuLayersPct] = useState(100) // 0=CPU, 100=full GPU
   const [cpuOverflow, setCpuOverflow] = useState(false)
   const [moeConfig, setMoeConfig] = useState<MoeLoadConfig | null>(null)
-  const [kvQuant, setKvQuant] = useState<'q8_0' | 'q4_0' | 'bf16'>('q4_0')
+  const [kvQuant, setKvQuant] = useState<'q8_0' | 'q4_0' | 'bf16' | null>(null)
   const [offloadKqv, setOffloadKqv] = useState(false)
   const [nBatch, setNBatch] = useState<64 | 128 | 256 | 512>(model.is_moe ? 128 : 512)
   const [ctxMode, setCtxMode] = useState<'fixed' | 'adaptive'>('fixed')
@@ -303,7 +303,7 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, conversati
   // KV cache VRAM: applies to both vLLM and llama.cpp
   // llama.cpp KV factor: bf16=1.0, q8_0=0.5, q4_0=0.25
   // For smart cap mode we don't know resolvedCtx yet (circular dep) — use ctxLen as upper bound estimate
-  const kvQuantFactor = kvQuant === 'bf16' ? 1.0 : kvQuant === 'q8_0' ? 0.5 : 0.25
+  const kvQuantFactor = (!kvQuant || kvQuant === 'bf16') ? 1.0 : kvQuant === 'q8_0' ? 0.5 : 0.25
   const kvTotal   = engine === 'vllm' ? kvCacheGb(ctxLen, params) : kvCacheGb(ctxLen, params) * kvQuantFactor
   // offload_kqv: KV cache in system RAM instead of VRAM — zero VRAM cost for KV
   const kv        = (engine === 'llama' && offloadKqv) ? 0 : kvTotal
@@ -636,12 +636,12 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, conversati
             {/* Quantization */}
             <div className="flex gap-2">
               {([
+                { id: null as null, label: 'F16', sub: '×1.0 VRAM · fastest · default', color: 'green' },
                 { id: 'q8_0' as const, label: 'Q8_0', sub: '×0.5 VRAM · balanced', color: 'accent' },
-                { id: 'q4_0' as const, label: 'Q4_0', sub: '×0.25 VRAM · recommended · best speed', color: 'green' },
-                { id: 'bf16' as const, label: 'BF16', sub: '×1.0 VRAM · max precision', color: 'text-muted' },
+                { id: 'q4_0' as const, label: 'Q4_0', sub: '×0.25 VRAM · long context', color: 'text-muted' },
               ]).map(opt => {
                 const active = kvQuant === opt.id
-                const optKvGb = kvCacheGb(ctxMode === 'fixed' ? ctxLen : 2048, params) * (opt.id === 'bf16' ? 1 : opt.id === 'q8_0' ? 0.5 : 0.25)
+                const optKvGb = kvCacheGb(ctxMode === 'fixed' ? ctxLen : 2048, params) * (!opt.id ? 1 : opt.id === 'q8_0' ? 0.5 : 0.25)
                 return (
                   <button key={opt.id} onClick={() => withProfileClear(setKvQuant)(opt.id)}
                     className={`flex-1 flex flex-col items-center gap-0.5 px-2 py-2 rounded-sm border cursor-pointer transition-colors text-center ${
