@@ -442,15 +442,24 @@ def get_llama_cpp_status() -> dict:
         installed = False
 
     cuda_enabled = False
+    hipblas_enabled = False
+    metal_enabled = False
+    backend_type = "cpu"
+
     if installed:
         try:
             import llama_cpp as _lc
             lib_dir = os.path.join(os.path.dirname(_lc.__file__), "lib")
-            cuda_enabled = any(
-                "cuda" in f.lower()
-                for f in os.listdir(lib_dir)
-                if os.path.isfile(os.path.join(lib_dir, f))
-            )
+            lib_files = [f.lower() for f in os.listdir(lib_dir) if os.path.isfile(os.path.join(lib_dir, f))]
+            cuda_enabled = any("cuda" in f for f in lib_files)
+            hipblas_enabled = any("hipblas" in f or "rocm" in f for f in lib_files)
+            metal_enabled = any("metal" in f for f in lib_files)
+            if cuda_enabled:
+                backend_type = "cuda"
+            elif hipblas_enabled:
+                backend_type = "hipblas"
+            elif metal_enabled:
+                backend_type = "metal"
         except Exception:
             pass
 
@@ -471,6 +480,9 @@ def get_llama_cpp_status() -> dict:
         "installed": installed,
         "version": version,
         "cuda_enabled": cuda_enabled,
+        "hipblas_enabled": hipblas_enabled,
+        "metal_enabled": metal_enabled,
+        "backend_type": backend_type,
         "size_gb": size_gb,
         "path": str(sys.executable),
     }

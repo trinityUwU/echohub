@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { listEngines, deleteEngine, installEngineStream, getLlamaCppStatus } from '@/api/client'
+import { listEngines, deleteEngine, installEngineStream, getLlamaCppStatus, getInstallerDiagnose, recompileLlamaStreamUrl } from '@/api/client'
 import { useDialog } from '@/components/shared/Dialog'
 import { apiUrl } from '@/api/base'
 
 interface LlamaCppStatus {
-  installed: boolean; version: string | null; cuda_enabled: boolean; size_gb: number; path: string
+  installed: boolean; version: string | null
+  cuda_enabled: boolean; hipblas_enabled: boolean; metal_enabled: boolean
+  backend_type: 'cuda' | 'hipblas' | 'metal' | 'cpu'
+  size_gb: number; path: string
+}
+
+interface DiagnoseResult {
+  gpu_type: 'nvidia' | 'amd' | 'apple' | 'cpu'
+  expected_backend: string; actual_backend: string | null
+  llama_installed: boolean; backend_ok: boolean; issues: string[]
 }
 
 interface EngineVersion {
@@ -36,6 +45,11 @@ export function EnginesTab(): React.ReactElement {
   const [llamaLogs, setLlamaLogs] = useState<Array<{ level: string; msg: string }>>([])
   const llamaLogsRef = useRef<HTMLDivElement>(null)
 
+  const [diagnose, setDiagnose] = useState<DiagnoseResult | null>(null)
+  const [recompiling, setRecompiling] = useState(false)
+  const [recompileLogs, setRecompileLogs] = useState<Array<{ level: string; msg: string }>>([])
+  const recompileLogsRef = useRef<HTMLDivElement>(null)
+
   const refresh = useCallback(async (): Promise<void> => {
     try {
       const d = await listEngines()
@@ -52,14 +66,25 @@ export function EnginesTab(): React.ReactElement {
     finally { setLlamaLoading(false) }
   }, [])
 
+  const refreshDiagnose = useCallback(async (): Promise<void> => {
+    try {
+      const d = await getInstallerDiagnose()
+      setDiagnose(d)
+    } catch { /* keep previous */ }
+  }, [])
+
   useEffect(() => { refresh() }, [refresh])
   useEffect(() => { refreshLlama() }, [refreshLlama])
+  useEffect(() => { refreshDiagnose() }, [refreshDiagnose])
   useEffect(() => {
     logsRef.current?.scrollTo({ top: logsRef.current.scrollHeight, behavior: 'smooth' })
   }, [installLogs])
   useEffect(() => {
     llamaLogsRef.current?.scrollTo({ top: llamaLogsRef.current.scrollHeight, behavior: 'smooth' })
   }, [llamaLogs])
+  useEffect(() => {
+    recompileLogsRef.current?.scrollTo({ top: recompileLogsRef.current.scrollHeight, behavior: 'smooth' })
+  }, [recompileLogs])
 
   const handleLlamaUpgrade = async (): Promise<void> => {
     setLlamaUpgrading(true)
@@ -81,6 +106,37 @@ export function EnginesTab(): React.ReactElement {
       } catch { /* ignore */ }
     }
     es.onerror = () => { es.close(); setLlamaUpgrading(false) }
+  }
+
+  const handleRecompile = async (): Promise<void> => {
+    setRecompiling(true)
+    setRecompileLogs([])
+    try {
+      const url = await recompileLlamaStreamUrl()
+      const res = await fetch(url)
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (value) buf += decoder.decode(value, { stream: !done })
+        const blocks = buf.split('\n\n')
+        buf = done ? '' : (blocks.pop() ?? '')
+        for (const block of blocks) {
+          if (!block.startsWith('data: ')) continue
+          try {
+            const d = JSON.parse(block.slice(6).trim())
+            if (d.done) { setRecompiling(false); refreshLlama(); refreshDiagnose(); return }
+            if (d.msg) setRecompileLogs(prev => [...prev, { level: d.level ?? 'info', msg: d.msg }])
+          } catch { /* ignore */ }
+        }
+        if (done) break
+      }
+    } catch (err) {
+      setRecompileLogs(prev => [...prev, { level: 'error', msg: String(err) }])
+    }
+    setRecompiling(false)
   }
 
   const handleInstall = (version: string): void => {
@@ -111,14 +167,67 @@ export function EnginesTab(): React.ReactElement {
   const suggested = SUGGESTED_VERSIONS.filter(v => !installedVersions.has(v))
   const operationalCount = data?.versions.filter(v => v.operational).length ?? 0
 
-  const llamaBadge = llamaStatus?.installed && llamaStatus.cuda_enabled
-    ? { label: 'operational', cls: 'bg-green/12 text-green' }
-    : llamaStatus?.installed
+  const backendLabel: Record<string, string> = { cuda: 'CUDA', hipblas: 'ROCm/HIP', metal: 'Metal', cpu: 'CPU only' }
+  const llamaBadge = !llamaStatus?.installed
+    ? { label: 'not installed', cls: 'bg-red/12 text-red' }
+    : llamaStatus.backend_type === 'cpu'
     ? { label: 'cpu only', cls: 'bg-yellow/12 text-yellow' }
-    : { label: 'not installed', cls: 'bg-red/12 text-red' }
+    : { label: backendLabel[llamaStatus.backend_type] ?? llamaStatus.backend_type, cls: 'bg-green/12 text-green' }
+
+  const hasMismatch = diagnose && !diagnose.backend_ok && diagnose.gpu_type !== 'cpu'
+  const gpuLabel: Record<string, string> = { nvidia: 'NVIDIA', amd: 'AMD', apple: 'Apple Silicon', cpu: 'No GPU' }
 
   return (
     <div className="flex flex-col gap-6">
+
+      {/* GPU health banner — shown when backend doesn't match GPU */}
+      {hasMismatch && (
+        <div className="flex items-start gap-3 bg-yellow/7 border border-yellow/25 rounded-md px-4 py-3">
+          <svg className="w-4 h-4 text-yellow flex-shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold text-yellow mb-0.5">GPU backend mismatch</div>
+            <div className="text-xs text-text-muted leading-relaxed">
+              {gpuLabel[diagnose!.gpu_type]} detected but llama-cpp compiled for{' '}
+              <span className="font-mono">{diagnose!.actual_backend ?? 'unknown'}</span>.
+              Models will run on CPU instead of GPU.
+            </div>
+          </div>
+          <button
+            onClick={handleRecompile}
+            disabled={recompiling}
+            className="px-3 py-1.5 rounded-sm bg-yellow/15 hover:bg-yellow/25 border border-yellow/30 text-yellow text-xs font-semibold cursor-pointer transition-colors disabled:opacity-40 flex-shrink-0">
+            {recompiling ? 'Compiling…' : `Recompile for ${gpuLabel[diagnose!.gpu_type]}`}
+          </button>
+        </div>
+      )}
+
+      {/* Recompile log */}
+      {(recompiling || recompileLogs.length > 0) && (
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-2 flex items-center gap-2">
+            {recompiling
+              ? <><span className="w-1.5 h-1.5 rounded-full bg-yellow animate-pulse" />Recompiling llama-cpp-python…</>
+              : 'Recompile log'
+            }
+          </div>
+          <div ref={recompileLogsRef}
+            className="bg-[#0a0a0d] border border-border rounded-sm p-3 font-mono text-xs leading-relaxed h-[180px] overflow-y-auto">
+            {recompileLogs.map((line, i) => (
+              <div key={i} className={
+                line.level === 'error' ? 'text-red' :
+                line.level === 'ok' ? 'text-green' :
+                line.level === 'warn' ? 'text-yellow' :
+                line.level === 'step' ? 'text-accent font-semibold' :
+                'text-[#6b7280]'
+              }>{line.level === 'step' ? `▶ ${line.msg}` : line.msg}</div>
+            ))}
+            {recompiling && <span className="text-yellow animate-blink">█</span>}
+          </div>
+        </div>
+      )}
 
       {/* llama-cpp-python section */}
       <div>

@@ -638,8 +638,20 @@ export async function llamaUpgradeStreamUrl(): Promise<string> {
 }
 
 export const getLlamaCppStatus = (): Promise<{
-  installed: boolean; version: string | null; cuda_enabled: boolean; size_gb: number; path: string
+  installed: boolean; version: string | null
+  cuda_enabled: boolean; hipblas_enabled: boolean; metal_enabled: boolean
+  backend_type: 'cuda' | 'hipblas' | 'metal' | 'cpu'
+  size_gb: number; path: string
 }> => apiRequest('/models/llama-cpp/status')
+
+export const getInstallerDiagnose = (): Promise<{
+  gpu_type: 'nvidia' | 'amd' | 'apple' | 'cpu'
+  expected_backend: string; actual_backend: string | null
+  llama_installed: boolean; backend_ok: boolean; issues: string[]
+}> => apiRequest('/installer/diagnose')
+
+export const recompileLlamaStreamUrl = (): Promise<string> =>
+  apiUrl('/installer/recompile-llama')
 
 export async function evalRunStreamUrl(): Promise<string> {
   return apiUrl('/finetune/eval-run/stream')

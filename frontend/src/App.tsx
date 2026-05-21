@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useModels } from '@/hooks/useModels'
 import { useGpu } from '@/hooks/useGpu'
 import { useConversations } from '@/hooks/useConversations'
-import { subscribeDownloads, cancelDownload, deleteModel, listFinetunedModels, deleteFinetunedModel } from '@/api/client'
+import { subscribeDownloads, cancelDownload, deleteModel, listFinetunedModels, deleteFinetunedModel, getInstallerDiagnose } from '@/api/client'
 import type { DownloadJob, FinetunedModel, ModelInfo, LoadConfig } from '@/types'
 import { NavRail } from '@/components/nav/NavRail'
 import { ChatPage } from '@/components/chat/ChatPage'
@@ -88,6 +88,31 @@ export default function App(): React.ReactElement {
     getOnboardingStatus()
       .then(r => { if (!r.complete) setShowOnboarding(true) })
       .catch(() => {})
+  }, [])
+
+  // GPU backend health check — toast if llama-cpp compiled for wrong backend
+  useEffect(() => {
+    getInstallerDiagnose()
+      .then(d => {
+        if (!d.backend_ok && d.gpu_type !== 'cpu' && d.issues.length > 0) {
+          const gpuLabel: Record<string, string> = { nvidia: 'NVIDIA', amd: 'AMD', apple: 'Apple Silicon' }
+          addToast({
+            type: 'warning',
+            title: 'GPU not used for inference',
+            message: `${gpuLabel[d.gpu_type] ?? d.gpu_type} detected but llama-cpp is running on CPU. Fix in Settings → Engines.`,
+            duration: 0,
+            action: {
+              label: 'Fix in Settings',
+              onClick: () => {
+                setPage('settings')
+                setSettingsInitialTab('engines')
+              },
+            },
+          })
+        }
+      })
+      .catch(() => {})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const refreshFinetuned = useCallback(() => {
