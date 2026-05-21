@@ -101,6 +101,7 @@ export function ChatPage({
   // When tool skills are active, normal chat routes through useToolChat (skill mode, no project)
   const skillChatHook = useToolChat('__skills__', {
     conversationId: activeId ?? null,
+    loadConfig: loadedModel ? { model_id: loadedModel.id, engine: loadedModel.engine ?? undefined } : null,
     maxContextTokens: loadedModel?.max_context_window ?? undefined,
     onSaveMessage: useCallback(async (convId: string, role: string, content: string, stats?: import('@/types').MessageStats | null) => {
       await addMessage(convId, { id: crypto.randomUUID(), role, content, stats: stats ?? null })
@@ -345,7 +346,7 @@ export function ChatPage({
           onRefreshFiles={() => {}}
           onRegenerate={handleRegenerate}
           onEditUser={handleEditUser}
-          onSend={(text, attachments) => send(text, !!loadedModel, attachments)}
+          onSend={(text, attachments) => send(text, !!loadedModel, attachments, loadedModel ? { model_id: loadedModel.id, engine: loadedModel.engine ?? undefined } : null)}
           onStop={stop}
           onLoadModel={onLoadModel}
           showLogs={showLogs}
@@ -574,6 +575,7 @@ function ProjectWorkspace({
   const toolChatHook = useToolChat(project.id, {
     conversationId: convHook.activeId,
     projectMode: project.mode,
+    loadConfig: loadedModel ? { model_id: loadedModel.id, engine: loadedModel.engine ?? undefined } : null,
     onSaveMessage: convHook.saveMessage,
     maxContextTokens: loadedModel?.max_context_window ?? undefined,
   })
@@ -769,7 +771,7 @@ function ProjectWorkspace({
           onEditUser={handleEditUser}
           onSend={isDevMode
             ? (text) => toolChatHook.send(text, buildDevSystemPrompt(params), projectSkillsHook)
-            : (text, attachments) => chatHook.send(text, !!loadedModel, attachments)
+            : (text, attachments) => chatHook.send(text, !!loadedModel, attachments, loadedModel ? { model_id: loadedModel.id, engine: loadedModel.engine ?? undefined } : null)
           }
           onStop={stop}
           onLoadModel={onLoadModel}
