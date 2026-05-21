@@ -597,6 +597,60 @@ async def generate(
             yield resp.json()
 
 
+async def generate_with_tools(
+    messages: list[dict],
+    tools: list[dict],
+    temperature: float = 0.2,
+    max_tokens: int = 2048,
+    stop_event=None,
+    **kwargs,
+):
+    """vLLM tool-use via OpenAI-compatible API. Yields raw SSE lines (streaming)."""
+    if _current_model is None:
+        raise RuntimeError("No model loaded")
+
+    try:
+        async with httpx.AsyncClient(timeout=5) as c:
+            r = await c.get(f"{VLLM_BASE_URL}/v1/models")
+            actual_model_id = r.json()["data"][0]["id"]
+    except Exception:
+        actual_model_id = _current_model.id
+
+    safe_max_tokens = max_tokens
+    if _current_model and _current_model.max_context_window:
+        prompt_chars = sum(len(str(m.get("content", ""))) for m in messages)
+        estimated_prompt_tokens = prompt_chars // 4 + 64
+        budget = _current_model.max_context_window - estimated_prompt_tokens
+        safe_max_tokens = min(max_tokens, budget) if budget > 0 else 128
+
+    payload: dict = {
+        "model": actual_model_id,
+        "messages": messages,
+        "tools": tools,
+        "tool_choice": "auto",
+        "temperature": temperature,
+        "max_tokens": safe_max_tokens,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+    }
+
+    async with httpx.AsyncClient(timeout=300) as client:
+        async with client.stream(
+            "POST",
+            f"{VLLM_BASE_URL}/v1/chat/completions",
+            json=payload,
+        ) as resp:
+            if resp.status_code >= 400:
+                body = await resp.aread()
+                logger.error(f"vLLM tools {resp.status_code}: {body.decode(errors='replace')}")
+                resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if stop_event and stop_event.is_set():
+                    break
+                if line:
+                    yield line
+
+
 def cleanup() -> None:
     """Called by atexit — always kills vLLM subprocess on process exit."""
     logger.info("EchoHub cleanup — killing vLLM if running")
