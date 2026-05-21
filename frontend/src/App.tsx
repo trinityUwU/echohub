@@ -40,7 +40,7 @@ export default function App(): React.ReactElement {
 
   const { downloaded, loadedModel, loadingModelId, loadError, unloading, refresh, loadModel, loadModelFromPath, unloadModel } = useModels()
   const gpu = useGpu()
-  const { conversations, archivedConversations, activeId, activeMessages, newConversation, selectConversation, deleteConversation, archiveConversation, unarchiveConversation, renameConversation, setActiveMessages } = useConversations()
+  const { conversations, archivedConversations, activeId, activeMessages, newConversation, selectConversation, deleteConversation, archiveConversation, unarchiveConversation, renameConversation, toggleMemory, setActiveMessages } = useConversations()
 
   useEffect(() => {
     const unsub = subscribeDownloads(jobs => {
@@ -262,6 +262,7 @@ export default function App(): React.ReactElement {
             onArchiveConversation={id => archiveConversation(id).catch(console.error)}
             onUnarchiveConversation={id => unarchiveConversation(id).catch(console.error)}
             onRenameConversation={(id, title) => renameConversation(id, title).catch(console.error)}
+            onToggleMemory={id => toggleMemory(id).catch(console.error)}
             onOpenPicker={() => setShowPicker(true)}
             onEject={unloadModel}
             onGoToSettings={() => setPage('settings')}

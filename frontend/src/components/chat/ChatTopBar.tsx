@@ -19,11 +19,14 @@ interface ChatTopBarProps {
   onModeChange: (m: ProjectMode) => void
   onBackToHub?: () => void
   loadedModelHasTools: boolean
+  memoryEnabled?: boolean
+  onToggleMemory?: () => void
 }
 
 export function ChatTopBar({
   loadedModel, loading, loadingPct, onOpenPicker, onClear, onEject, onExport,
   view, mode, activeProjectName, onViewChange, onModeChange, onBackToHub, loadedModelHasTools,
+  memoryEnabled, onToggleMemory,
 }: ChatTopBarProps): React.ReactElement {
   if (loading) return <LoadingBar pct={loadingPct} modelName={loadedModel?.name ?? '…'} onEject={onEject} />
   return (
@@ -40,6 +43,8 @@ export function ChatTopBar({
       onModeChange={onModeChange}
       onBackToHub={onBackToHub ?? null}
       loadedModelHasTools={loadedModelHasTools}
+      memoryEnabled={memoryEnabled}
+      onToggleMemory={onToggleMemory}
     />
   )
 }
@@ -57,6 +62,8 @@ interface NormalBarProps {
   onModeChange: (m: ProjectMode) => void
   onBackToHub: (() => void) | null
   loadedModelHasTools: boolean
+  memoryEnabled?: boolean
+  onToggleMemory?: () => void
 }
 
 const VIEWS: { id: ChatView; label: string }[] = [
@@ -99,6 +106,7 @@ const MODES: { id: ProjectMode; label: string; icon: React.ReactElement }[] = [
 function NormalBar({
   loadedModel, onOpenPicker, onClear, onEject, onExport,
   view, mode, activeProjectName, onViewChange, onModeChange, onBackToHub, loadedModelHasTools,
+  memoryEnabled, onToggleMemory,
 }: NormalBarProps): React.ReactElement {
   return (
     <div className="bg-surface border-b border-border flex-shrink-0">
@@ -197,6 +205,22 @@ function NormalBar({
         </AnimatePresence>
 
         <div className="flex items-center gap-1.5 ml-auto">
+          {onToggleMemory && (
+            <button
+              onClick={onToggleMemory}
+              title={memoryEnabled ? 'Memory ON — click to disable' : 'Memory OFF — click to enable'}
+              className={`flex items-center gap-1.5 px-2 py-1.5 rounded-sm text-xs transition-colors cursor-pointer border ${
+                memoryEnabled
+                  ? 'border-accent/40 bg-accent/10 text-accent hover:bg-accent/20'
+                  : 'border-border bg-surface text-text-muted hover:bg-overlay hover:text-text-primary'
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+              </svg>
+              Memory
+            </button>
+          )}
           <TopBarBtn onClick={onExport}>
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
             Export

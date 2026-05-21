@@ -118,6 +118,13 @@ export function useConversations() {
     setConversations(prev => prev.map(c => c.id === id ? updated : c))
   }, [])
 
+  const toggleMemory = useCallback(async (id: string) => {
+    const conv = conversations.find(c => c.id === id)
+    if (!conv) return
+    const updated = await updateConversation(id, { memory_enabled: !conv.memory_enabled })
+    setConversations(prev => prev.map(c => c.id === id ? updated : c))
+  }, [conversations])
+
   // No-op kept for API compatibility — persistence is now via addMessage in useChat
   const updateMessages = useCallback((_convId: string, _messages: ChatMessage[]) => {
     // no-op: messages are persisted directly via addMessage API calls
@@ -137,6 +144,7 @@ export function useConversations() {
     unarchiveConversation,
     archivedConversations,
     renameConversation,
+    toggleMemory,
     setActiveMessages,
   }
 }

@@ -5,8 +5,9 @@ import { Toggle } from '@/components/shared/Toggle'
 import { EnginesTab } from './EnginesTab'
 import { PathsTab } from './PathsTab'
 import { BenchmarkTab } from './BenchmarkTab'
+import { MemoryTab } from './MemoryTab'
 
-type Section = 'setup' | 'engines' | 'benchmark' | 'paths' | 'hardware' | 'about'
+type Section = 'setup' | 'engines' | 'benchmark' | 'paths' | 'hardware' | 'memory' | 'about'
 
 const NAV: { id: Section; label: string; icon: string }[] = [
   { id: 'setup',    label: 'Setup',    icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
@@ -14,7 +15,7 @@ const NAV: { id: Section; label: string; icon: string }[] = [
   { id: 'benchmark', label: 'Benchmark', icon: 'M18 20V10M12 20V4M6 20v-6' },
   { id: 'hardware', label: 'Hardware', icon: 'M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18' },
   { id: 'paths',    label: 'Paths',    icon: 'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z' },
-
+  { id: 'memory',   label: 'Memory',   icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z' },
   { id: 'about',    label: 'About',    icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 7v4m0 4h.01' },
 ]
 
@@ -51,7 +52,7 @@ export function SettingsPage({ initialTab }: SettingsPageProps): React.ReactElem
           {section === 'benchmark' && <BenchmarkTab />}
           {section === 'paths'    && <PathsTab />}
           {section === 'hardware' && <HardwareSection />}
-
+          {section === 'memory'   && <MemoryTab />}
           {section === 'about'    && <AboutSection />}
         </div>
       </div>
