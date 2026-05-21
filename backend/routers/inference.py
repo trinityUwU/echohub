@@ -494,19 +494,17 @@ async def tool_chat(req: ToolChatRequest):
         elif _mode == "research":
             base_system = _RESEARCH_SYSTEM_PROMPT
         else:
-            # Chat normal — only inject dev prompt if filesystem tools are explicitly enabled
+            # Chat normal — dev prompt si fs tools actifs, sinon assistant généraliste
             _fs_tools = {"create_file", "edit_file", "read_file", "delete_file", "list_files",
                          "get_workspace_info", "run_command"}
             _active_tools = set(req.enabled_tools or [t["function"]["name"] for t in tools])
-            base_system = _DEV_SYSTEM_PROMPT if (_active_tools & _fs_tools) else ""
+            base_system = _DEV_SYSTEM_PROMPT if (_active_tools & _fs_tools) else "You are a helpful assistant."
 
         combined_system = base_system
         if awareness:
-            combined_system += f"\n\n---\nACTIVE SKILLS:\n{awareness}" if combined_system else f"ACTIVE SKILLS:\n{awareness}"
+            combined_system += f"\n\n---\nACTIVE SKILLS:\n{awareness}"
         if user_system:
-            combined_system += f"\n\n---\nADDITIONAL INSTRUCTIONS:\n{user_system}" if combined_system else user_system
-        if not combined_system:
-            combined_system = "You are a helpful assistant."
+            combined_system += f"\n\n---\nADDITIONAL INSTRUCTIONS:\n{user_system}"
         messages.append({"role": "system", "content": combined_system})
 
         # Inject memory context if memory is enabled for this conversation
