@@ -7,23 +7,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend.models.schemas import ConversationOut, MessageOut, MessageStats
-from backend.services import db
+from backend.services import conversation_manager as cm
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
-
-@router.get("", response_model=list)
-def list_conversations_filtered(archived: int = 0):
-    """Return conversations filtered by archived status (0=active, 1=archived)."""
-    with db._lock:
-        conn = db._get_conn()
-        rows = conn.execute(
-            "SELECT c.*, COUNT(m.id) AS message_count FROM conversations c "
-            "LEFT JOIN messages m ON m.conversation_id = c.id "
-            "WHERE c.archived = ? "
-            "GROUP BY c.id ORDER BY c.updated_at DESC",
-            (archived,)
-        ).fetchall()
-    return [dict(r) for r in rows]
 
 
 class CreateConversationBody(BaseModel):
@@ -35,6 +21,7 @@ class CreateConversationBody(BaseModel):
 class UpdateConversationBody(BaseModel):
     title: str | None = None
     model_id: str | None = None
+    memory_enabled: bool | None = None
 
 
 class AddMessageBody(BaseModel):
@@ -61,7 +48,7 @@ def _to_message_out(row: dict) -> MessageOut:
     stats = MessageStats(**stats_raw) if isinstance(stats_raw, dict) else None
     return MessageOut(
         id=row["id"],
-        conversation_id=row["conversation_id"],
+        conversation_id=row.get("conversation_id", ""),
         role=row["role"],
         content=row["content"],
         stats=stats,
@@ -70,21 +57,20 @@ def _to_message_out(row: dict) -> MessageOut:
     )
 
 
-@router.get("", response_model=list[ConversationOut])
-def list_conversations() -> list[ConversationOut]:
-    rows = db.get_conversations()
-    return [_to_conversation_out(r) for r in rows]
+@router.get("", response_model=list)
+def list_conversations_filtered(archived: int = 0) -> list[dict]:
+    return cm.list_conversations(archived=bool(archived))
 
 
 @router.post("", response_model=ConversationOut, status_code=201)
 def create_conversation(body: CreateConversationBody) -> ConversationOut:
-    row = db.create_conversation(body.id, body.title, body.model_id)
+    row = cm.create_conversation(body.id, body.title, body.model_id)
     return _to_conversation_out(row)
 
 
 @router.get("/{conv_id}", response_model=ConversationOut)
 def get_conversation(conv_id: str) -> ConversationOut:
-    row = db.get_conversation(conv_id)
+    row = cm.get_conversation(conv_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return _to_conversation_out(row)
@@ -92,7 +78,12 @@ def get_conversation(conv_id: str) -> ConversationOut:
 
 @router.put("/{conv_id}", response_model=ConversationOut)
 def update_conversation(conv_id: str, body: UpdateConversationBody) -> ConversationOut:
-    row = db.update_conversation(conv_id, body.title, body.model_id)
+    row = cm.update_conversation(
+        conv_id,
+        title=body.title,
+        model_id=body.model_id,
+        memory_enabled=body.memory_enabled,
+    )
     if row is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return _to_conversation_out(row)
@@ -100,7 +91,7 @@ def update_conversation(conv_id: str, body: UpdateConversationBody) -> Conversat
 
 @router.delete("/{conv_id}")
 def delete_conversation(conv_id: str) -> dict:
-    deleted = db.delete_conversation(conv_id)
+    deleted = cm.delete_conversation(conv_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return {"status": "deleted"}
@@ -108,34 +99,36 @@ def delete_conversation(conv_id: str) -> dict:
 
 @router.get("/{conv_id}/messages", response_model=list[MessageOut])
 def get_messages(conv_id: str) -> list[MessageOut]:
-    if db.get_conversation(conv_id) is None:
+    if cm.get_conversation(conv_id) is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    rows = db.get_messages(conv_id)
-    return [_to_message_out(r) for r in rows]
+    rows = cm.get_messages(conv_id)
+    return [_to_message_out({**r, "conversation_id": conv_id}) for r in rows]
 
 
 @router.post("/{conv_id}/messages", response_model=MessageOut, status_code=201)
 def add_message(conv_id: str, body: AddMessageBody) -> MessageOut:
-    if db.get_conversation(conv_id) is None:
+    if cm.get_conversation(conv_id) is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     stats_dict = body.stats.model_dump() if body.stats else None
-    row = db.add_message(conv_id, body.id, body.role, body.content, stats_dict, body.load_config)
+    row = cm.add_message(conv_id, body.id, body.role, body.content, stats_dict, body.load_config)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
     return _to_message_out(row)
 
 
 @router.delete("/{conv_id}/messages")
 def clear_messages(conv_id: str) -> dict:
-    if db.get_conversation(conv_id) is None:
+    if cm.get_conversation(conv_id) is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    db.delete_messages(conv_id)
+    cm.delete_messages(conv_id)
     return {"status": "cleared"}
 
 
 @router.delete("/{conv_id}/messages/{message_id}")
 def delete_message(conv_id: str, message_id: str) -> dict:
-    if db.get_conversation(conv_id) is None:
+    if cm.get_conversation(conv_id) is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    deleted = db.delete_message(conv_id, message_id)
+    deleted = cm.delete_message(conv_id, message_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Message not found")
     return {"status": "deleted"}
@@ -143,19 +136,15 @@ def delete_message(conv_id: str, message_id: str) -> dict:
 
 @router.patch("/{conv_id}/archive")
 def archive_conversation(conv_id: str) -> dict:
-    with db._lock:
-        conn = db._get_conn()
-        conn.execute("UPDATE conversations SET archived=1, updated_at=? WHERE id=?",
-                     (datetime.utcnow().isoformat(), conv_id))
-        conn.commit()
+    row = cm.update_conversation(conv_id, archived=True)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
     return {"status": "archived", "id": conv_id}
 
 
 @router.patch("/{conv_id}/unarchive")
 def unarchive_conversation(conv_id: str) -> dict:
-    with db._lock:
-        conn = db._get_conn()
-        conn.execute("UPDATE conversations SET archived=0, updated_at=? WHERE id=?",
-                     (datetime.utcnow().isoformat(), conv_id))
-        conn.commit()
+    row = cm.update_conversation(conv_id, archived=False)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
     return {"status": "unarchived", "id": conv_id}

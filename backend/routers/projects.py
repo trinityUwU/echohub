@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel
 
-from backend.services import db
+from backend.services import conversation_manager as cm
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -25,7 +25,7 @@ class SaveMessageBody(BaseModel):
 @router.get("/{project_id}/conversations")
 def list_conversations(project_id: str) -> list[dict]:
     try:
-        return db.list_project_conversations(project_id)
+        return cm.list_project_conversations(project_id)
     except Exception as exc:
         logger.error("list_conversations error: {}", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -34,7 +34,7 @@ def list_conversations(project_id: str) -> list[dict]:
 @router.post("/{project_id}/conversations")
 def create_conversation(project_id: str, body: CreateConversationBody) -> dict:
     try:
-        return db.create_project_conversation(project_id, body.title)
+        return cm.create_project_conversation(project_id, body.title)
     except Exception as exc:
         logger.error("create_conversation error: {}", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -43,7 +43,7 @@ def create_conversation(project_id: str, body: CreateConversationBody) -> dict:
 @router.delete("/{project_id}/conversations/{conv_id}")
 def delete_conversation(project_id: str, conv_id: str) -> dict:
     try:
-        db.delete_project_conversation(conv_id)
+        cm.delete_project_conversation(conv_id)
         return {"ok": True}
     except Exception as exc:
         logger.error("delete_conversation error: {}", exc)
@@ -53,7 +53,7 @@ def delete_conversation(project_id: str, conv_id: str) -> dict:
 @router.patch("/{project_id}/conversations/{conv_id}")
 def rename_conversation(project_id: str, conv_id: str, body: RenameConversationBody) -> dict:
     try:
-        db.rename_project_conversation(conv_id, body.title)
+        cm.rename_project_conversation(conv_id, body.title)
         return {"ok": True}
     except Exception as exc:
         logger.error("rename_conversation error: {}", exc)
@@ -63,7 +63,7 @@ def rename_conversation(project_id: str, conv_id: str, body: RenameConversationB
 @router.get("/{project_id}/conversations/{conv_id}/messages")
 def list_messages(project_id: str, conv_id: str) -> list[dict]:
     try:
-        return db.list_project_messages(conv_id)
+        return cm.list_project_messages(conv_id)
     except Exception as exc:
         logger.error("list_messages error: {}", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -72,7 +72,7 @@ def list_messages(project_id: str, conv_id: str) -> list[dict]:
 @router.post("/{project_id}/conversations/{conv_id}/messages")
 def save_message(project_id: str, conv_id: str, body: SaveMessageBody) -> dict:
     try:
-        return db.save_project_message(conv_id, body.role, body.content)
+        return cm.save_project_message(conv_id, body.role, body.content)
     except Exception as exc:
         logger.error("save_message error: {}", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -81,7 +81,7 @@ def save_message(project_id: str, conv_id: str, body: SaveMessageBody) -> dict:
 @router.delete("/{project_id}/conversations/{conv_id}/messages")
 def clear_messages(project_id: str, conv_id: str) -> dict:
     try:
-        db.delete_project_messages(conv_id)
+        cm.delete_project_messages(conv_id)
         return {"ok": True}
     except Exception as exc:
         logger.error("clear_messages error: {}", exc)

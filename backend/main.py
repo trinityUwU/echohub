@@ -19,6 +19,8 @@ async def lifespan(app: FastAPI):
     logger.info("EchoHub backend starting up")
     vllm_service.kill_stale_pid()
     db.init_db()
+    from backend.services.conversation_manager import migrate_from_sqlite
+    migrate_from_sqlite()
     yield
     logger.info("EchoHub backend shutting down")
     engine_router.cleanup()
