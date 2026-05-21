@@ -126,9 +126,17 @@ export function ChatPage({
     : chatHookBase
 
   // Sync messages when conversation changes OR when activeMessages loads from DB
-  // streaming flag prevents reset mid-generation
+  // When activeId changes (conv switch), always sync regardless of streaming state
+  const prevActiveId = useRef<string | null>(null)
   useEffect(() => {
-    if (!streaming) setMessages(activeMessages)
+    const convChanged = prevActiveId.current !== activeId
+    prevActiveId.current = activeId ?? null
+    if (convChanged) {
+      stop() // abort any in-progress generation from previous conv
+      setMessages(activeMessages)
+    } else if (!streaming) {
+      setMessages(activeMessages)
+    }
   }, [activeId, activeMessages]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
