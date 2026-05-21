@@ -32,6 +32,9 @@ cd echohub
 - Agent mode with tool use: web search, file system, code execution, and any installed MCP tools
 - Collect training pairs from real conversations, fine-tune locally with QLoRA, evaluate before and after, and export as GGUF
 - Detects and preserves MTP (Multi-Token Prediction) — models like Qwen3 get 1.5–2x faster generation automatically, with a badge in Discover and Library
+- Load profiles (Performance / Balanced / Gaming / Minimal) that configure all GPU parameters automatically
+- Multi-GPU support: tensor split across N GPUs for llama.cpp, tensor parallel for vLLM — automatic detection, no config needed
+- Speculative decoding: n-gram (zero cost), MTP self-speculative, and draft model — selectable per load
 - Export any conversation as Markdown
 - Once a model is downloaded, everything works offline
 
@@ -81,6 +84,10 @@ A few things that aren't obvious from the UI:
 - Vision support for GGUF models: detects mmproj file at load time, selects the right chat handler automatically (Qwen2-VL, LLaVA, MiniCPM, Llama3-Vision…)
 - Reload model from message footer: each message stores its exact load config, one click reloads the same model with the same parameters if it was ejected
 - Capability badges everywhere: quant, MTP, MoE, thinking, vision in Discover, Library, LoadModal, ChatTopBar, ModelPicker
+- Load profiles compute optimal `n_gpu_layers` dynamically from model params and available VRAM — Gaming mode targets 3 GB leaving ~8.5 GB free on a 12 GB card
+- `offload_kqv`: moves the KV cache to system RAM, freeing its full VRAM footprint at a small PCIe latency cost
+- Multi-GPU: `detect_all_gpus()` queries nvidia-smi/rocm-smi, `tensor_split` is computed proportional to each GPU's VRAM and injected at load time
+- Speculative decoding in llama.cpp: n-gram lookup (zero cost), MTP self-speculative (auto-detected from GGUF metadata), and external draft model — slider for tokens per step
 
 Full technical breakdown:
 - [v0.1 — Foundation](docs/v0.1-foundation.md)
@@ -91,6 +98,7 @@ Full technical breakdown:
 - [v0.6 — Vision, MTP, UX polish](docs/v0.6-vision-mtp-ux.md)
 - [v0.7 — Projects workspace & tool calling](docs/v0.7-projects-workspace.md)
 - [v0.8 — MCP Skills Intelligence & Agent Polish](docs/v0.8-mcp-skills-intelligence.md)
+- [v0.9 — Perf, Multi-GPU & Speculative](docs/v0.9-perf-gpu-speculative.md)
 
 ---
 
@@ -106,6 +114,7 @@ Full technical breakdown:
 | [v0.6 — Vision, MTP, UX polish](docs/v0.6-vision-mtp-ux.md) | ✅ Stable | Vision for GGUF (mmproj auto-detect), capability badges everywhere, reload model from footer, image lightbox, Wayland clipboard paste, vLLM fixes |
 | [v0.7 — Projects workspace](docs/v0.7-projects-workspace.md) | ✅ Stable | Projects hub (Dev/Docs/Research), per-project profiles, tool calling detection & filter, collapsible panels |
 | [v0.8 — MCP Skills Intelligence](docs/v0.8-mcp-skills-intelligence.md) | ✅ Stable | stdio MCP transport (Python + Node), auto-install from GitHub, isolated venvs, context budget, synthesis on cap, 5 built-in chat profiles |
+| [v0.9 — Perf, Multi-GPU & Speculative](docs/v0.9-perf-gpu-speculative.md) | ✅ Stable | Load profiles, offload_kqv, multi-GPU tensor split/parallel, speculative decoding |
 
 ---
 
