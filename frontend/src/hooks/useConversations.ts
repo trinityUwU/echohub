@@ -77,6 +77,7 @@ export function useConversations() {
 
   const deleteConversation = useCallback(async (id: string) => {
     await apiDeleteConversation(id)
+    setArchivedConversations(prev => prev.filter(c => c.id !== id))
     setConversations(prev => {
       const next = prev.filter(c => c.id !== id)
       if (activeId === id) {
