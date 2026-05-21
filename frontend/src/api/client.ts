@@ -181,7 +181,11 @@ export async function chatStream(
       body: JSON.stringify(body),
       signal,
     })
-    if (!res.ok || !res.body) throw new Error(`Chat request failed: ${res.status}`)
+    if (!res.ok || !res.body) {
+      let detail = `Chat request failed: ${res.status}`
+      try { const j = await res.json(); detail = j.detail ?? detail } catch { /* ignore */ }
+      throw new Error(detail)
+    }
 
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
@@ -290,7 +294,11 @@ export async function* toolChat(req: ToolChatRequest): AsyncGenerator<unknown> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   })
-  if (!res.ok || !res.body) throw new Error(`Tool chat request failed: ${res.status}`)
+  if (!res.ok || !res.body) {
+    let detail = `Tool chat request failed: ${res.status}`
+    try { const j = await res.json(); detail = j.detail ?? detail } catch { /* ignore */ }
+    throw new Error(detail)
+  }
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()

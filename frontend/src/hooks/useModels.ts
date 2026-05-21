@@ -18,9 +18,10 @@ export function useModels() {
         api.getInferenceStatus(),
       ])
       setDownloaded(dl)
+      // status=null means backend responded but no model is loaded — trust it
       setLoadedModel(status)
     } catch {
-      // Backend temporarily unavailable — keep existing state, retry on next tick
+      // Network error — backend unreachable, keep existing state until it comes back
     }
   }, [])
 

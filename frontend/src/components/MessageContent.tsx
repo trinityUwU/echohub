@@ -256,45 +256,119 @@ function ToolCallBlock({ content, streaming }: { content: string; streaming?: bo
 
 // ── ToolResultBlock ───────────────────────────────────────────────────────────
 
+type AgentResult = { status: string; summary: string; findings: Record<string, unknown>; actions_taken: string[] }
+
+function _parseAgentResult(content: string): AgentResult | null {
+  try {
+    const parsed = JSON.parse(content.trim())
+    if (parsed && typeof parsed.status === 'string' && typeof parsed.summary === 'string') return parsed as AgentResult
+  } catch { /* not JSON */ }
+  return null
+}
+
+function _parseHarnessFeedback(content: string): { main: string; harness: string[] } | null {
+  const lines = content.split('\n')
+  const harnessLines = lines.filter(l => l.trim().startsWith('[harness]') || (l.trim().startsWith('line ') && l.includes('[')))
+  const mainLines = lines.filter(l => !l.trim().startsWith('[harness]') && !(l.trim().startsWith('line ') && l.includes('[')))
+  if (harnessLines.length === 0) return null
+  return { main: mainLines.join('\n').trim(), harness: harnessLines }
+}
+
+function AgentResultView({ result }: { result: AgentResult }): React.ReactElement {
+  const statusColor = result.status === 'success' ? 'text-green bg-green/10'
+    : result.status === 'failed' ? 'text-red bg-red/10'
+    : 'text-yellow bg-yellow/10'
+  return (
+    <div className="px-3 pb-3 pt-2 border-t border-white/5 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded uppercase tracking-wide ${statusColor}`}>{result.status}</span>
+        <span className="text-xs text-text-muted/80">{result.summary}</span>
+      </div>
+      {result.actions_taken?.length > 0 && (
+        <div className="space-y-0.5">
+          <p className="text-[10px] text-text-muted/40 uppercase tracking-wide">Actions</p>
+          {result.actions_taken.map((a, i) => (
+            <div key={i} className="flex items-center gap-1.5 text-[11px] text-text-muted/60 font-mono">
+              <span className="text-text-muted/30">›</span>{a}
+            </div>
+          ))}
+        </div>
+      )}
+      {Object.keys(result.findings ?? {}).length > 0 && (
+        <div className="text-[11px] text-text-muted/50 font-mono whitespace-pre-wrap max-h-32 overflow-y-auto border-t border-white/5 pt-2">
+          {JSON.stringify(result.findings, null, 2)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function HarnessView({ main, harness }: { main: string; harness: string[] }): React.ReactElement {
+  const hasFatal = harness.some(l => l.includes('FATAL') || l.includes('fatal'))
+  const hasError = harness.some(l => l.includes('ERROR') || l.includes('error'))
+  const color = hasFatal || hasError ? 'text-red' : 'text-yellow'
+  return (
+    <div className="px-3 pb-3 pt-2 border-t border-white/5 space-y-2">
+      {main && <p className="text-xs text-text-muted/60 font-mono">{main}</p>}
+      <div className={`space-y-0.5 ${color}`}>
+        {harness.map((l, i) => (
+          <p key={i} className="text-[11px] font-mono">{l.trim()}</p>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function ToolResultBlock({ tool, content }: { tool: string; content: string }): React.ReactElement {
   const [open, setOpen] = useState(false)
+
+  const agentResult = tool === 'invoke_agent' ? _parseAgentResult(content) : null
+  const harnessParsed = !agentResult && tool !== 'search_memory' ? _parseHarnessFeedback(content) : null
+  const isMemoryResult = tool === 'search_memory' || tool === 'store_memory'
   const words = content.trim() ? content.trim().split(/\s+/).length : 0
+
+  // Status badge for header
+  const statusBadge = agentResult
+    ? <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wide font-medium ${agentResult.status === 'success' ? 'text-green bg-green/10' : agentResult.status === 'failed' ? 'text-red bg-red/10' : 'text-yellow bg-yellow/10'}`}>{agentResult.status}</span>
+    : harnessParsed
+      ? <span className="text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wide font-medium text-red bg-red/10">harness</span>
+      : isMemoryResult
+        ? <span className="text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wide font-medium text-purple bg-purple/10">memory</span>
+        : null
+
+  const alwaysOpen = agentResult !== null || harnessParsed !== null
+  const isOpen = alwaysOpen || open
 
   return (
     <div className="mb-2 rounded-lg border border-white/5 bg-surface overflow-hidden">
       <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/[0.03] transition-colors cursor-pointer"
+        onClick={() => !alwaysOpen && setOpen(o => !o)}
+        className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${alwaysOpen ? 'cursor-default' : 'hover:bg-white/[0.03] cursor-pointer'}`}
       >
         <svg className="w-3.5 h-3.5 flex-shrink-0 text-text-muted/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="20 6 9 17 4 12"/>
         </svg>
         <span className="text-xs font-mono text-text-muted/80">{tool}</span>
         <div className="ml-auto flex items-center gap-2">
-          {words > 0 && (
-            <span className="text-[10px] text-text-muted/40">{words}w</span>
+          {statusBadge}
+          {!alwaysOpen && words > 0 && <span className="text-[10px] text-text-muted/40">{words}w</span>}
+          {!alwaysOpen && (
+            <svg className={`w-3 h-3 text-text-muted/40 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
           )}
-          <svg
-            className={`w-3 h-3 text-text-muted/40 transition-transform ${open ? 'rotate-180' : ''}`}
-            fill="none" viewBox="0 0 24 24" stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
         </div>
       </button>
       <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            key="body"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            style={{ overflow: 'hidden' }}
-          >
-            <div className="px-3 pb-3 pt-2 text-xs text-text-muted/60 leading-relaxed whitespace-pre-wrap border-t border-white/5 font-mono max-h-64 overflow-y-auto">
-              {content}
-            </div>
+        {isOpen && (
+          <motion.div key="body" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }} style={{ overflow: 'hidden' }}>
+            {agentResult
+              ? <AgentResultView result={agentResult} />
+              : harnessParsed
+                ? <HarnessView main={harnessParsed.main} harness={harnessParsed.harness} />
+                : <div className="px-3 pb-3 pt-2 text-xs text-text-muted/60 leading-relaxed whitespace-pre-wrap border-t border-white/5 font-mono max-h-64 overflow-y-auto">{content}</div>
+            }
           </motion.div>
         )}
       </AnimatePresence>
