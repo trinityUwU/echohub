@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { chatStream, summarizeMessages, addMessage, updateConversation } from '@/api/client'
+import { addToast } from '@/hooks/useToast'
 import type { Attachment, ChatMessage, ChatParams, ContentPart, GenerationStats, LoadConfig } from '@/types'
 
 export const DEFAULT_CHAT_PARAMS: ChatParams = {
@@ -245,6 +246,17 @@ export function useChat(
       controller.signal,
       (prompt, completion) => setLiveTokens({ prompt, completion }),
       () => { setOomError(true); setStreaming(false) },
+      (currentCtx, nextCtx) => {
+        setStreaming(false)
+        setError(null)
+        addToast({
+          type: 'warning',
+          title: `Context too small (${Math.round(currentCtx / 1024)}K)`,
+          message: `Reload the model with ${Math.round(nextCtx / 1024)}K context to continue.`,
+          duration: 0,
+          action: { label: `Reload ${Math.round(nextCtx / 1024)}K`, onClick: () => window.dispatchEvent(new CustomEvent('echohub:reload-ctx', { detail: { nextCtx } })) },
+        })
+      },
     )
     abortRef.current = null
   }, [messages, params, updateMessages, onMessagesChange, maxContextTokens, compact, modelId, convId])
@@ -332,6 +344,17 @@ export function useChat(
       controller.signal,
       (prompt, completion) => setLiveTokens({ prompt, completion }),
       () => { setOomError(true); setStreaming(false) },
+      (currentCtx, nextCtx) => {
+        setStreaming(false)
+        setError(null)
+        addToast({
+          type: 'warning',
+          title: `Context too small (${Math.round(currentCtx / 1024)}K)`,
+          message: `Reload the model with ${Math.round(nextCtx / 1024)}K context to continue.`,
+          duration: 0,
+          action: { label: `Reload ${Math.round(nextCtx / 1024)}K`, onClick: () => window.dispatchEvent(new CustomEvent('echohub:reload-ctx', { detail: { nextCtx } })) },
+        })
+      },
     )
     abortRef.current = null
   }, [params, onMessagesChange, modelId, convId])

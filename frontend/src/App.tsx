@@ -155,6 +155,17 @@ export default function App(): React.ReactElement {
     setPendingLoad(model)
   }
 
+  // Listen for ctx_exceeded reload requests from useChat
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const nextCtx = (e as CustomEvent).detail?.nextCtx
+      if (!loadedModel) return
+      setPendingLoad({ ...loadedModel, _suggestedCtx: nextCtx } as ModelInfo & { _suggestedCtx?: number })
+    }
+    window.addEventListener('echohub:reload-ctx', handler)
+    return () => window.removeEventListener('echohub:reload-ctx', handler)
+  }, [loadedModel])
+
   const handleLoadFinetuned = (model: FinetunedModel): void => {
     loadModelFromPath(model.id, model.path).catch(console.error)
   }
@@ -322,6 +333,7 @@ export default function App(): React.ReactElement {
           vramTotalGb={gpu.vram_total_mb / 1024}
           vramUsedGb={gpu.vram_used_mb / 1024}
           gpu={gpu}
+          suggestedCtx={(pendingLoad as ModelInfo & { _suggestedCtx?: number })._suggestedCtx}
           conversationTokens={Math.round(
             activeMessages.reduce((sum, m) => {
               const txt = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)

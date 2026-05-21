@@ -615,13 +615,25 @@ async def generate(
             except Exception as e:
                 if not _eject_requested:
                     err_str = str(e).lower()
+                    is_ctx_exceeded = any(k in err_str for k in (
+                        "exceed context", "context window", "kv cache is full",
+                        "exceed the maximum", "tokens exceed",
+                    ))
                     is_oom = any(k in err_str for k in (
                         "out of memory", "cuda error", "cuda out", "ggml_cuda",
                         "failed to allocate", "memory allocation", "killed",
                     ))
-                    err_type = "oom" if is_oom else "error"
-                    _log(f"[llama] {'OOM detected' if is_oom else 'Error'} during generation: {e}")
-                    payload = json.dumps({"error": str(e), "error_type": err_type})
+                    if is_ctx_exceeded:
+                        current_ctx = _load_config.get("n_ctx", 4096) if _load_config else 4096
+                        next_ctx = min(current_ctx * 2, 32768)
+                        _log(f"[llama] context exceeded ({current_ctx} tokens) — signaling resize to {next_ctx}", "warn")
+                        payload = json.dumps({"error": str(e), "error_type": "ctx_exceeded", "current_ctx": current_ctx, "next_ctx": next_ctx})
+                    elif is_oom:
+                        _log(f"[llama] OOM detected during generation: {e}")
+                        payload = json.dumps({"error": str(e), "error_type": "oom"})
+                    else:
+                        _log(f"[llama] Error during generation: {e}")
+                        payload = json.dumps({"error": str(e), "error_type": "error"})
                     asyncio.run_coroutine_threadsafe(queue.put(f"data: {payload}"), loop)
             finally:
                 asyncio.run_coroutine_threadsafe(queue.put(None), loop)  # sentinel
@@ -776,7 +788,17 @@ async def generate_with_tools(
 
         except Exception as e:
             logger.error(f"[llama] generate_with_tools streaming error: {e}")
-            asyncio.run_coroutine_threadsafe(queue.put({"type": "error", "error": str(e)}), loop)
+            err_str = str(e).lower()
+            is_ctx = any(k in err_str for k in ("exceed context", "context window", "kv cache is full", "tokens exceed"))
+            if is_ctx:
+                current_ctx = _load_config.get("n_ctx", 4096) if _load_config else 4096
+                next_ctx = min(current_ctx * 2, 32768)
+                asyncio.run_coroutine_threadsafe(queue.put({
+                    "type": "error", "error": str(e),
+                    "error_type": "ctx_exceeded", "current_ctx": current_ctx, "next_ctx": next_ctx
+                }), loop)
+            else:
+                asyncio.run_coroutine_threadsafe(queue.put({"type": "error", "error": str(e)}), loop)
         finally:
             asyncio.run_coroutine_threadsafe(queue.put(None), loop)
 
