@@ -1,14 +1,98 @@
 # STATE — EchoHub
-*Dernière mise à jour : 2026-05-20 (session 21)*
+*Dernière mise à jour : 2026-05-21 (session 22)*
 
 ## Résumé de l'état actuel
 
-Application Tauri v2 native stable. Sessions 20+21 = système Skills/MCP complet avec
-support stdio (Python + Node), pipeline d'installation automatique depuis GitHub,
-agent loop production-grade (context budget, synthesis on cap, timeout MCP). Profils
-de chat réécrits avec vrais prompts. Persistance messages MCP fixée. Frontend animé.
+Application Tauri v2 native stable. Installation GPU-aware : détecte NVIDIA/AMD/Apple/CPU de façon fiable, compile llama-cpp avec le bon backend (CUDA/ROCm/Metal/CPU), et diagnostique les mismatches au démarrage avec un toast actionnable. Sessions 20+21 = système Skills/MCP complet avec support stdio. Pushé sur master, prêt à distribuer.
 
-## Ce qui a été fait — session 21 (2026-05-20)
+## Ce qui a été fait — session 22 (2026-05-21)
+
+### GPU backend mismatch — bug report + fix complet
+
+**Bug root cause :** `nvidia-smi` sans argument retourne 0 même si les drivers sont installés sans GPU NVIDIA physique. Sur la machine d'un utilisateur AMD, le setup détectait "NVIDIA" → installait vLLM + compilait llama-cpp CUDA au lieu de ROCm.
+
+**Corrections apportées :**
+
+- `backend/routers/installer.py` :
+  - `_detect_gpu()` centralisée : NVIDIA = `nvidia-smi -L` doit lister un device réel, AMD = `rocm-smi --showproductname`, Apple = Darwin, CPU = fallback
+  - `_compile_llama_async()` : branch ROCm complète (`-DGGML_HIPBLAS=on`, détection `/opt/rocm`, `LLAMA_HIPBLAS=1`)
+  - Mismatch check au re-lancement du setup : si llama-cpp déjà installé mais mauvais backend → recompile automatique
+  - `GET /installer/diagnose` → `{gpu_type, expected_backend, actual_backend, backend_ok, issues}` — appelé au startup de l'app
+  - `GET /installer/recompile-llama` → SSE stream, recompile depuis Settings sans reset `install_complete`
+
+- `backend/routers/models.py` : `/llama-cpp/status` expose maintenant `hipblas_enabled`, `metal_enabled`, `backend_type` en plus de `cuda_enabled`
+
+- `frontend/src/components/settings/EnginesTab.tsx` : banner jaune si mismatch GPU/backend + bouton "Recompile for AMD/NVIDIA" + log inline SSE
+
+- `frontend/src/App.tsx` : toast warning persistent au démarrage si GPU détecté mais llama tourne en CPU, action "Fix in Settings" → navigate Settings/Engines
+
+- `frontend/src/api/client.ts` : `getInstallerDiagnose()`, `recompileLlamaStreamUrl()`, types `LlamaCppStatus` enrichis
+
+**Commit :** `d596191` pushé sur master.
+
+## Décisions prises
+
+| Décision | Raison | Date |
+|----------|--------|------|
+| `nvidia-smi -L` obligatoire (pas juste returncode) | Drivers installés sans GPU retournent 0 — faux positif | 2026-05-21 |
+| Mismatch auto-recompile au setup | L'utilisateur ne devrait jamais avoir à le faire manuellement | 2026-05-21 |
+| `/installer/diagnose` séparé de `/installer/status` | Diagnose = coûteux (subprocess), status = léger (DB flag) | 2026-05-21 |
+| Toast persistent (duration: 0) | Une dégradation silencieuse (CPU au lieu de GPU) est pire qu'un avertissement | 2026-05-21 |
+
+## Contexte non-évident
+
+- `nvidia-smi` sans args = teste seulement si le driver kernel est chargé, pas si un GPU est physiquement présent. `-L` liste les devices réels.
+- ROCm : `rocm-smi` peut être absent même si le GPU AMD est présent (drivers génériques). Llama-cpp compilé `hipblas` requiert ROCm installé au runtime.
+- `_check_llama_backend_mismatch()` dans installer.py doit être appelé avec le venv Python du backend, pas `sys.executable` (qui est le Python qui fait tourner FastAPI).
+- `install_complete` flag en DB : ne JAMAIS le reset pour forcer le setup — utiliser `/installer/recompile-llama` à la place.
+- `CHAT_BUILTINS` est dans `useProfiles.ts`, pas dans `ChatSettingsSidebar.tsx` (qui existe mais n'est pas utilisé pour le panel Profile de ChatPage)
+- Clé localStorage profiles : `echohub:profiles` (avec deux-points, pas underscore)
+- `skillChatHook` en mode skill = `useToolChat('__skills__')` — endpoint `/conversations/:id/messages` (pas `/projects/`)
+
+## Prochaines étapes (session 23)
+
+1. **Types de projets Dev/Docs/Research** — layouts fonctionnels (P0)
+   - Dev : arborescence fichiers réelle + IDE-like
+   - Docs : injection contexte fichiers drag & drop
+   - Research : gestion sources URL/documents
+2. **RAG natif dans les projets** (dépend des types de projets)
+   - PDF, DOCX, PPTX, XLSX, MD, CSV, JSON
+   - ChromaDB par projet, retrieval injecté dans contexte
+3. **Logs MCP** dans la card skill (petit, utile debug)
+4. **Scoring qualité benchmarks** — algo sans LLM juge
+
+## Points en suspens
+
+- `params` pas mis à jour si profil changé avant reload app → workaround : resélectionner le profil
+- web_search DDG sélecteurs brittle — fallback si DDG change layout
+- OOM kernel SIGKILL non détectable — watchdog process (backlog)
+- ROCm : si rocm-smi absent mais GPU AMD présent → llama-cpp compilé CPU, pas de warning clair (edge case)
+
+## Historique
+
+### Session 21 (2026-05-20)
+MCP stdio transport (McpStdioClient, buffer 8MB, timeout 120s), venv isolé par skill Python,
+detect_mcp_server smithery.yaml + StdioServerTransport Node + monorepos, context budget 75%/92%,
+synthesis on cap, persistance messages MCP, context bar projets, déduplication messages,
+tool call blocks animés, 5 profils chat avec system prompts + permanent rules.
+
+### Session 20 (2026-05-20)
+Skills/MCP system complet : native skills (Web Search, Code Runner, File System, Calculator),
+community skills installables depuis GitHub, toggles UI, awareness blocks injectés dans system prompt,
+MCP HTTP fonctionnel, notifications SSE, modularisation backend.
+
+### Session 19 (2026-05-20)
+Streaming interleaved tool execution, parser MessageContent à état (think/tool_call/tool_result),
+auto-compact 98%, set_tool_limit tool, fetch_url + web_search via Scrapling, slash commands,
+auto-focus textarea, Permanent Rules UI, capabilities détectées au load.
+
+### Session 18 (2026-05-20 matin)
+Projects system complet : hub, workspaces, profils scopés, sidebar conversations.
+Dev mode tool use. generate_with_tools streaming réel. KV cache sélectionnable. MoE VRAM guard.
+
+### Sessions 1-17
+Fondations (dual-engine inference, VRAM management, model discovery), multi-vLLM,
+benchmark suite, fine-tuning QLoRA complet, MTP support, vision GGUF.
 
 ### MCP stdio transport (chantier principal)
 - `mcp_stdio_client.py` — nouveau module McpStdioClient, pool singleton, JSON-RPC 2.0 over stdin/stdout

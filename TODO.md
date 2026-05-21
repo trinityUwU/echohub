@@ -1,5 +1,5 @@
 # TODO — EchoHub
-*Dernière mise à jour : 2026-05-20 (session 21)*
+*Dernière mise à jour : 2026-05-21 (session 22)*
 
 ## En cours
 - [ ] Construction karma Reddit (r/LocalLLaMA) — 1-2 commentaires/jour, sujets perfs/vLLM/GGUF/CUDA
@@ -54,6 +54,17 @@
 - [ ] Multi-GPU support vLLM
 - [ ] Valider .AppImage + .deb
 - [ ] Supprimer vieux composants héritage (ChatPanel.tsx, LoadConfigModal.tsx)
+
+## Terminé ✅ (session 22 — 2026-05-21)
+
+- [x] GPU detection stricte : `nvidia-smi -L` (faux positif drivers sans GPU corrigé)
+- [x] AMD ROCm support dans `_compile_llama_async` (`-DGGML_HIPBLAS=on`, détection `/opt/rocm`)
+- [x] Mismatch auto-recompile au setup (backend ≠ GPU détecté → recompile automatique)
+- [x] `GET /installer/diagnose` : gpu_type, actual_backend, backend_ok, issues
+- [x] `GET /installer/recompile-llama` : SSE stream depuis Settings sans reset install_complete
+- [x] `/llama-cpp/status` : hipblas_enabled, metal_enabled, backend_type exposés
+- [x] EnginesTab : banner mismatch + bouton recompile + log inline
+- [x] App.tsx : toast warning startup GPU détecté mais CPU utilisé, action "Fix in Settings"
 
 ## Terminé ✅ (session 21 — 2026-05-20)
 
