@@ -64,6 +64,8 @@ export interface LoadRequest {
   kv_quant?: 'q8_0' | 'q4_0' | 'bf16'
   offload_kqv?: boolean
   n_batch?: number | null
+  tensor_parallel_size?: number | null   // vLLM: number of GPUs in tensor parallel
+  pipeline_parallel_size?: number | null // vLLM: pipeline parallel for very large models
 }
 
 export interface FinetunedModel {
@@ -122,6 +124,8 @@ export interface LoadConfig {
   gpu_memory_utilization?: number
   vllm_version?: string | null
   gguf_path?: string | null
+  tensor_parallel_size?: number | null
+  pipeline_parallel_size?: number | null
 }
 
 export interface StoredMessage {

@@ -226,7 +226,9 @@ def load_model_async(model_path: str, model_id: str,
                      max_model_len: Optional[int] = None,
                      enforce_eager: bool = False,
                      max_cudagraph_capture_size: Optional[int] = None,
-                     python_override: Optional[str] = None) -> None:
+                     python_override: Optional[str] = None,
+                     tensor_parallel_size: Optional[int] = None,
+                     pipeline_parallel_size: Optional[int] = None) -> None:
     """Launch vLLM in a background thread — returns immediately."""
     import threading
     global _loading_model_id, _load_error, _eject_requested
@@ -238,7 +240,8 @@ def load_model_async(model_path: str, model_id: str,
         global _loading_model_id, _load_error
         try:
             load_model(model_path, model_id, gpu_memory_utilization, max_model_len,
-                       enforce_eager, max_cudagraph_capture_size, python_override)
+                       enforce_eager, max_cudagraph_capture_size, python_override,
+                       tensor_parallel_size, pipeline_parallel_size)
         except Exception as e:
             if not _eject_requested:
                 _load_error = str(e)
@@ -253,7 +256,9 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
                max_model_len: Optional[int] = None,
                enforce_eager: bool = False,
                max_cudagraph_capture_size: Optional[int] = None,
-               python_override: Optional[str] = None) -> None:
+               python_override: Optional[str] = None,
+               tensor_parallel_size: Optional[int] = None,
+               pipeline_parallel_size: Optional[int] = None) -> None:
     """Launch vLLM subprocess serving model_path on VLLM_PORT."""
     global _current_model, _vllm_proc, _eject_requested, _load_config
 
@@ -323,6 +328,14 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
     # Disable FlashInfer JIT sampling — requires nvcc which is not installed
     cmd += ["--no-enable-flashinfer-autotune"]
 
+    if tensor_parallel_size and tensor_parallel_size > 1:
+        cmd.extend(["--tensor-parallel-size", str(tensor_parallel_size)])
+        logger.info(f"[vLLM] tensor_parallel_size={tensor_parallel_size}")
+
+    if pipeline_parallel_size and pipeline_parallel_size > 1:
+        cmd.extend(["--pipeline-parallel-size", str(pipeline_parallel_size)])
+        logger.info(f"[vLLM] pipeline_parallel_size={pipeline_parallel_size}")
+
     # Fallback chat template for models without one (e.g. older Mistral AWQ)
     # Chatml is widely compatible and safe as fallback
     _FALLBACK_TEMPLATE = (
@@ -386,7 +399,9 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
             logger.warning(f"KV cache OOM — auto-retrying with max_model_len={suggested_len}")
             load_model(model_path=model_path, model_id=model_id,
                        gpu_memory_utilization=gpu_memory_utilization, max_model_len=suggested_len,
-                       python_override=python_override)
+                       python_override=python_override,
+                       tensor_parallel_size=tensor_parallel_size,
+                       pipeline_parallel_size=pipeline_parallel_size)
             return
 
         # Retry: GPU util OOM → reduce utilization by 3%
@@ -395,7 +410,9 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
             logger.warning(f"GPU util OOM — auto-retrying with gpu_memory_utilization={reduced}")
             load_model(model_path=model_path, model_id=model_id,
                        gpu_memory_utilization=reduced, max_model_len=max_model_len,
-                       python_override=python_override)
+                       python_override=python_override,
+                       tensor_parallel_size=tensor_parallel_size,
+                       pipeline_parallel_size=pipeline_parallel_size)
             return
 
         # Known incompatibility patterns — fail fast with clear message
@@ -446,6 +463,8 @@ def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[
         "max_model_len": max_model_len,
         "vllm_version": _active_version,
         "gguf_path": model_path if model_path.endswith(".gguf") else None,
+        "tensor_parallel_size": tensor_parallel_size,
+        "pipeline_parallel_size": pipeline_parallel_size,
     }
 
     # Persist to DB

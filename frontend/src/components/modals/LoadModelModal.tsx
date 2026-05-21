@@ -3,7 +3,7 @@ import { Modal } from '@/components/shared/Modal'
 import { Slider } from '@/components/shared/Slider'
 import { Btn } from '@/components/shared/Btn'
 import { Badge } from '@/components/shared/Badge'
-import { getInferenceSettings, getMoeLoadConfig } from '@/api/client'
+import { getInferenceSettings, getMoeLoadConfig, getMultiGpuConfig } from '@/api/client'
 import type { MoeLoadConfig } from '@/api/client'
 import type { GpuStats, ModelInfo } from '@/types'
 
@@ -23,6 +23,7 @@ interface LoadModelModalProps {
     nGpuLayers?: number | null; cpuOverflow?: boolean; isMoe?: boolean
     kvQuant?: 'q8_0' | 'q4_0' | 'bf16'
     offloadKqv?: boolean; nBatch?: number | null
+    tensorParallelSize?: number | null; pipelineParallelSize?: number | null
   }) => void
   onCancel: () => void
 }
@@ -134,6 +135,9 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
   const [nBatch, setNBatch] = useState<64 | 128 | 256 | 512>(model.is_moe ? 128 : 512)
   const [ctxMode, setCtxMode] = useState<'fixed' | 'adaptive'>('fixed')
   const [activeProfile, setActiveProfile] = useState<LoadProfile | null>(null)
+  // Multi-GPU state (vLLM only)
+  const [gpuCount, setGpuCount] = useState(1)
+  const [tensorParallelSize, setTensorParallelSize] = useState<number>(1)
 
   // Pre-compute weightsGb here so applyProfile can use it
   const _qUpperEarly = (model.quantization ?? '').toUpperCase()
@@ -202,6 +206,13 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
       if (cfg.recommended_ctx) setCtxLen(cfg.recommended_ctx)
     }).catch(() => {})
   }, [model.id, model.is_moe, vramTotalGb])
+
+  useEffect(() => {
+    getMultiGpuConfig().then(cfg => {
+      setGpuCount(cfg.gpu_count)
+      if (cfg.gpu_count > 1) setTensorParallelSize(cfg.gpu_count)
+    }).catch(() => {})
+  }, [])
 
   useEffect(() => {
     // Check all available fields — quantization, name, id, arch_tag
@@ -305,6 +316,8 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
             kvQuant: engine === 'llama' ? kvQuant : undefined,
             offloadKqv: engine === 'llama' ? offloadKqv : false,
             nBatch: engine === 'llama' ? nBatch : null,
+            tensorParallelSize: engine === 'vllm' && tensorParallelSize > 1 ? tensorParallelSize : null,
+            pipelineParallelSize: null,
           })}>
           Load model
         </Btn>
@@ -694,6 +707,54 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, onConfirm,
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Tensor Parallel — vLLM only, shown when multi-GPU detected */}
+      {engine === 'vllm' && gpuCount > 1 && (
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-2.5">
+            Tensor Parallel
+          </div>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-start gap-2 bg-green/8 border border-green/30 rounded-sm px-3 py-2.5">
+              <svg className="w-4 h-4 flex-shrink-0 mt-0.5 text-green" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8m-4-4v4"/>
+              </svg>
+              <div>
+                <div className="text-sm font-medium text-green">{gpuCount} GPUs detected</div>
+                <div className="text-xs text-text-muted mt-0.5">
+                  Model distributed across GPUs — throughput ×N, VRAM ×N available
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              {Array.from({ length: gpuCount }, (_, i) => i + 1).map(n => {
+                const active = tensorParallelSize === n
+                return (
+                  <button key={n} onClick={() => setTensorParallelSize(n)}
+                    className={`flex-1 flex flex-col items-center gap-1 px-3 py-2.5 rounded-sm border cursor-pointer transition-colors ${
+                      active ? 'border-green/50 bg-green/8' : 'border-border bg-elevated hover:border-border-hover'
+                    }`}>
+                    <span className={`text-sm font-semibold font-mono ${active ? 'text-green' : 'text-text-primary'}`}>
+                      {n === 1 ? '×1' : `×${n}`}
+                    </span>
+                    <span className="text-2xs text-text-muted">
+                      {n === 1 ? 'Single GPU' : `${n} GPUs`}
+                    </span>
+                    {n === gpuCount && n > 1 && (
+                      <span className="text-2xs px-1 py-px rounded bg-green/15 text-green">max</span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+            {tensorParallelSize > 1 && (
+              <div className="text-xs text-text-muted">
+                NCCL required (included in vLLM). All selected GPUs must be peer-accessible.
+              </div>
+            )}
+          </div>
         </div>
       )}
     </Modal>

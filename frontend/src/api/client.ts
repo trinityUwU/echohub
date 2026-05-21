@@ -335,6 +335,13 @@ export const getGpuStats = (): Promise<GpuStats> =>
 
 export const downloadModel = startDownload
 
+export const getMultiGpuConfig = (): Promise<{
+  gpu_count: number
+  gpus: Array<{ index: number; name: string; vram_total_mb: number; type: string }>
+  tensor_split: number[] | null
+  total_vram_mb: number
+}> => apiRequest('/inference/multi-gpu-config')
+
 export const canLoadModel = (modelId: string, gpuUtil?: number, maxModelLen?: number): Promise<{
   engine: string
   format: string

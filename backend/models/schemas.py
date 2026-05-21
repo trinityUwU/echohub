@@ -60,6 +60,13 @@ class LoadRequest(BaseModel):
     kv_quant: Optional[str] = None     # llama.cpp only: KV cache quantization — "q8_0" | "q4_0" | "bf16"
     offload_kqv: bool = False          # llama.cpp only: move KV cache to system RAM — frees VRAM, tiny PCIe latency
     n_batch: Optional[int] = None      # llama.cpp only: batch size — 512 (fast prefill) | 256 | 128 | 64 (low VRAM)
+    speculative_mode: str = "ngram"    # llama.cpp only: "off" | "ngram" | "mtp" | "draft_model"
+    draft_model_path: Optional[str] = None  # llama.cpp only: absolute path to draft GGUF (mode=draft_model)
+    n_pred_tokens: int = 10            # llama.cpp only: tokens predicted per speculative step (4–16)
+    tensor_parallel_size: Optional[int] = None   # vLLM only: N GPUs for tensor parallel (1=single, 2=dual, etc.)
+    pipeline_parallel_size: Optional[int] = None # vLLM only: pipeline parallel for 3+ GPUs on models > 70B
+    tensor_split: Optional[list[float]] = None  # llama.cpp: répartition VRAM multi-GPU [0.5, 0.5]
+    main_gpu: Optional[int] = None              # llama.cpp: GPU principal pour les layers non-splittés (default 0)
 
 
 class ChatMessage(BaseModel):

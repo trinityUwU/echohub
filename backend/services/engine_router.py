@@ -201,6 +201,8 @@ def load_model_async(
     kv_quant: Optional[str] = None,
     offload_kqv: bool = False,
     n_batch: Optional[int] = None,
+    tensor_parallel_size: Optional[int] = None,
+    pipeline_parallel_size: Optional[int] = None,
 ) -> None:
     from backend.services import llama_service, vllm_service
 
@@ -259,6 +261,8 @@ def load_model_async(
             enforce_eager=enforce_eager,
             max_cudagraph_capture_size=max_cudagraph_capture_size,
             python_override=str(py),
+            tensor_parallel_size=tensor_parallel_size,
+            pipeline_parallel_size=pipeline_parallel_size,
         )
         return
 
