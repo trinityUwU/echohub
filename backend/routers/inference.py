@@ -627,6 +627,10 @@ async def tool_chat(req: ToolChatRequest):
                         yield f"data: {_json.dumps({'type': 'error', 'error': event.get('error', 'Unknown error')})}\n\n"
                         return
 
+                    if isinstance(event, dict) and event.get("type") == "timings":
+                        yield f"data: {_json.dumps({'timings': event['timings']})}\n\n"
+                        continue
+
                     if not isinstance(event, dict) or event.get("type") not in ("text_delta", "response"):
                         continue
 

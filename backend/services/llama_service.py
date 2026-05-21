@@ -720,6 +720,35 @@ async def generate_with_tools(
                         if func.get("arguments"):
                             accumulated_tool_calls[idx]["function"]["arguments"] += func["arguments"]
 
+            # Emit timings
+            try:
+                import llama_cpp as _lc
+                perf = _lc.llama_perf_context(_llm._ctx.ctx)
+                t_prompt_ms = perf.t_p_eval_ms
+                t_eval_ms = perf.t_eval_ms
+                n_prompt = perf.n_p_eval
+                n_eval = perf.n_eval
+                prompt_tps = (n_prompt / t_prompt_ms * 1000) if t_prompt_ms > 0 else 0
+                eval_tps = (n_eval / t_eval_ms * 1000) if t_eval_ms > 0 else 0
+                timings_log = (
+                    f"prompt eval time = {t_prompt_ms:>10.2f} ms / {n_prompt:>5} tokens"
+                    f" ({t_prompt_ms/n_prompt:.2f} ms per token, {prompt_tps:.2f} tokens per second)\n"
+                    f"       eval time = {t_eval_ms:>10.2f} ms / {n_eval:>5} tokens"
+                    f" ({t_eval_ms/n_eval:.2f} ms per token, {eval_tps:.2f} tokens per second)\n"
+                    f"      total time = {(t_prompt_ms+t_eval_ms):>10.2f} ms / {n_prompt+n_eval:>5} tokens"
+                )
+                _log(timings_log)
+                asyncio.run_coroutine_threadsafe(
+                    queue.put({"type": "timings", "timings": {
+                        "prompt_ms": round(t_prompt_ms, 2), "eval_ms": round(t_eval_ms, 2),
+                        "n_prompt": n_prompt, "n_eval": n_eval,
+                        "prompt_tps": round(prompt_tps, 2), "eval_tps": round(eval_tps, 2),
+                        "log": timings_log,
+                    }}), loop
+                )
+            except Exception as _te:
+                _log(f"[llama] timings unavailable: {_te}", "warn")
+
             final_message: dict = {"role": "assistant", "content": accumulated_text or None}
             if accumulated_tool_calls:
                 final_message["tool_calls"] = accumulated_tool_calls
