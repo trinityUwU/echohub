@@ -267,19 +267,9 @@ export function LogsPanel({ active }: { active: boolean }): React.ReactElement {
     return () => { alive = false; clearInterval(id) }
   }, [active])
 
+  // Subscribe to timings buffer — called immediately with buffered lines on mount
   React.useEffect(() => {
-    return onTimings(t => {
-      const sep = '─'.repeat(60)
-      const ppt = t.n_prompt > 0 ? (t.prompt_ms / t.n_prompt).toFixed(2) : '0.00'
-      const ept = t.n_eval > 0 ? (t.eval_ms / t.n_eval).toFixed(2) : '0.00'
-      setTimingsLines(prev => [
-        ...prev,
-        sep,
-        `prompt eval time = ${t.prompt_ms.toFixed(2).padStart(10)} ms / ${String(t.n_prompt).padStart(5)} tokens  (${ppt} ms per token, ${t.prompt_tps.toFixed(2)} tokens per second)`,
-        `       eval time = ${t.eval_ms.toFixed(2).padStart(10)} ms / ${String(t.n_eval).padStart(5)} tokens  (${ept} ms per token, ${t.eval_tps.toFixed(2)} tokens per second)`,
-        `      total time = ${(t.prompt_ms + t.eval_ms).toFixed(2).padStart(10)} ms / ${String(t.n_prompt + t.n_eval).padStart(5)} tokens`,
-      ])
-    })
+    return onTimings(lines => setTimingsLines(lines))
   }, [])
 
   React.useEffect(() => {

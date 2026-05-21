@@ -124,6 +124,85 @@ async def recompile_llama():
     )
 
 
+@router.get("/upgrade-llama-cpp")
+async def upgrade_llama_cpp():
+    """SSE stream — upgrade llama-cpp-python from GitHub to get latest features (ngram speculative, etc.)."""
+    pip = ROOT / "backend" / ".venv" / "bin" / "pip"
+
+    async def _stream():
+        if not pip.exists():
+            yield _sse("Backend venv not found — run full installer first", "error")
+            yield _done(False)
+            return
+
+        yield _step("Upgrading llama-cpp-python from GitHub")
+        yield _sse("This installs the latest pre-release with speculative decoding support.", "info")
+        yield _sse("Estimated time: 3–15 min depending on GPU (requires compilation).", "warn")
+
+        env = dict(os.environ)
+        gpu_type = _detect_gpu()
+
+        if gpu_type == "nvidia":
+            yield _sse("NVIDIA GPU — compiling with CUDA…")
+            is_arch = Path("/etc/arch-release").exists()
+            if is_arch and Path("/usr/bin/gcc-15").exists() and Path("/opt/cuda").exists():
+                env.update({
+                    "CUDA_PATH": "/opt/cuda",
+                    "PATH": f"/opt/cuda/bin:{env.get('PATH', '')}",
+                    "NVCC_CCBIN": "/usr/bin/gcc-15",
+                    "CMAKE_ARGS": (
+                        "-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=native"
+                        " -DCMAKE_CUDA_FLAGS=--allow-unsupported-compiler"
+                        " -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/gcc-15"
+                    ),
+                })
+            else:
+                env["CMAKE_ARGS"] = "-DGGML_CUDA=on"
+        elif gpu_type == "amd":
+            yield _sse("AMD GPU — compiling with ROCm/HIP…")
+            env["CMAKE_ARGS"] = "-DGGML_HIPBLAS=on"
+            env["LLAMA_HIPBLAS"] = "1"
+        elif gpu_type == "apple":
+            yield _sse("macOS — Metal backend")
+            env["CMAKE_ARGS"] = "-DGGML_METAL=on"
+        else:
+            yield _sse("No GPU — CPU backend")
+
+        proc = await asyncio.create_subprocess_exec(
+            str(pip), "install",
+            "llama-cpp-python @ git+https://github.com/abetlen/llama-cpp-python.git",
+            "--no-cache-dir", "--force-reinstall",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            env=env,
+        )
+
+        still_running_count = 0
+        start_ts = time.time()
+        async for line in proc.stdout:
+            text = line.decode(errors="replace").rstrip()
+            if text:
+                yield _sse(text)
+            else:
+                still_running_count += 1
+                if still_running_count % 20 == 0:
+                    elapsed = int(time.time() - start_ts)
+                    yield _sse(f"Still compiling… ({elapsed}s)")
+
+        await proc.wait()
+        if proc.returncode == 0:
+            yield _sse("Upgrade complete — restart EchoHub to apply.", "success")
+            yield _done(True)
+        else:
+            yield _sse(f"Compilation failed (exit {proc.returncode}).", "error")
+            yield _done(False)
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.get("/run")
 async def run_installer():
     """SSE stream for the full installation process."""

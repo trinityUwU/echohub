@@ -137,6 +137,33 @@ def check_mtp_support(model_id: str) -> dict:
         return {"mtp_supported": False, "model_id": model_id}
 
 
+@router.get("/llama/capabilities")
+def get_llama_capabilities() -> dict:
+    """Return which llama-cpp-python optional features are available in the current install."""
+    caps: dict = {}
+    try:
+        import llama_cpp
+        caps["version"] = getattr(llama_cpp, "__version__", "unknown")
+    except ImportError:
+        return {"version": None, "ngram": False, "mtp": False, "draft_model": False}
+
+    try:
+        from llama_cpp import LlamaPromptLookupDecoding  # noqa: F401
+        caps["ngram"] = True
+    except ImportError:
+        caps["ngram"] = False
+
+    try:
+        from llama_cpp import LlamaDraftModel  # noqa: F401
+        caps["mtp"] = True
+        caps["draft_model"] = True
+    except ImportError:
+        caps["mtp"] = False
+        caps["draft_model"] = False
+
+    return caps
+
+
 @router.get("/multi-gpu-config")
 def get_multi_gpu_config_endpoint() -> dict:
     """Retourne la config multi-GPU détectée : gpu_count, gpus, tensor_split suggéré."""
