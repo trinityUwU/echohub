@@ -17,7 +17,7 @@ from loguru import logger
 
 from backend.models.schemas import ModelInfo
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Format detection
@@ -126,7 +126,7 @@ def is_vllm_available() -> bool:
     except Exception:
         # Fallback: check legacy path relative to project root
         import glob as _glob
-        legacy = Path(__file__).resolve().parents[3] / ".venv-vllm"
+        legacy = Path(__file__).resolve().parents[2] / ".venv-vllm"
         if (legacy / "bin" / "python").exists():
             for sp in legacy.glob("lib/python*/site-packages"):
                 if (sp / "vllm").is_dir() or _glob.glob(str(sp / "vllm-*.dist-info")):

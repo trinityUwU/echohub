@@ -78,7 +78,7 @@ _eject_requested: bool = False
 _lock = threading.Lock()
 _load_config: Optional[dict] = None           # params used at last successful load
 
-LOG_PATH = Path(__file__).resolve().parents[3] / "logs" / "llama.log"
+LOG_PATH = Path(__file__).resolve().parents[2] / "logs" / "llama.log"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # GPU layer mapping
