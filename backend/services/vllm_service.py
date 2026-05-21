@@ -1,7 +1,6 @@
 import atexit
 import json
 import os
-import signal
 import subprocess
 import time
 from pathlib import Path
@@ -11,10 +10,18 @@ import httpx
 from loguru import logger
 
 from backend.models.schemas import ModelInfo
+from backend.services.vllm_process import (
+    VLLM_PID_FILE, _write_pid, _read_pid, _remove_pid, _kill_pid, _log_vram_freed,
+)
+from backend.services.vllm_vram import (
+    VRAM_SAFETY_MARGIN, VRAM_FIXED_OVERHEAD_MB, VRAM_SAMPLE_WINDOW,
+    record_vram_sample, compute_safe_gpu_utilization, _parse_suggested_max_len,
+)
 
-VLLM_PID_FILE = Path("/tmp/echohub_vllm.pid")
 VLLM_PORT = 37823
 VLLM_BASE_URL = f"http://127.0.0.1:{VLLM_PORT}"
+
+
 def _get_vllm_python(version: Optional[str] = None) -> Path:
     """Get vLLM python for a specific version, or the default."""
     try:
@@ -35,13 +42,9 @@ def _get_vllm_python(version: Optional[str] = None) -> Path:
 # Kept for backward compat — actual path resolved dynamically
 VLLM_PYTHON = Path(__file__).resolve().parents[2] / ".venv-vllm" / "bin" / "python"
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-VRAM_SAFETY_MARGIN = 0.03   # 3% of total reserved
-VRAM_FIXED_OVERHEAD_MB = 1536  # 1.5GB fixed: vLLM process startup, NCCL, CUDA graphs
-VRAM_SAMPLE_WINDOW = 10    # last N nvidia-smi samples for baseline
 
 _current_model: Optional[ModelInfo] = None
 _vllm_proc: Optional[subprocess.Popen] = None
-_vram_samples: list[int] = []  # used MB samples
 _loading_model_id: Optional[str] = None  # set during async load
 _load_error: Optional[str] = None        # last load error message
 _eject_requested: bool = False           # set by unload_model() to abort in-progress load
@@ -51,57 +54,6 @@ _load_config: Optional[dict] = None      # params used at last successful load
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-def _write_pid(pid: int) -> None:
-    VLLM_PID_FILE.write_text(str(pid))
-
-
-def _read_pid() -> Optional[int]:
-    if VLLM_PID_FILE.exists():
-        try:
-            return int(VLLM_PID_FILE.read_text().strip())
-        except ValueError:
-            return None
-    return None
-
-
-def _remove_pid() -> None:
-    VLLM_PID_FILE.unlink(missing_ok=True)
-
-
-def _kill_pid(pid: int) -> None:
-    """Kill a process by PID, wait for it to die."""
-    try:
-        os.kill(pid, signal.SIGTERM)
-        for _ in range(30):  # wait up to 3s
-            time.sleep(0.1)
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                logger.info(f"vLLM PID {pid} terminated")
-                return
-        # Force kill if still alive
-        os.kill(pid, signal.SIGKILL)
-        logger.warning(f"vLLM PID {pid} force-killed with SIGKILL")
-    except ProcessLookupError:
-        logger.info(f"vLLM PID {pid} already gone")
-
-
-def _log_vram_freed() -> None:
-    """Log nvidia-smi VRAM after unload for verification."""
-    try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.used,memory.free", "--format=csv,noheader,nounits"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            used, free = result.stdout.strip().split(",")
-            logger.info(f"VRAM after unload — used: {used.strip()} MB, free: {free.strip()} MB")
-    except Exception as e:
-        logger.warning(f"Could not verify VRAM after unload: {e}")
-
 
 def _wait_vllm_ready(timeout: int = 300) -> bool:
     """Poll vLLM /health until ready, timeout, or eject requested."""
@@ -127,73 +79,6 @@ def _wait_vllm_ready(timeout: int = 300) -> bool:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-
-def record_vram_sample() -> None:
-    """Called periodically by gpu_service to track baseline VRAM usage."""
-    try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=3,
-        )
-        if result.returncode == 0:
-            used_mb, total_mb = [int(x.strip()) for x in result.stdout.strip().split(",")]
-            _vram_samples.append(used_mb)
-            if len(_vram_samples) > VRAM_SAMPLE_WINDOW:
-                _vram_samples.pop(0)
-    except Exception:
-        pass
-
-
-def compute_safe_gpu_utilization() -> tuple[float, int, int]:
-    """
-    Returns (gpu_memory_utilization, baseline_used_mb, total_mb).
-    Uses average of recent VRAM samples as baseline, reserves 2% margin.
-    """
-    try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=3,
-        )
-        if result.returncode != 0:
-            return 0.70, 0, 0
-        current_used_mb, total_mb = [int(x.strip()) for x in result.stdout.strip().split(",")]
-
-        # Use max of recent samples + current to avoid underestimating
-        baseline_mb = max(_vram_samples + [current_used_mb]) if _vram_samples else current_used_mb
-        free_mb = total_mb - baseline_mb
-        # Apply 2% margin + 1GB fixed overhead for vLLM process startup
-        safe_mb = free_mb - int(total_mb * VRAM_SAFETY_MARGIN) - VRAM_FIXED_OVERHEAD_MB
-        utilization = round(safe_mb / total_mb, 3)
-        utilization = max(0.50, min(utilization, 0.95))  # clamp 50%-95%
-
-        logger.info(
-            f"VRAM baseline: {baseline_mb} MB used / {total_mb} MB total — "
-            f"safe allocation: {safe_mb} MB ({utilization:.1%})"
-        )
-        return utilization, baseline_mb, total_mb
-    except Exception as e:
-        logger.warning(f"compute_safe_gpu_utilization failed: {e} — using 0.70 fallback")
-        return 0.70, 0, 0
-
-
-def _parse_suggested_max_len(log_content: str = "") -> Optional[int]:
-    """Parse vLLM log for 'estimated maximum model length is X' after a KV cache OOM."""
-    import re
-    if not log_content:
-        try:
-            log_content = (_PROJECT_ROOT / "logs" / "vllm.log").read_text(errors="replace")
-        except Exception:
-            return None
-    m = re.search(r'estimated maximum model length is (\d+)', log_content)
-    if m:
-        suggested = int(m.group(1))
-        # Round down to nearest power of 2 for clean context sizes
-        p2 = 1
-        while p2 * 2 <= suggested:
-            p2 *= 2
-        return p2
-    return None
-
 
 def kill_stale_pid() -> None:
     """On startup: kill any leftover vLLM process from a previous crash."""
@@ -252,229 +137,184 @@ def load_model_async(model_path: str, model_id: str,
     threading.Thread(target=_run, daemon=True, name=f"load-{model_id}").start()
 
 
+_FALLBACK_CHAT_TEMPLATE = (
+    "{% for message in messages %}"
+    "{% if message['role'] == 'system' %}<|im_start|>system\n{{ message['content'] }}<|im_end|>\n{% endif %}"
+    "{% if message['role'] == 'user' %}<|im_start|>user\n{{ message['content'] }}<|im_end|>\n<|im_start|>assistant\n{% endif %}"
+    "{% if message['role'] == 'assistant' %}{{ message['content'] }}<|im_end|>\n{% endif %}"
+    "{% endfor %}"
+)
+
+
+def _resolve_max_model_len(model_path: str, max_model_len: Optional[int], is_vision: bool) -> int:
+    if is_vision:
+        if max_model_len is None:
+            logger.info("Vision model — defaulting max_model_len to 4096")
+            return 4096
+        if max_model_len > 4096:
+            logger.warning(f"Vision model with max_model_len={max_model_len} — may OOM on 12GB VRAM")
+        return max_model_len
+    if max_model_len is None:
+        logger.info("max_model_len not specified — defaulting to 4096 (safe for 12GB VRAM)")
+        return 4096
+    if max_model_len > 8192:
+        logger.warning(f"max_model_len={max_model_len} is large — may OOM on 12GB VRAM")
+    return max_model_len
+
+
+def _build_vllm_cmd(
+    model_path: str, model_id: str, gpu_memory_utilization: float,
+    max_model_len: int, is_vision: bool, enforce_eager: bool,
+    max_cudagraph_capture_size: Optional[int], tensor_parallel_size: Optional[int],
+    pipeline_parallel_size: Optional[int], python_override: Optional[str],
+) -> list[str]:
+    py = str(Path(python_override) if python_override else _get_vllm_python())
+    cmd = [py, "-m", "vllm.entrypoints.openai.api_server",
+           "--model", model_path, "--served-model-name", model_id,
+           "--port", str(VLLM_PORT), "--host", "127.0.0.1",
+           "--gpu-memory-utilization", str(gpu_memory_utilization),
+           "--trust-remote-code", "--max-model-len", str(max_model_len)]
+    if is_vision:
+        cmd += ["--enforce-eager", "--limit-mm-per-prompt", '{"image": 4, "video": 0}', "--skip-mm-profiling"]
+    else:
+        cmd += ["--language-model-only"]
+        if enforce_eager:
+            cmd += ["--enforce-eager"]
+        elif max_cudagraph_capture_size is not None:
+            cmd += ["--max-cudagraph-capture-size", str(max_cudagraph_capture_size)]
+    cmd += ["--no-enable-flashinfer-autotune"]
+    if tensor_parallel_size and tensor_parallel_size > 1:
+        cmd.extend(["--tensor-parallel-size", str(tensor_parallel_size)])
+    if pipeline_parallel_size and pipeline_parallel_size > 1:
+        cmd.extend(["--pipeline-parallel-size", str(pipeline_parallel_size)])
+    # Fallback chat template if model has none
+    has_template = False
+    try:
+        import json as _j
+        tc = Path(model_path) / "tokenizer_config.json"
+        if tc.exists():
+            has_template = bool(_j.loads(tc.read_text(errors="ignore")).get("chat_template"))
+    except Exception:
+        pass
+    if not has_template:
+        cmd += ["--chat-template", _FALLBACK_CHAT_TEMPLATE]
+    return cmd
+
+
+def _handle_load_failure(
+    log_path: Path, log_file: object,  # type: ignore[type-arg]
+    model_path: str, model_id: str, gpu_memory_utilization: float,
+    max_model_len: int, python_override: Optional[str],
+    tensor_parallel_size: Optional[int], pipeline_parallel_size: Optional[int],
+) -> None:
+    """Parse vLLM failure log and retry or raise with clear message."""
+    log_content = ""
+    try:
+        log_file.flush()  # type: ignore[attr-defined]
+        log_content = log_path.read_text(errors="replace")
+    except Exception:
+        pass
+    suggested_len = _parse_suggested_max_len(log_content)
+    is_util_oom = ("Free memory on device" in log_content
+                   and "is less than desired GPU memory utilization" in log_content)
+    unload_model()
+    if _eject_requested:
+        raise RuntimeError("Ejected by user")
+    if suggested_len and suggested_len < max_model_len:
+        logger.warning(f"KV cache OOM — retrying with max_model_len={suggested_len}")
+        load_model(model_path=model_path, model_id=model_id,
+                   gpu_memory_utilization=gpu_memory_utilization, max_model_len=suggested_len,
+                   python_override=python_override, tensor_parallel_size=tensor_parallel_size,
+                   pipeline_parallel_size=pipeline_parallel_size)
+        return
+    if is_util_oom and gpu_memory_utilization > 0.55:
+        reduced = round(gpu_memory_utilization - 0.03, 2)
+        logger.warning(f"GPU util OOM — retrying with gpu_memory_utilization={reduced}")
+        load_model(model_path=model_path, model_id=model_id,
+                   gpu_memory_utilization=reduced, max_model_len=max_model_len,
+                   python_override=python_override, tensor_parallel_size=tensor_parallel_size,
+                   pipeline_parallel_size=pipeline_parallel_size)
+        return
+    if "input size is not aligned with the quantized weight shape" in log_content:
+        raise RuntimeError(
+            f"AWQ alignment error: multimodal architecture incompatible with AWQ in vLLM {_vllm_version()}. "
+            "Use a GGUF version instead."
+        )
+    root_cause = next(
+        (ln.split("Error:")[-1].strip()[:200] for ln in reversed(log_content.splitlines())
+         if any(t in ln for t in ("ValueError:", "RuntimeError:", "OSError:"))),
+        ""
+    )
+    raise RuntimeError(root_cause or (
+        "Not enough VRAM — lower GPU utilization % or reduce context length."
+        if is_util_oom else "vLLM failed to start — check model compatibility."
+    ))
+
+
+def _resolve_active_version(python_override: Optional[str]) -> Optional[str]:
+    try:
+        from backend.services.vllm_manager import get_default_python as _gp, list_versions as _lv
+        active_py = str(python_override) if python_override else str(_gp())
+        return next((v["version"] for v in _lv() if v["path"] in active_py), None)
+    except Exception:
+        return None
+
+
 def load_model(model_path: str, model_id: str, gpu_memory_utilization: Optional[float] = None,
-               max_model_len: Optional[int] = None,
-               enforce_eager: bool = False,
+               max_model_len: Optional[int] = None, enforce_eager: bool = False,
                max_cudagraph_capture_size: Optional[int] = None,
                python_override: Optional[str] = None,
                tensor_parallel_size: Optional[int] = None,
                pipeline_parallel_size: Optional[int] = None) -> None:
     """Launch vLLM subprocess serving model_path on VLLM_PORT."""
     global _current_model, _vllm_proc, _eject_requested, _load_config
-
-    _eject_requested = False  # reset from any previous eject
-
+    _eject_requested = False
     if _vllm_proc is not None:
         raise RuntimeError("A model is already loaded. Unload it first.")
-
-    # Auto-compute safe utilization from current VRAM state
     if gpu_memory_utilization is None:
         gpu_memory_utilization, _, _ = compute_safe_gpu_utilization()
 
     model_lower = model_path.lower()
-    # Detect vision by name pattern AND by presence of preprocessor_config.json
-    _has_mm_config = (Path(model_path) / "preprocessor_config.json").exists()
-    is_vision = _has_mm_config or any(k in model_lower for k in ("-vl", "vl-", "vision", "qwen2-vl", "qwen2vl"))
+    is_vision = ((Path(model_path) / "preprocessor_config.json").exists()
+                 or any(k in model_lower for k in ("-vl", "vl-", "vision", "qwen2-vl", "qwen2vl")))
+    max_model_len = _resolve_max_model_len(model_path, max_model_len, is_vision)
 
-    if is_vision:
-        # Vision encoder adds heavy overhead — default to 4096 if not specified
-        if max_model_len is None:
-            max_model_len = 4096
-            logger.info("Vision model — defaulting max_model_len to 4096")
-        elif max_model_len > 4096:
-            logger.warning(f"Vision model with max_model_len={max_model_len} — may OOM on 12GB VRAM")
-    else:
-        # Default to 4096 only when user hasn't specified — user-provided values are respected
-        if max_model_len is None:
-            max_model_len = 4096
-            logger.info("max_model_len not specified — defaulting to 4096 (safe for 12GB VRAM)")
-        elif max_model_len > 8192:
-            logger.warning(f"max_model_len={max_model_len} is large — may OOM on 12GB VRAM")
-
-    env = {
-        **os.environ,
-        "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
-        "VLLM_USE_FLASHINFER_SAMPLER": "0",          # FlashInfer JIT requires nvcc
-        "VLLM_WORKER_MULTIPROC_METHOD": "spawn",
-        # CUDA graph profiling enabled (default in v0.21) — user-facing utilization
-        # is corrected below to account for the ~15% overhead
-    }
-
-    cmd = [
-        str(Path(python_override) if python_override else _get_vllm_python()), "-m", "vllm.entrypoints.openai.api_server",
-        "--model", model_path,
-        "--served-model-name", model_id,  # expose HF id, not local path
-        "--port", str(VLLM_PORT),
-        "--host", "127.0.0.1",
-        "--gpu-memory-utilization", str(gpu_memory_utilization),
-        "--trust-remote-code",
-    ]
-    if max_model_len is not None:
-        cmd += ["--max-model-len", str(max_model_len)]
-    if is_vision:
-        cmd += [
-            "--enforce-eager",
-            "--limit-mm-per-prompt", '{"image": 4, "video": 0}',
-            "--skip-mm-profiling",
-        ]
-    else:
-        cmd += ["--language-model-only"]
-        if enforce_eager:
-            cmd += ["--enforce-eager"]
-            logger.info("CUDA graphs disabled (enforce-eager)")
-        elif max_cudagraph_capture_size is not None:
-            cmd += ["--max-cudagraph-capture-size", str(max_cudagraph_capture_size)]
-            logger.info(f"CUDA graph max-capture-size: {max_cudagraph_capture_size}")
-    # Disable FlashInfer JIT sampling — requires nvcc which is not installed
-    cmd += ["--no-enable-flashinfer-autotune"]
-
-    if tensor_parallel_size and tensor_parallel_size > 1:
-        cmd.extend(["--tensor-parallel-size", str(tensor_parallel_size)])
-        logger.info(f"[vLLM] tensor_parallel_size={tensor_parallel_size}")
-
-    if pipeline_parallel_size and pipeline_parallel_size > 1:
-        cmd.extend(["--pipeline-parallel-size", str(pipeline_parallel_size)])
-        logger.info(f"[vLLM] pipeline_parallel_size={pipeline_parallel_size}")
-
-    # Fallback chat template for models without one (e.g. older Mistral AWQ)
-    # Chatml is widely compatible and safe as fallback
-    _FALLBACK_TEMPLATE = (
-        "{% for message in messages %}"
-        "{% if message['role'] == 'system' %}<|im_start|>system\n{{ message['content'] }}<|im_end|>\n{% endif %}"
-        "{% if message['role'] == 'user' %}<|im_start|>user\n{{ message['content'] }}<|im_end|>\n<|im_start|>assistant\n{% endif %}"
-        "{% if message['role'] == 'assistant' %}{{ message['content'] }}<|im_end|>\n{% endif %}"
-        "{% endfor %}"
-    )
-    has_template = False
-    try:
-        import json as _json_check
-        tc = Path(model_path) / "tokenizer_config.json"
-        if tc.exists():
-            cfg = _json_check.loads(tc.read_text(errors="ignore"))
-            has_template = bool(cfg.get("chat_template"))
-    except Exception:
-        pass
-    if not has_template:
-        cmd += ["--chat-template", _FALLBACK_TEMPLATE]
-        logger.info("No chat template found — using chatml fallback")
-
+    cmd = _build_vllm_cmd(model_path, model_id, gpu_memory_utilization, max_model_len,
+                           is_vision, enforce_eager, max_cudagraph_capture_size,
+                           tensor_parallel_size, pipeline_parallel_size, python_override)
     logger.info(f"Starting vLLM: {' '.join(cmd)}")
-
     log_path = _PROJECT_ROOT / "logs" / "vllm.log"
     log_file = open(log_path, "w")
-    _vllm_log_path = log_path  # store for _parse_suggested_max_len
-
-    _vllm_proc = subprocess.Popen(
-        cmd,
-        stdout=log_file,
-        stderr=log_file,
-        start_new_session=True,
-        env=env,
-    )
+    env = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+           "VLLM_USE_FLASHINFER_SAMPLER": "0", "VLLM_WORKER_MULTIPROC_METHOD": "spawn"}
+    _vllm_proc = subprocess.Popen(cmd, stdout=log_file, stderr=log_file, start_new_session=True, env=env)
     _write_pid(_vllm_proc.pid)
     logger.info(f"vLLM started with PID {_vllm_proc.pid}")
 
-    # Check eject immediately after spawn (user may have clicked while we were building the cmd)
     if _eject_requested:
-        logger.info("Eject requested before ready wait — killing vLLM")
         unload_model()
         raise RuntimeError("Ejected by user")
 
     if not _wait_vllm_ready():
-        # Capture log content NOW before unload kills process or log gets overwritten on retry
-        log_content = ""
-        try:
-            log_file.flush()
-            log_content = log_path.read_text(errors="replace")
-        except Exception:
-            pass
-        suggested_len = _parse_suggested_max_len(log_content)
-        is_util_oom = "Free memory on device" in log_content and "is less than desired GPU memory utilization" in log_content
-        unload_model()
-        if _eject_requested:
-            raise RuntimeError("Ejected by user")
+        _handle_load_failure(log_path, log_file, model_path, model_id, gpu_memory_utilization,
+                             max_model_len, python_override, tensor_parallel_size, pipeline_parallel_size)
+        return
 
-        # Retry: KV cache OOM → reduce context
-        if suggested_len and (max_model_len is None or suggested_len < max_model_len):
-            logger.warning(f"KV cache OOM — auto-retrying with max_model_len={suggested_len}")
-            load_model(model_path=model_path, model_id=model_id,
-                       gpu_memory_utilization=gpu_memory_utilization, max_model_len=suggested_len,
-                       python_override=python_override,
-                       tensor_parallel_size=tensor_parallel_size,
-                       pipeline_parallel_size=pipeline_parallel_size)
-            return
-
-        # Retry: GPU util OOM → reduce utilization by 3%
-        if is_util_oom and gpu_memory_utilization is not None and gpu_memory_utilization > 0.55:
-            reduced = round(gpu_memory_utilization - 0.03, 2)
-            logger.warning(f"GPU util OOM — auto-retrying with gpu_memory_utilization={reduced}")
-            load_model(model_path=model_path, model_id=model_id,
-                       gpu_memory_utilization=reduced, max_model_len=max_model_len,
-                       python_override=python_override,
-                       tensor_parallel_size=tensor_parallel_size,
-                       pipeline_parallel_size=pipeline_parallel_size)
-            return
-
-        # Known incompatibility patterns — fail fast with clear message
-        if "input size is not aligned with the quantized weight shape" in log_content:
-            raise RuntimeError(
-                f"AWQ alignment error: this model has a multimodal (vision+text) architecture "
-                f"incompatible with AWQ quantization in vLLM {_vllm_version()}. "
-                "Look for a GGUF version of this model on HuggingFace."
-            )
-
-        # Extract root cause from vLLM log
-        root_cause = ""
-        for line in reversed(log_content.splitlines()):
-            if "ValueError:" in line or "RuntimeError:" in line or "OSError:" in line:
-                root_cause = line.split("Error:")[-1].strip()[:200]
-                break
-
-        raise RuntimeError(
-            root_cause if root_cause
-            else ("Not enough VRAM — lower GPU utilization % or reduce context length."
-                  if is_util_oom else "vLLM failed to start — check model compatibility.")
-        )
-
-    # Resolve active vllm version
-    try:
-        from backend.services.vllm_manager import get_default_python as _gp
-        _active_py = str(python_override) if python_override else str(_gp())
-        _active_version = None
-        from backend.services.vllm_manager import list_versions as _lv
-        for _v in _lv():
-            if _v["path"] in _active_py:
-                _active_version = _v["version"]
-                break
-    except Exception:
-        _active_version = None
-
-    _current_model = ModelInfo(
-        id=model_id,
-        name=model_id.split("/")[-1],
-        downloaded=True,
-        loaded=True,
-        max_context_window=max_model_len,
-        engine="vllm",
-    )
-    _load_config = {
-        "engine": "vllm",
-        "gpu_memory_utilization": gpu_memory_utilization,
-        "max_model_len": max_model_len,
-        "vllm_version": _active_version,
-        "gguf_path": model_path if model_path.endswith(".gguf") else None,
-        "tensor_parallel_size": tensor_parallel_size,
-        "pipeline_parallel_size": pipeline_parallel_size,
-    }
-
-    # Persist to DB
+    active_version = _resolve_active_version(python_override)
+    _current_model = ModelInfo(id=model_id, name=model_id.split("/")[-1],
+                               downloaded=True, loaded=True,
+                               max_context_window=max_model_len, engine="vllm")
+    _load_config = {"engine": "vllm", "gpu_memory_utilization": gpu_memory_utilization,
+                    "max_model_len": max_model_len, "vllm_version": active_version,
+                    "gguf_path": model_path if model_path.endswith(".gguf") else None,
+                    "tensor_parallel_size": tensor_parallel_size,
+                    "pipeline_parallel_size": pipeline_parallel_size}
     try:
         from backend.services.db import set_app_state
-        set_app_state(f"engine:{model_id}", f"vllm:{_active_version or '?'}")
+        set_app_state(f"engine:{model_id}", f"vllm:{active_version or '?'}")
     except Exception:
         pass
-
-    logger.info(f"Model loaded: {model_id} (vLLM {_active_version})")
+    logger.info(f"Model loaded: {model_id} (vLLM {active_version})")
 
 
 def unload_model() -> None:
@@ -509,146 +349,30 @@ def get_status() -> Optional[ModelInfo]:
     return _current_model
 
 
-async def generate(
-    messages: list[dict],
-    stream: bool = True,
-    temperature: float = 0.7,
-    max_tokens: int = 2048,
-    top_p: float = 0.95,
-    top_k: int = -1,
-    repetition_penalty: float = 1.1,
-    presence_penalty: float = 0.0,
-    frequency_penalty: float = 0.0,
-    stop: Optional[list[str]] = None,
-):
-    """Proxy chat completion request to vLLM's OpenAI-compatible API.
+# ---------------------------------------------------------------------------
+# Re-export generation functions for backward compat
+# ---------------------------------------------------------------------------
+from backend.services.vllm_generate import generate, generate_with_tools  # noqa: E402
 
-    When stream=True, yields raw SSE data strings.
-    When stream=False, returns the full response dict.
-    """
-    if _current_model is None:
-        raise RuntimeError("No model loaded")
-
-    # Ask vLLM what model name it's actually serving (path vs HF id depends on version)
-    try:
-        async with httpx.AsyncClient(timeout=5) as c:
-            r = await c.get(f"{VLLM_BASE_URL}/v1/models")
-            actual_model_id = r.json()["data"][0]["id"]
-    except Exception:
-        actual_model_id = _current_model.id
-
-    # Clip max_tokens to avoid vLLM 400 when prompt + max_tokens > max_model_len
-    safe_max_tokens = max_tokens
-    if _current_model and _current_model.max_context_window:
-        # Estimate prompt token count conservatively (4 chars ~ 1 token)
-        prompt_chars = sum(len(str(m.get("content", ""))) for m in messages)
-        estimated_prompt_tokens = prompt_chars // 4 + 64  # 64 = overhead for roles/special tokens
-        budget = _current_model.max_context_window - estimated_prompt_tokens
-        if budget > 0:
-            safe_max_tokens = min(max_tokens, budget)
-        else:
-            safe_max_tokens = 128  # context full — allow short reply
-
-    payload: dict = {
-        "model": actual_model_id,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": safe_max_tokens,
-        "top_p": top_p,
-        "repetition_penalty": repetition_penalty,
-        "presence_penalty": presence_penalty,
-        "frequency_penalty": frequency_penalty,
-        "stream": stream,
-    }
-
-    # top_k: vLLM errors on -1 in some versions, only include if > 0
-    if top_k > 0:
-        payload["top_k"] = top_k
-
-    if stop:
-        payload["stop"] = stop
-
-    if stream:
-        payload["stream_options"] = {"include_usage": True}
-
-    if stream:
-        async with httpx.AsyncClient(timeout=300) as client:
-            async with client.stream(
-                "POST",
-                f"{VLLM_BASE_URL}/v1/chat/completions",
-                json=payload,
-            ) as resp:
-                if resp.status_code >= 400:
-                    body = await resp.aread()
-                    logger.error(f"vLLM {resp.status_code}: {body.decode(errors='replace')} | payload_msgs={[m['role'] for m in payload.get('messages', [])]}")
-                    resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if line:
-                        yield line
-    else:
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(
-                f"{VLLM_BASE_URL}/v1/chat/completions",
-                json=payload,
-            )
-            if resp.status_code >= 400:
-                logger.error(f"vLLM {resp.status_code}: {resp.text} | payload_msgs={[m['role'] for m in payload.get('messages', [])]}")
-            resp.raise_for_status()
-            yield resp.json()
-
-
-async def generate_with_tools(
-    messages: list[dict],
-    tools: list[dict],
-    temperature: float = 0.2,
-    max_tokens: int = 2048,
-    stop_event=None,
-    **kwargs,
-):
-    """vLLM tool-use via OpenAI-compatible API. Yields raw SSE lines (streaming)."""
-    if _current_model is None:
-        raise RuntimeError("No model loaded")
-
-    try:
-        async with httpx.AsyncClient(timeout=5) as c:
-            r = await c.get(f"{VLLM_BASE_URL}/v1/models")
-            actual_model_id = r.json()["data"][0]["id"]
-    except Exception:
-        actual_model_id = _current_model.id
-
-    safe_max_tokens = max_tokens
-    if _current_model and _current_model.max_context_window:
-        prompt_chars = sum(len(str(m.get("content", ""))) for m in messages)
-        estimated_prompt_tokens = prompt_chars // 4 + 64
-        budget = _current_model.max_context_window - estimated_prompt_tokens
-        safe_max_tokens = min(max_tokens, budget) if budget > 0 else 128
-
-    payload: dict = {
-        "model": actual_model_id,
-        "messages": messages,
-        "tools": tools,
-        "tool_choice": "auto",
-        "temperature": temperature,
-        "max_tokens": safe_max_tokens,
-        "stream": True,
-        "stream_options": {"include_usage": True},
-    }
-
-    async with httpx.AsyncClient(timeout=300) as client:
-        async with client.stream(
-            "POST",
-            f"{VLLM_BASE_URL}/v1/chat/completions",
-            json=payload,
-        ) as resp:
-            if resp.status_code >= 400:
-                body = await resp.aread()
-                logger.error(f"vLLM tools {resp.status_code}: {body.decode(errors='replace')}")
-                resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if stop_event and stop_event.is_set():
-                    break
-                if line:
-                    yield line
+__all__ = [
+    "VLLM_BASE_URL",
+    "VLLM_PORT",
+    "VLLM_PID_FILE",
+    "VLLM_PYTHON",
+    "_current_model",
+    "load_model",
+    "load_model_async",
+    "unload_model",
+    "get_status",
+    "get_load_state",
+    "get_load_config",
+    "kill_stale_pid",
+    "record_vram_sample",
+    "compute_safe_gpu_utilization",
+    "cleanup",
+    "generate",
+    "generate_with_tools",
+]
 
 
 def cleanup() -> None:

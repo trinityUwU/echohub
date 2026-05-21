@@ -235,13 +235,8 @@ def _find_tsc() -> str | None:
 # Main entry point
 # ──────────────────────────────────────────────────────────────────────────────
 
-def validate_file(path: str, content: str) -> HarnessResult:
-    """
-    Run validation pipeline on file content.
-    Called synchronously before sub-agent continues after a file mutation.
-    """
-    lang = detect_language(path, content)
-
+def _run_layers(lang: str, content: str, path: str) -> tuple[LayerResult, LayerResult, LayerResult]:
+    """Run syntax + lint + types layers for a given language."""
     syntax = LayerResult(ok=True)
     lint = LayerResult(ok=True)
     types = LayerResult(ok=True)
@@ -250,18 +245,22 @@ def validate_file(path: str, content: str) -> HarnessResult:
         syntax = _syntax_python(content)
         if syntax.ok:
             lint = _lint_python(content, path)
-
     elif lang in ("typescript", "javascript"):
         syntax = _syntax_typescript(content, path)
         lint = _lint_typescript(content, path)
-
     elif lang == "json":
         try:
             json.loads(content)
         except (json.JSONDecodeError, ValueError) as e:
             syntax = LayerResult(ok=False, errors=[{"line": 0, "msg": str(e), "severity": "fatal"}])
 
-    # Compute overall severity
+    return syntax, lint, types
+
+
+def _compute_overall(
+    syntax: LayerResult, lint: LayerResult, types: LayerResult
+) -> tuple[Overall, list[str]]:
+    """Compute overall severity and actionable messages from layer results."""
     all_errors = syntax.errors + lint.errors + types.errors
     all_warnings = syntax.warnings + lint.warnings + types.warnings
 
@@ -274,30 +273,28 @@ def validate_file(path: str, content: str) -> HarnessResult:
     else:
         overall = "ok"
 
-    # Actionable messages for the agent
     actionable: list[str] = []
     for e in all_errors:
         line = e.get("line", 0)
         prefix = f"line {line}: " if line else ""
         actionable.append(f"{prefix}{e.get('msg', '')} [{e.get('rule', e.get('severity', ''))}]")
-    for w in all_warnings[:5]:  # cap warnings to avoid flooding context
+    for w in all_warnings[:5]:
         line = w.get("line", 0)
         prefix = f"line {line}: " if line else ""
         actionable.append(f"{prefix}{w.get('msg', '')} [warning/{w.get('rule', '')}]")
 
-    result = HarnessResult(
-        file=path,
-        language=lang,
-        syntax=syntax,
-        lint=lint,
-        types=types,
-        overall=overall,
-        actionable=actionable,
-    )
+    return overall, actionable
 
+
+def validate_file(path: str, content: str) -> HarnessResult:
+    """Run validation pipeline. Called synchronously after a sub-agent file mutation."""
+    lang = detect_language(path, content)
+    syntax, lint, types = _run_layers(lang, content, path)
+    overall, actionable = _compute_overall(syntax, lint, types)
+    result = HarnessResult(file=path, language=lang, syntax=syntax, lint=lint,
+                           types=types, overall=overall, actionable=actionable)
     if overall != "ok":
         logger.debug("[harness] {} — {} — {} actionable items", path, overall, len(actionable))
-
     return result
 
 
