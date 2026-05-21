@@ -260,7 +260,12 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
           if (!isSseEvent(raw)) continue
 
           // Helper — update message + token counter after every content change
-          const updateAccumulated = (snap: string): void => {
+          const RENDER_INTERVAL_MS = 80
+          let lastRenderTime = 0
+          const updateAccumulated = (snap: string, force = false): void => {
+            const now = Date.now()
+            if (!force && now - lastRenderTime < RENDER_INTERVAL_MS) return
+            lastRenderTime = now
             const historyChars = messagesRef.current.reduce((sum, m) => {
               const c = typeof m.content === 'string' ? m.content : ''
               return sum + c.length
@@ -313,6 +318,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
               return updated
             })
           } else if (raw.type === 'done') {
+            updateAccumulated(accumulated, true) // flush last chunk
             setWorkspaceFiles(raw.files)
             setStreaming(false)
             // Final token count from full context
