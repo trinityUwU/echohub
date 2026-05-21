@@ -132,8 +132,10 @@ export function LoadModelModal({ model, vramTotalGb, vramUsedGb, gpu, conversati
     // Reasoning/thinking models need more ctx — system prompt + thinking tokens eat 1-3K before user input
     const isReasoning = /reasoning|thinking|distill|qwq|deepseek-r|r1/i.test(model.id + ' ' + model.name)
     const minCtx = isReasoning ? 8192 : 4096
+    // Hard cap at 16K — beyond that KV cache dominates VRAM and kills decode speed on 12GB
+    const smartCtxCap = 16384
     const baseCtx = conversationTokens && conversationTokens > 1024
-      ? Math.min(32768, Math.max(minCtx, Math.pow(2, Math.ceil(Math.log2(conversationTokens * 2)))))
+      ? Math.min(smartCtxCap, Math.max(minCtx, Math.pow(2, Math.ceil(Math.log2(conversationTokens * 2)))))
       : minCtx
     return Math.min(baseCtx, model.max_context_window ?? 32768)
   })
