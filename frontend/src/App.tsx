@@ -322,6 +322,12 @@ export default function App(): React.ReactElement {
           vramTotalGb={gpu.vram_total_mb / 1024}
           vramUsedGb={gpu.vram_used_mb / 1024}
           gpu={gpu}
+          conversationTokens={Math.round(
+            activeMessages.reduce((sum, m) => {
+              const txt = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+              return sum + txt.length / 3
+            }, 0)
+          )}
           onConfirm={confirmLoad}
           onCancel={() => setPendingLoad(null)}
         />

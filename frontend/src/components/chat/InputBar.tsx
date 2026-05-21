@@ -374,19 +374,21 @@ function ParamChip({ label }: { label: string }): React.ReactElement {
 
 function ContextBar({ used, max, exact }: { used: number; max: number; exact: boolean }): React.ReactElement {
   const pct = Math.min(used / max, 1)
-  const color = pct >= 0.9 ? 'bg-red' : pct >= 0.75 ? 'bg-yellow-500' : 'bg-accent'
+  const color = pct >= 0.95 ? 'bg-red' : pct >= 0.80 ? 'bg-orange-500' : pct >= 0.60 ? 'bg-yellow-500' : 'bg-accent'
+  const textColor = pct >= 0.95 ? 'text-red' : pct >= 0.80 ? 'text-orange-400' : pct >= 0.60 ? 'text-yellow-400' : 'text-text-muted'
   const usedK = used >= 1000 ? `${(used / 1000).toFixed(1)}K` : `${used}`
   const maxK = max >= 1000 ? `${(max / 1000).toFixed(0)}K` : `${max}`
+  const tooltip = `${Math.round(pct * 100)}% used · ${usedK} / ${maxK} tokens · auto-compact at 75%`
 
   return (
-    <div className="mt-2 mb-0.5 px-0.5 flex items-center gap-2">
+    <div className="mt-2 mb-0.5 px-0.5 flex items-center gap-2" title={tooltip}>
       <div className="flex-1 h-[3px] bg-overlay rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-300 ${color}`}
           style={{ width: `${pct * 100}%` }}
         />
       </div>
-      <span className="text-xs text-text-muted tabular-nums flex-shrink-0">
+      <span className={`text-xs tabular-nums flex-shrink-0 transition-colors ${textColor}`}>
         {!exact && <span className="opacity-50 mr-0.5">~</span>}{usedK} / {maxK} ctx
       </span>
     </div>

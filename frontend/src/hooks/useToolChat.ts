@@ -186,7 +186,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     const { maxContextTokens } = optionsRef.current
     if (maxContextTokens) {
       const currentTokens = usedTokensRef.current + Math.round(text.length / 4)
-      if (currentTokens >= maxContextTokens * 0.98) {
+      if (currentTokens >= maxContextTokens * 0.75) {
         await compact()
       }
     }
