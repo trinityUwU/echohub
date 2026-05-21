@@ -15,10 +15,31 @@ export interface Toast {
 
 type Listener = (toasts: Toast[]) => void
 
+const STORAGE_KEY = 'echohub:notifications'
+
+function _loadHistory(): Toast[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function _saveHistory(history: Toast[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(history))
+  } catch {
+    // localStorage quota exceeded — not critical
+  }
+}
+
 // ── Singleton state ────────────────────────────────────────────────────────────
 let _toasts: Toast[] = []
-let _history: Toast[] = []             // full history, never auto-cleared
-let _historyListeners: Listener[] = [] // for the history page
+let _history: Toast[] = _loadHistory()  // restored from localStorage on module init
+let _historyListeners: Listener[] = []  // for the history page
 const _listeners: Listener[] = []
 
 function notifyLive(): void {
@@ -35,6 +56,7 @@ export function addToast(opts: Omit<Toast, 'id' | 'createdAt'>): string {
 
   _toasts = [..._toasts, toast].slice(-4)
   _history = [toast, ..._history].slice(0, 200)  // keep last 200
+  _saveHistory(_history)
   notifyLive()
   notifyHistory()
 
@@ -51,6 +73,7 @@ export function removeToast(id: string): void {
 
 export function clearHistory(): void {
   _history = []
+  _saveHistory(_history)
   notifyHistory()
 }
 
