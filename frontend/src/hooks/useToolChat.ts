@@ -79,7 +79,7 @@ export interface UseToolChatReturn {
 interface UseToolChatOptions {
   conversationId: string | null
   projectMode?: 'dev' | 'docs' | 'research' | ''
-  onSaveMessage?: (convId: string, role: string, content: string) => Promise<void>
+  onSaveMessage?: (convId: string, role: string, content: string, stats?: import('@/types').MessageStats | null) => Promise<void>
   maxContextTokens?: number
 }
 
@@ -325,26 +325,44 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
             updateAccumulated(accumulated, true) // flush last chunk
             setWorkspaceFiles(raw.files)
             setStreaming(false)
-            // Final token count from full context
             const finalChars = messagesRef.current.reduce((sum, m) => {
               const c = typeof m.content === 'string' ? m.content : ''
               return sum + c.length
             }, 0)
             _setUsedTokens(Math.round(finalChars / 4))
-            if (raw.tokens_generated != null) {
+            const msgStats = raw.tokens_generated != null ? {
+              tokens: raw.tokens_generated,
+              tok_per_sec: raw.tok_per_sec ?? 0,
+              time_ms: raw.total_ms ?? 0,
+              prompt_tokens: 0,
+              ttft_ms: raw.ttft_ms ?? undefined,
+              engine: raw.engine ?? undefined,
+              model_name: raw.model_name ?? undefined,
+            } : null
+            if (msgStats) {
               setGenStats({
-                tokensGenerated: raw.tokens_generated,
-                tokensPerSecond: raw.tok_per_sec ?? 0,
-                timeMs: raw.total_ms ?? 0,
+                tokensGenerated: msgStats.tokens,
+                tokensPerSecond: msgStats.tok_per_sec,
+                timeMs: msgStats.time_ms,
                 promptTokens: 0,
-                ttftMs: raw.ttft_ms ?? null,
-                engine: raw.engine ?? null,
-                modelName: raw.model_name ?? null,
+                ttftMs: msgStats.ttft_ms ?? null,
+                engine: msgStats.engine ?? null,
+                modelName: msgStats.model_name ?? null,
               })
             }
+            // Attach stats to the assistant message in state so footer persists after streaming
+            setMessages(prev => {
+              const updated = [...prev]
+              const last = updated[updated.length - 1]
+              if (last?.role === 'assistant') {
+                updated[updated.length - 1] = { ...last, stats: msgStats ?? undefined }
+                messagesRef.current = updated
+              }
+              return updated
+            })
             const { conversationId: cid, onSaveMessage: onSave } = optionsRef.current
             if (cid && onSave && accumulated) {
-              void onSave(cid, 'assistant', accumulated)
+              void onSave(cid, 'assistant', accumulated, msgStats)
             }
           } else if (raw.type === 'error') {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any

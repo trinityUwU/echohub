@@ -102,8 +102,8 @@ export function ChatPage({
   const skillChatHook = useToolChat('__skills__', {
     conversationId: activeId ?? null,
     maxContextTokens: loadedModel?.max_context_window ?? undefined,
-    onSaveMessage: useCallback(async (convId: string, role: string, content: string) => {
-      await addMessage(convId, { id: crypto.randomUUID(), role, content, stats: null })
+    onSaveMessage: useCallback(async (convId: string, role: string, content: string, stats?: import('@/types').MessageStats | null) => {
+      await addMessage(convId, { id: crypto.randomUUID(), role, content, stats: stats ?? null })
     }, []),
   })
 
