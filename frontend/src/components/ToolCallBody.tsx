@@ -23,6 +23,13 @@ function _parseArgs(argsDisplay: string): Record<string, string> | null {
   try { return JSON.parse(argsDisplay.trim()) } catch { return null }
 }
 
+function _extractField(raw: string, field: string): string {
+  // Works on complete AND partial JSON — regex extracts string value even if JSON is truncated
+  const m = raw.match(new RegExp(`"${field}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)`))
+  if (!m) return ''
+  return m[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+}
+
 export function ToolCallBody({ toolName, argsDisplay, streaming }: {
   toolName: string
   argsDisplay: string
@@ -30,8 +37,9 @@ export function ToolCallBody({ toolName, argsDisplay, streaming }: {
 }): React.ReactElement {
   const args = useMemo(() => _parseArgs(argsDisplay), [argsDisplay])
   const isCodeTool = _CODE_TOOLS.has(toolName)
-  const filePath: string = args?.path ?? ''
-  const rawCode: string = args?.content ?? ''
+  // Use parsed args when available (complete JSON), fall back to regex for partial JSON
+  const filePath: string = args?.path ?? _extractField(argsDisplay, 'path')
+  const rawCode: string = args?.content ?? _extractField(argsDisplay, 'content')
   const lang = filePath ? _langFromPath(filePath) : 'plaintext'
 
   const highlighted = useMemo(() => {
