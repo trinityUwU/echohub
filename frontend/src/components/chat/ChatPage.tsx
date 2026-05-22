@@ -406,15 +406,16 @@ function ChatContent({
 }: ChatContentProps): React.ReactElement {
   // Build agentStepsMap: tool name → steps, for live sub-agent progress in ToolCallBlock.
   // We prefer the currently-running invoke_agent TC; fall back to the most recent one with steps.
+  // agentStepsMap: keyed by "invoke_agent:N" where N is the 0-based occurrence index
+  // so each invoke_agent block gets its own steps, not all the same ones
   const agentStepsMap = useMemo(() => {
     const map: Record<string, import('@/types').AgentStep[]> = {}
-    // Collect all invoke_agent TCs that have steps
-    const invokeTcs = toolCalls.filter(tc => tc.tool === 'invoke_agent' && tc.agentSteps?.length)
-    if (invokeTcs.length === 0) return map
-    // Prefer the running one; if none running, take the last one
-    const running = invokeTcs.find(tc => tc.status === 'running')
-    const target = running ?? invokeTcs[invokeTcs.length - 1]
-    if (target?.agentSteps) map['invoke_agent'] = target.agentSteps
+    const invokeTcs = toolCalls.filter(tc => tc.tool === 'invoke_agent')
+    invokeTcs.forEach((tc, idx) => {
+      if (tc.agentSteps?.length) {
+        map[`invoke_agent:${idx}`] = tc.agentSteps
+      }
+    })
     return map
   }, [toolCalls])
 

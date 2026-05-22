@@ -17,7 +17,14 @@ type Segment =
 
 function parseSegments(content: string): Segment[] {
   const segments: Segment[] = []
-  let remaining = content
+  // Strip orphan </tool_call> tags that appear outside of a <tool_call> block
+  // (happens when model resumes after tool execution)
+  let remaining = content.replace(/<\/tool_call>/g, (match, offset, str) => {
+    const before = str.slice(0, offset)
+    const opens = (before.match(/<tool_call>/g) || []).length
+    const closes = (before.match(/<\/tool_call>/g) || []).length
+    return opens > closes ? match : ''
+  })
   let inThink = false
   let inToolCall = false
   let inToolResult = false
@@ -144,7 +151,12 @@ export function MessageContent({ content, streaming, agentStepsMap }: Props): Re
         if (seg.type === 'tool_call') {
           const nameMatch = seg.content.match(/"name"\s*:\s*"([^"]+)"/)
           const toolName = nameMatch ? nameMatch[1] : ''
-          const liveSteps = toolName && agentStepsMap ? (agentStepsMap[toolName] ?? []) : []
+          // Count how many tool_call segments of same name appeared before this one
+          const sameNameIdx = segments.slice(0, i).filter(
+            s => s.type === 'tool_call' && s.content.match(/"name"\s*:\s*"([^"]+)"/)?.at(1) === toolName
+          ).length
+          const stepsKey = `${toolName}:${sameNameIdx}`
+          const liveSteps = agentStepsMap ? (agentStepsMap[stepsKey] ?? []) : []
           return (
             <ToolCallBlock
               key={i}
