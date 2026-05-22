@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useChat } from '@/hooks/useChat'
 import { useToolChat } from '@/hooks/useToolChat'
@@ -349,7 +349,7 @@ export function ChatPage({
           usedTokens={usedTokens}
           isTokensExact={isTokensExact}
           bottomRef={bottomRef}
-          toolCalls={[]}
+          toolCalls={skillChatHook.toolCalls}
           workspaceFiles={[]}
           onRefreshFiles={() => {}}
           onRegenerate={handleRegenerate}
@@ -404,6 +404,17 @@ function ChatContent({
   onRegenerate, onEditUser, onSend, onStop, onLoadModel, showLogs,
   onCommand, isDevMode,
 }: ChatContentProps): React.ReactElement {
+  // Build agentStepsMap: tool name → steps, for live sub-agent progress in ToolCallBlock
+  const agentStepsMap = useMemo(() => {
+    const map: Record<string, import('@/types').AgentStep[]> = {}
+    for (const tc of toolCalls) {
+      if (tc.tool === 'invoke_agent' && tc.agentSteps?.length) {
+        map[tc.tool] = tc.agentSteps
+      }
+    }
+    return map
+  }, [toolCalls])
+
   const inner = (
     <>
       <LogsPanel active={showLogs ?? false} />
@@ -416,6 +427,7 @@ function ChatContent({
             genStats={i === messages.length - 1 && msg.role === 'assistant' ? stats : undefined}
             modelName={activeModelName}
             streaming={streaming}
+            agentStepsMap={i === messages.length - 1 ? agentStepsMap : undefined}
             onRegenerate={msg.role === 'assistant' && i === messages.length - 1 ? onRegenerate : undefined}
             onEditUser={msg.role === 'user' ? (text: string) => onEditUser(i, text) : undefined}
             loadedModelId={loadedModel?.id ?? null}

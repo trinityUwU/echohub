@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ThinkingBlock } from './ThinkingBlock'
 import { MarkdownContent } from './MarkdownContent'
+import type { AgentStep } from '@/types'
 
 interface Props {
   content: string
   streaming?: boolean
+  agentStepsMap?: Record<string, AgentStep[]>
 }
 
 // ── Segment types ─────────────────────────────────────────────────────────────
@@ -162,7 +164,7 @@ function parseSegments(raw: string): Segment[] {
 
 // ── ToolCallBlock ─────────────────────────────────────────────────────────────
 
-function ToolCallBlock({ content, streaming }: { content: string; streaming?: boolean }): React.ReactElement {
+function ToolCallBlock({ content, streaming, agentSteps = [] }: { content: string; streaming?: boolean; agentSteps?: AgentStep[] }): React.ReactElement {
   // While streaming (tag still open): always expanded, showing live content.
   // Once done: collapsed by default, user can toggle.
   const [open, setOpen] = useState(false)
@@ -239,6 +241,41 @@ function ToolCallBlock({ content, streaming }: { content: string; streaming?: bo
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             style={{ overflow: 'hidden' }}
           >
+            {agentSteps.length > 0 && (
+              <div className="px-3 pt-2 pb-1 border-t border-white/5 space-y-0.5">
+                {agentSteps.map((step, i) => (
+                  <div key={i} className="flex items-center gap-2 py-0.5">
+                    {step.type === 'agent_tool_start' && (
+                      <motion.svg className="w-3 h-3 flex-shrink-0 text-text-muted/50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                        animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}>
+                        <path d="M21 12a9 9 0 1 1-6.22-8.56"/>
+                      </motion.svg>
+                    )}
+                    {step.type === 'agent_tool_done' && (
+                      <svg className="w-3 h-3 flex-shrink-0 text-green/70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                    )}
+                    {step.type === 'agent_thinking' && (
+                      <svg className="w-3 h-3 flex-shrink-0 text-text-muted/30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>
+                      </svg>
+                    )}
+                    {step.type === 'agent_done' && (
+                      <svg className="w-3 h-3 flex-shrink-0 text-accent/70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+                      </svg>
+                    )}
+                    <span className="text-[11px] font-mono text-text-muted/60 truncate">
+                      {step.type === 'agent_tool_start' && `→ ${step.tool ?? ''}${step.args && Object.keys(step.args).length ? ` (${Object.values(step.args)[0]?.toString().slice(0, 40)})` : ''}`}
+                      {step.type === 'agent_tool_done' && `✓ ${step.tool ?? ''}${step.result_preview ? ` — ${step.result_preview.slice(0, 50)}` : ''}`}
+                      {step.type === 'agent_thinking' && 'synthesizing…'}
+                      {step.type === 'agent_done' && `completed (${step.status ?? 'success'})`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             <pre className="px-3 pb-3 pt-2 text-xs text-text-muted/60 leading-relaxed whitespace-pre-wrap border-t border-white/5 font-mono max-h-64 overflow-y-auto">
               {streaming && !argsDisplay.trim() ? (
                 <span className="text-text-muted/40 italic">Executing…</span>
@@ -378,7 +415,7 @@ function ToolResultBlock({ tool, content }: { tool: string; content: string }): 
 
 // ── MessageContent ────────────────────────────────────────────────────────────
 
-export function MessageContent({ content, streaming }: Props): React.ReactElement {
+export function MessageContent({ content, streaming, agentStepsMap }: Props): React.ReactElement {
   const segments = parseSegments(content)
 
   return (
@@ -397,11 +434,16 @@ export function MessageContent({ content, streaming }: Props): React.ReactElemen
         }
 
         if (seg.type === 'tool_call') {
+          // Extract tool name to look up live steps
+          const nameMatch = seg.content.match(/"name"\s*:\s*"([^"]+)"/)
+          const toolName = nameMatch ? nameMatch[1] : ''
+          const liveSteps = toolName && agentStepsMap ? (agentStepsMap[toolName] ?? []) : []
           return (
             <ToolCallBlock
               key={i}
               content={seg.content}
               streaming={streaming && seg.open}
+              agentSteps={liveSteps}
             />
           )
         }
