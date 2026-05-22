@@ -686,6 +686,42 @@ async def generate(
 # Tool use
 # ──────────────────────────────────────────────────────────────────────────────
 
+def chat_completion_sync(
+    messages: list[dict],
+    tools: list[dict],
+    temperature: float = 0.1,
+    max_tokens: int = 2048,
+    **_ignored,
+) -> dict | None:
+    """Blocking (non-streaming) tool completion for sub-agent use.
+    Called from a regular thread — must NOT be called from the async stream path."""
+    if _llm is None:
+        raise RuntimeError("No model loaded")
+    try:
+        response = _llm.create_chat_completion(
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=False,
+        )
+    except Exception as e:
+        logger.warning(f"[llama] chat_completion_sync tools failed ({e}), retrying without tools")
+        response = _llm.create_chat_completion(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=False,
+        )
+    choices = response.get("choices", [{}])
+    msg = choices[0].get("message", {}) if choices else {}
+    return {
+        "type": "response",
+        "choices": [{"message": msg, "finish_reason": choices[0].get("finish_reason") if choices else "stop"}],
+    }
+
+
 async def generate_with_tools(
     messages: list[dict],
     tools: list[dict],

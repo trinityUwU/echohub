@@ -332,34 +332,20 @@ async def generate_with_tools(
 
 
 def chat_completion(messages: list[dict], tools: list[dict], **kwargs) -> dict | None:
-    """Blocking wrapper around generate_with_tools for sub-agent use."""
-    import asyncio
-
-    final_response: dict | None = None
-
-    async def _run() -> None:
-        nonlocal final_response
-        async for chunk in generate_with_tools(messages=messages, tools=tools, **kwargs):
-            if isinstance(chunk, dict) and chunk.get("type") == "response":
-                final_response = chunk
-            elif isinstance(chunk, dict) and chunk.get("type") == "error":
-                raise RuntimeError(chunk.get("error", "unknown error"))
-
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, _run())
-                future.result(timeout=300)
-        else:
-            loop.run_until_complete(_run())
-    except Exception as e:
-        from loguru import logger
-        logger.error(f"[engine_router] chat_completion error: {e}")
+    """Synchronous tool completion for sub-agent use — calls the active engine directly."""
+    from loguru import logger
+    if _active_engine == "llama":
+        from backend.services import llama_service
+        return llama_service.chat_completion_sync(messages=messages, tools=tools, **kwargs)
+    elif _active_engine == "vllm":
+        from backend.services import vllm_service
+        if hasattr(vllm_service, "chat_completion_sync"):
+            return vllm_service.chat_completion_sync(messages=messages, tools=tools, **kwargs)
+        logger.error("[engine_router] vLLM chat_completion_sync not implemented")
         return None
-
-    return final_response
+    else:
+        logger.error("[engine_router] chat_completion called with no engine loaded")
+        return None
 
 
 def get_engine_log(n_lines: int = 100) -> str:
