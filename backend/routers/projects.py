@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from loguru import logger
 from pydantic import BaseModel
 
 from backend.services import conversation_manager as cm
+from backend.services import db
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -124,3 +125,91 @@ def delete_workspace_file(project_id: str, file_path: str) -> dict:
         return {"ok": True}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+# ── Context files (Docs mode) ──────────────────────────────────────────────────
+
+@router.get("/{project_id}/context-files")
+def list_context_files(project_id: str) -> list[dict]:
+    try:
+        return db.list_context_files(project_id)
+    except Exception as exc:
+        logger.error("list_context_files error: {}", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/{project_id}/context-files")
+async def upload_context_file(
+    project_id: str,
+    file: UploadFile = File(...),
+) -> dict:
+    try:
+        raw = await file.read()
+        content = raw.decode("utf-8", errors="replace")
+        filename = file.filename or "file.txt"
+        return db.add_context_file(project_id, filename, content)
+    except Exception as exc:
+        logger.error("upload_context_file error: {}", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.delete("/{project_id}/context-files/{file_id}")
+def delete_context_file(project_id: str, file_id: str) -> dict:
+    try:
+        db.delete_context_file(file_id)
+        return {"ok": True}
+    except Exception as exc:
+        logger.error("delete_context_file error: {}", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+# ── Sources (Research mode) ────────────────────────────────────────────────────
+
+class AddSourceBody(BaseModel):
+    label: str
+    url: str | None = None
+    content: str = ""
+    source_type: str = "url"
+
+
+@router.get("/{project_id}/sources")
+def list_sources(project_id: str) -> list[dict]:
+    try:
+        return db.list_sources(project_id)
+    except Exception as exc:
+        logger.error("list_sources error: {}", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/{project_id}/sources")
+def add_source(project_id: str, body: AddSourceBody) -> dict:
+    try:
+        return db.add_source(project_id, body.label, body.url, body.content, body.source_type)
+    except Exception as exc:
+        logger.error("add_source error: {}", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/{project_id}/sources/upload")
+async def upload_source_file(
+    project_id: str,
+    file: UploadFile = File(...),
+) -> dict:
+    try:
+        raw = await file.read()
+        content = raw.decode("utf-8", errors="replace")
+        filename = file.filename or "document.txt"
+        return db.add_source(project_id, filename, None, content, "file")
+    except Exception as exc:
+        logger.error("upload_source_file error: {}", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.delete("/{project_id}/sources/{source_id}")
+def delete_source(project_id: str, source_id: str) -> dict:
+    try:
+        db.delete_source(source_id)
+        return {"ok": True}
+    except Exception as exc:
+        logger.error("delete_source error: {}", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc

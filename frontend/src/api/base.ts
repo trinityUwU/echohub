@@ -60,6 +60,17 @@ export async function apiRequest<T>(path: string, options?: RequestInit): Promis
   return res.json() as Promise<T>
 }
 
+export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  const base = await resolveBase()
+  const url = `${base}${path}`
+  const res = await fetch(url, { method: 'POST', body: formData })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`API error ${res.status}: ${text}`)
+  }
+  return res.json() as Promise<T>
+}
+
 export async function apiUrl(path: string): Promise<string> {
   const base = await resolveBase()
   return `${base}${path}`

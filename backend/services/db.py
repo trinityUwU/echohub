@@ -367,6 +367,38 @@ def init_db() -> None:
                 )
                 conn.commit()
 
+        # project_context_files — docs injected as context in Docs mode
+        existing_tables5 = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "project_context_files" not in existing_tables5:
+            conn.execute("""
+                CREATE TABLE project_context_files (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    size INTEGER NOT NULL DEFAULT 0,
+                    created_at REAL NOT NULL
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ctx_files_proj ON project_context_files(project_id)")
+            conn.commit()
+
+        # project_sources — URLs/docs injected as context in Research mode
+        if "project_sources" not in existing_tables5:
+            conn.execute("""
+                CREATE TABLE project_sources (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    label TEXT NOT NULL,
+                    url TEXT,
+                    content TEXT NOT NULL DEFAULT '',
+                    source_type TEXT NOT NULL DEFAULT 'url',
+                    created_at REAL NOT NULL
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sources_proj ON project_sources(project_id)")
+            conn.commit()
+
     logger.info("DB initialized at {}", get_db_path())
 
 
@@ -1456,3 +1488,98 @@ def get_running_mcp_servers() -> list[dict]:
             "SELECT * FROM mcp_servers WHERE status='running' ORDER BY skill_id"
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Project context files (Docs mode) ─────────────────────────────────────────
+
+def list_context_files(project_id: str) -> list[dict]:
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT id, project_id, filename, size, created_at FROM project_context_files WHERE project_id=? ORDER BY created_at ASC",
+            (project_id,),
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def get_context_file(file_id: str) -> dict | None:
+    with _lock:
+        conn = _get_conn()
+        row = conn.execute(
+            "SELECT * FROM project_context_files WHERE id=?", (file_id,)
+        ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def add_context_file(project_id: str, filename: str, content: str) -> dict:
+    import uuid as _uuid
+    file_id = str(_uuid.uuid4())
+    now = _now()
+    with _lock:
+        conn = _get_conn()
+        conn.execute(
+            "INSERT INTO project_context_files (id, project_id, filename, content, size, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (file_id, project_id, filename, content, len(content.encode()), now),
+        )
+        conn.commit()
+    return {"id": file_id, "project_id": project_id, "filename": filename, "size": len(content.encode()), "created_at": now}
+
+
+def delete_context_file(file_id: str) -> None:
+    with _lock:
+        conn = _get_conn()
+        conn.execute("DELETE FROM project_context_files WHERE id=?", (file_id,))
+        conn.commit()
+
+
+def get_all_context_files_content(project_id: str) -> list[dict]:
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT filename, content FROM project_context_files WHERE project_id=? ORDER BY created_at ASC",
+            (project_id,),
+        ).fetchall()
+    return [{"filename": r["filename"], "content": r["content"]} for r in rows]
+
+
+# ── Project sources (Research mode) ───────────────────────────────────────────
+
+def list_sources(project_id: str) -> list[dict]:
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT id, project_id, label, url, source_type, created_at FROM project_sources WHERE project_id=? ORDER BY created_at ASC",
+            (project_id,),
+        ).fetchall()
+    return [_row_to_dict(r) for r in rows]
+
+
+def add_source(project_id: str, label: str, url: str | None, content: str, source_type: str) -> dict:
+    import uuid as _uuid
+    src_id = str(_uuid.uuid4())
+    now = _now()
+    with _lock:
+        conn = _get_conn()
+        conn.execute(
+            "INSERT INTO project_sources (id, project_id, label, url, content, source_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (src_id, project_id, label, url or "", content, source_type, now),
+        )
+        conn.commit()
+    return {"id": src_id, "project_id": project_id, "label": label, "url": url, "source_type": source_type, "created_at": now}
+
+
+def delete_source(source_id: str) -> None:
+    with _lock:
+        conn = _get_conn()
+        conn.execute("DELETE FROM project_sources WHERE id=?", (source_id,))
+        conn.commit()
+
+
+def get_all_sources_content(project_id: str) -> list[dict]:
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT label, url, content, source_type FROM project_sources WHERE project_id=? ORDER BY created_at ASC",
+            (project_id,),
+        ).fetchall()
+    return [{"label": r["label"], "url": r["url"], "content": r["content"], "source_type": r["source_type"]} for r in rows]
