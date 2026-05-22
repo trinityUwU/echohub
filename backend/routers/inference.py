@@ -505,6 +505,35 @@ async def tool_chat(req: ToolChatRequest):
             combined_system += f"\n\n---\nACTIVE SKILLS:\n{awareness}"
         if user_system:
             combined_system += f"\n\n---\nADDITIONAL INSTRUCTIONS:\n{user_system}"
+
+        # Inject docs context files (Docs mode)
+        if _mode == "docs" and req.project_id:
+            try:
+                from backend.services import db as _db
+                ctx_files = _db.get_all_context_files_content(req.project_id)
+                if ctx_files:
+                    blocks = "\n\n".join(
+                        f"[FILE: {f['filename']}]\n{f['content'][:8000]}"
+                        for f in ctx_files
+                    )
+                    combined_system += f"\n\n---\nCONTEXT DOCUMENTS:\n{blocks}"
+            except Exception as _e:
+                logger.warning("Failed to inject context files: {}", _e)
+
+        # Inject research sources (Research mode)
+        if _mode == "research" and req.project_id:
+            try:
+                from backend.services import db as _db
+                sources = _db.get_all_sources_content(req.project_id)
+                if sources:
+                    blocks = "\n\n".join(
+                        f"[SOURCE: {s['label']}{(' — ' + s['url']) if s.get('url') else ''}]\n{s['content'][:8000]}"
+                        for s in sources
+                    )
+                    combined_system += f"\n\n---\nRESEARCH SOURCES:\n{blocks}"
+            except Exception as _e:
+                logger.warning("Failed to inject research sources: {}", _e)
+
         messages.append({"role": "system", "content": combined_system})
 
         # Inject memory context if memory is enabled for this conversation
