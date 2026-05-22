@@ -318,10 +318,11 @@ async def install_version_stream(version: str) -> AsyncGenerator[str, None]:
         yield _sse(f"Removing existing incomplete installation at {venv_dir}", "warn")
         shutil.rmtree(venv_dir)
 
-    # Step 1: create venv
-    yield _sse("Creating isolated Python environment...")
+    # Step 1: create venv — force python3.11 (vLLM compatibility), fall back to python3
+    _py_bin = "python3.11" if shutil.which("python3.11") else "python3"
+    yield _sse(f"Creating isolated Python environment ({_py_bin})...")
     proc = await asyncio.create_subprocess_exec(
-        "python3", "-m", "venv", str(venv_dir),
+        _py_bin, "-m", "venv", str(venv_dir),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
     )
     async for line in proc.stdout:
