@@ -139,10 +139,6 @@ export function ChatPage({
     }
   }, [activeId, activeMessages]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
   const handleClear = (): void => {
     setMessages([])
     setActiveMessages([])
@@ -404,6 +400,26 @@ function ChatContent({
   onRegenerate, onEditUser, onSend, onStop, onLoadModel, showLogs,
   onCommand, isDevMode,
 }: ChatContentProps): React.ReactElement {
+  const [autoScroll, setAutoScroll] = useState(true)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+
+  // Reset auto-scroll when streaming starts
+  useEffect(() => {
+    if (streaming) setAutoScroll(true)
+  }, [streaming])
+
+  // Detect manual scroll up → disable auto-scroll
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const onScroll = (): void => {
+      if (!streaming) return
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+      if (!nearBottom) setAutoScroll(false)
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [streaming])
   // Build agentStepsMap: tool name → steps, for live sub-agent progress in ToolCallBlock.
   // We prefer the currently-running invoke_agent TC; fall back to the most recent one with steps.
   // agentStepsMap: keyed by "invoke_agent:N" where N is the 0-based occurrence index
@@ -419,10 +435,16 @@ function ChatContent({
     return map
   }, [toolCalls])
 
+  // Auto-scroll when messages update (respects autoScroll flag)
+  useEffect(() => {
+    if (!autoScroll) return
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, autoScroll])
+
   const inner = (
     <>
       <LogsPanel active={showLogs ?? false} />
-      <div className="flex-1 overflow-y-auto py-6">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto py-6">
         {messages.map((msg, i) => (
           <MessageRow
             key={msg.id ?? i}
@@ -440,6 +462,34 @@ function ChatContent({
         ))}
         <div ref={bottomRef as React.RefObject<HTMLDivElement>} />
       </div>
+      <AnimatePresence>
+        {streaming && (
+          <motion.div
+            initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }} transition={{ duration: 0.15 }}
+            className="flex justify-end px-4 pb-1"
+          >
+            <button
+              onClick={() => setAutoScroll(v => {
+                if (!v) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+                return !v
+              })}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono transition-colors border ${
+                autoScroll
+                  ? 'border-accent/30 text-accent/70 bg-accent/5 hover:bg-accent/10'
+                  : 'border-white/10 text-text-muted/50 bg-white/[0.03] hover:bg-white/[0.06]'
+              }`}
+            >
+              <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                {autoScroll
+                  ? <><polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/></>
+                  : <><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></>}
+              </svg>
+              {autoScroll ? 'auto-scroll on' : 'auto-scroll off'}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <InputBar
         modelLoaded={!!loadedModel}
         visionEnabled={!!loadedModel?.capabilities?.vision}
@@ -634,10 +684,6 @@ function ProjectWorkspace({
   useEffect(() => {
     if (!isDevMode && !chatHook.streaming) chatHook.setMessages(activeMessages)
   }, [activeMessages]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
 
   const handleRegenerate = (): void => {
     if (!loadedModel) return
