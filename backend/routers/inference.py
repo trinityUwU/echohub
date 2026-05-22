@@ -702,14 +702,12 @@ async def tool_chat(req: ToolChatRequest):
                 from backend.services.agent_runner import run_agent_streaming
                 result = None
                 async for agent_event in run_agent_streaming(tool_args, req.project_id, req.conv_id):
-                    if agent_event.get("type") == "agent_done":
-                        result = agent_event.get("result_json", "{}")
-                        yield f"data: {_json.dumps({'type': 'agent_step', **{k: v for k, v in agent_event.items() if k != 'result_json'}})}\n\n"
-                    elif agent_event.get("type") == "agent_error":
+                    etype = agent_event.get("type")
+                    if etype == "agent_done":
+                        result = agent_event.pop("result_json", "{}")
+                    elif etype == "agent_error":
                         result = _json.dumps({"status": "failed", "summary": agent_event.get("error", ""), "findings": {}, "actions_taken": []})
-                        yield f"data: {_json.dumps({'type': 'agent_step', **agent_event})}\n\n"
-                    else:
-                        yield f"data: {_json.dumps({'type': 'agent_step', **agent_event})}\n\n"
+                    yield f"data: {_json.dumps({'type': 'agent_step', 'step': agent_event})}\n\n"
                 if result is None:
                     result = _json.dumps({"status": "failed", "summary": "No result", "findings": {}, "actions_taken": []})
             else:

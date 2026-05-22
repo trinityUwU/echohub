@@ -21,10 +21,16 @@ _HARNESS_TOOLS: dict[str, list[str]] = {
 }
 
 _SUB_AGENT_SYSTEM = (
-    "You are a sub-agent. Complete the task using the available tools.\n"
-    "When done, output ONLY this JSON (no other text):\n"
-    '{"status": "success|partial|failed", "summary": "one sentence", "findings": {}, "actions_taken": []}\n'
-    "Do not explain. Do not add markdown. Just the JSON."
+    "You are a sub-agent. Use the available tools to complete the task, then output your findings.\n\n"
+    "CRITICAL: After all tool calls, output ONLY a JSON object — no preamble, no markdown, no explanation.\n"
+    "The JSON MUST contain the actual results from your tool calls, not placeholders.\n\n"
+    "Required format (fill in real data, do NOT copy this skeleton):\n"
+    '{"status": "success", "summary": "<concise summary of actual findings>", '
+    '"findings": {"<key>": "<value>", ...}, "actions_taken": ["tool(args)", ...]}\n\n'
+    "Rules:\n"
+    "- findings must contain the actual data you collected (e.g. model names, benchmarks, URLs)\n"
+    "- summary must describe what you actually found, not what you plan to find\n"
+    "- Only output the JSON object, nothing else"
 )
 
 _MAX_AGENT_TOOL_CALLS = 15

@@ -63,6 +63,9 @@ app.include_router(skills.router)
 app.include_router(memory.router)
 
 
+_SERVER_START_TIME = int(__import__("time").time())
+
+
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    return {"status": "ok", "started_at": _SERVER_START_TIME}

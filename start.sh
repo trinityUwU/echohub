@@ -139,5 +139,16 @@ if [[ "$DEV_MODE" == "true" ]]; then
     export VITE_MSW=true
 fi
 
+log_step "Clearing Python bytecode cache..."
+find "$ROOT/backend" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+find "$ROOT/backend" -name "*.pyc" -delete 2>/dev/null || true
+log_ok "Python cache cleared"
+
+log_step "Resetting logs..."
+mkdir -p "$ROOT/logs"
+> "$ROOT/logs/backend.log"
+> "$ROOT/logs/vllm.log" 2>/dev/null || true
+log_ok "Logs reset"
+
 log_step "Launching EchoHub..."
 exec cargo tauri dev

@@ -40,6 +40,29 @@ export default function App(): React.ReactElement {
 
   const { downloaded, loadedModel, loadingModelId, loadError, unloading, activeLoadConfig, refresh, loadModel, loadModelFromPath, unloadModel } = useModels()
   const gpu = useGpu()
+
+  // Detect backend restart — if started_at changes, the backend was restarted and the model is gone
+  const lastStartedAt = useRef<number | null>(null)
+  useEffect(() => {
+    const check = async (): Promise<void> => {
+      try {
+        const { apiUrl } = await import('@/api/base')
+        const url = await apiUrl('/health')
+        const r = await fetch(url, { signal: AbortSignal.timeout(2000) })
+        if (!r.ok) return
+        const data = await r.json() as { started_at?: number }
+        const at = data.started_at ?? null
+        if (lastStartedAt.current !== null && at !== null && at !== lastStartedAt.current) {
+          refresh()
+          addToast({ type: 'info', title: 'Backend restarted', message: 'Model state reset — reload your model.' })
+        }
+        if (at !== null) lastStartedAt.current = at
+      } catch { /* backend not ready */ }
+    }
+    check()
+    const id = setInterval(() => { void check() }, 5000)
+    return () => clearInterval(id)
+  }, [refresh])
   const { conversations, archivedConversations, activeId, activeMessages, newConversation, selectConversation, deleteConversation, archiveConversation, unarchiveConversation, renameConversation, toggleMemory, setActiveMessages } = useConversations()
 
   useEffect(() => {

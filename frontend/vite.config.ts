@@ -17,6 +17,9 @@ export default defineConfig({
         target: 'http://localhost:37821',
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/api/, ''),
+        configure: (proxy) => {
+          proxy.on('error', () => { /* backend not running yet — expected in dev */ })
+        },
       },
     },
   },
