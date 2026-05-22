@@ -54,11 +54,13 @@ function parseSegments(content: string): Segment[] {
 
       buffer += remaining.slice(0, first)
 
-      // Orphan </think> — treat everything before it as implicit thinking content
+      // Orphan </think> — buffer already has text before </think>, put it in ThinkingBlock
       if (first === thinkClose && (thinkOpen < 0 || thinkClose < thinkOpen)) {
-        push('text')
-        segments.push({ type: 'thinking', content: buffer || remaining.slice(0, thinkClose), open: false })
+        const thinkContent = buffer
         buffer = ''
+        if (thinkContent.trim()) {
+          segments.push({ type: 'thinking', content: thinkContent, open: false })
+        }
         remaining = remaining.slice(thinkClose + '</think>'.length)
         continue
       }
