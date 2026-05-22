@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { AgentStep } from '@/types'
+import { ToolCallBody } from './ToolCallBody'
 
 function _extractTaskFromArgs(raw: string): string {
-  // Extract "task" field from partial JSON — works even when the JSON is incomplete
   const m = raw.match(/"task"\s*:\s*"([\s\S]*)/)
   if (!m) return raw.slice(0, 200)
-  // Unescape \n sequences, trim trailing incomplete chars
   return m[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/, '"')
 }
 
@@ -118,12 +117,11 @@ export function ToolCallBlock({ content, streaming, agentSteps = [] }: {
                 agentRunning={agentRunning}
               />
             ) : (
-              <pre className="px-3 pb-3 pt-2 text-xs text-text-muted/60 leading-relaxed whitespace-pre-wrap border-t border-white/5 font-mono max-h-64 overflow-y-auto">
-                {streaming && !argsDisplay.trim() ? (
-                  <span className="text-text-muted/40 italic">Executing…</span>
-                ) : argsDisplay}
-                {streaming && <span className="inline-block w-1 h-3 bg-text-muted/40 animate-pulse rounded-sm ml-0.5 align-middle" />}
-              </pre>
+              <ToolCallBody
+                toolName={toolName}
+                argsDisplay={argsDisplay}
+                streaming={!!streaming}
+              />
             )}
           </motion.div>
         )}
