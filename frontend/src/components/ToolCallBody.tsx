@@ -54,7 +54,9 @@ export function ToolCallBody({ toolName, argsDisplay, streaming }: {
     }
   }, [isCodeTool, rawCode, lang])
 
+  // Both refs declared unconditionally — React hooks rules
   const codeScrollRef = useScrollToBottom([rawCode], streaming) as React.RefObject<HTMLDivElement>
+  const defaultScrollRef = useScrollToBottom([argsDisplay], streaming) as React.RefObject<HTMLPreElement>
 
   if (isCodeTool && (streaming || rawCode)) {
     const displayCode = _unescapeContent(rawCode)
@@ -85,7 +87,6 @@ export function ToolCallBody({ toolName, argsDisplay, streaming }: {
     )
   }
 
-  const defaultScrollRef = useScrollToBottom([argsDisplay], streaming) as React.RefObject<HTMLPreElement>
   return (
     <pre
       ref={defaultScrollRef}
