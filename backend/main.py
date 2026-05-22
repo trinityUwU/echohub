@@ -1,6 +1,14 @@
+import importlib
 import os
+import sys
 import traceback
 from contextlib import asynccontextmanager
+
+# Invalidate import cache so Python reloads .py files instead of .pyc on restart.
+# Critical when Tauri respawns the backend after code changes.
+importlib.invalidate_caches()
+if os.environ.get("PYTHONDONTWRITEBYTECODE") != "1":
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request

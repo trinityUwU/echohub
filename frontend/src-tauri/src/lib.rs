@@ -118,14 +118,51 @@ fn spawn_backend(app: &AppHandle, port: u16) {
     spawn_backend_with_retries(app, port, 0);
 }
 
+fn find_python(root: &str) -> String {
+    // Prefer venv python, then python3, then python
+    let candidates = [
+        format!("{}/backend/.venv/bin/python", root),
+        format!("{}/backend/.venv/bin/python3", root),
+        "python3".to_string(),
+        "python".to_string(),
+    ];
+    for candidate in &candidates {
+        if candidate.starts_with('/') {
+            if std::path::Path::new(candidate).exists() {
+                return candidate.clone();
+            }
+        } else {
+            // System python — check with `which`
+            if let Ok(output) = std::process::Command::new("which").arg(candidate).output() {
+                if output.status.success() {
+                    return candidate.clone();
+                }
+            }
+        }
+    }
+    "python3".to_string()
+}
+
+
 fn spawn_backend_with_retries(app: &AppHandle, port: u16, attempt: u32) {
     use tauri_plugin_shell::ShellExt;
 
     let root = locate_project_root(app);
-    let python = format!("{}/backend/.venv/bin/python", root);
+    let python = find_python(&root);
     let log_path = format!("{}/logs/backend.log", root);
 
     let _ = std::fs::create_dir_all(format!("{}/logs", root));
+
+    // Clear Python bytecode cache so code changes are picked up on respawn
+    if attempt == 0 {
+        let _ = std::process::Command::new("find")
+            .args([
+                &format!("{}/backend", root),
+                "-type", "d", "-name", "__pycache__",
+                "-exec", "rm", "-rf", "{}", "+",
+            ])
+            .output();
+    }
 
     log::info!("Spawning backend on port {} (attempt {}) (python: {})", port, attempt + 1, python);
 
@@ -134,6 +171,7 @@ fn spawn_backend_with_retries(app: &AppHandle, port: u16, attempt: u32) {
         .args(["-m", "uvicorn", "backend.main:app", "--host", "127.0.0.1", "--port", &port.to_string()])
         .env("PYTHONPATH", &root)
         .env("LOGURU_SINK", &log_path)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
         .spawn();
 
     match result {

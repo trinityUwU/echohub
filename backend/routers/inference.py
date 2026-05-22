@@ -23,6 +23,110 @@ router = APIRouter(prefix="/inference", tags=["inference"])
 # from the default asyncio thread pool to avoid deadlocks with the stream thread.
 _tool_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="tool_exec")
 
+
+import json as _json_module
+import re as _re_module
+
+def _parse_tool_call_json(raw: str) -> dict:
+    """
+    Parse a tool_call JSON string robustly.
+    Handles: unescaped newlines, truncated JSON (model cut off mid-generation),
+    unescaped quotes inside string values.
+    """
+    raw = raw.strip()
+
+    # 1. Direct parse
+    try:
+        return _json_module.loads(raw)
+    except _json_module.JSONDecodeError:
+        pass
+
+    # 2. Sanitize control characters inside string values
+    sanitized = _sanitize_json_strings(raw)
+    try:
+        return _json_module.loads(sanitized)
+    except _json_module.JSONDecodeError:
+        pass
+
+    # 3. JSON is truncated — extract name + arguments with regex fallback
+    return _extract_tool_call_fields(raw)
+
+
+def _sanitize_json_strings(raw: str) -> str:
+    """Replace unescaped control chars inside JSON string values."""
+    out = []
+    in_str = False
+    esc = False
+    for ch in raw:
+        if esc:
+            out.append(ch)
+            esc = False
+            continue
+        if ch == '\\':
+            out.append(ch)
+            esc = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            out.append(ch)
+            continue
+        if in_str:
+            if ch == '\n':   out.append('\\n')
+            elif ch == '\r': out.append('\\r')
+            elif ch == '\t': out.append('\\t')
+            else:            out.append(ch)
+        else:
+            out.append(ch)
+    return ''.join(out)
+
+
+def _extract_tool_call_fields(raw: str) -> dict:
+    """
+    Regex-based extraction for truncated tool_call JSON.
+    Extracts 'name' and the 'arguments' object or individual fields.
+    Works even when the JSON is cut off mid-string.
+    """
+    # Extract name
+    name_m = _re_module.search(r'"name"\s*:\s*"([^"]+)"', raw)
+    name = name_m.group(1) if name_m else ""
+
+    # Try to extract the arguments block — may be truncated
+    args_m = _re_module.search(r'"arguments"\s*:\s*(\{.*)', raw, _re_module.DOTALL)
+    if not args_m:
+        # arguments might be a string-encoded JSON
+        args_str_m = _re_module.search(r'"arguments"\s*:\s*"(.*)', raw, _re_module.DOTALL)
+        if args_str_m:
+            try:
+                args = _json_module.loads(args_str_m.group(1).rstrip('"} \n'))
+                return {"name": name, "arguments": args}
+            except Exception:
+                pass
+        return {"name": name, "arguments": {}}
+
+    raw_args = args_m.group(1)
+
+    # Try to parse the args block as-is
+    try:
+        args = _json_module.loads(raw_args.rstrip())
+        return {"name": name, "arguments": args}
+    except _json_module.JSONDecodeError:
+        pass
+
+    # Args is truncated — extract individual string fields with regex
+    # This handles the case where "task" is a long string that was cut off
+    args_fields: dict = {}
+    for field_m in _re_module.finditer(r'"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)(?:"|$)', raw_args, _re_module.DOTALL):
+        key = field_m.group(1)
+        val = field_m.group(2).replace('\\n', '\n').replace('\\t', '\t')
+        args_fields[key] = val
+    # Also extract non-string fields (booleans, numbers)
+    for field_m in _re_module.finditer(r'"(\w+)"\s*:\s*(true|false|null|-?\d+(?:\.\d+)?)', raw_args):
+        key = field_m.group(1)
+        raw_val = field_m.group(2)
+        args_fields[key] = {"true": True, "false": False, "null": None}.get(raw_val, raw_val)
+
+    return {"name": name, "arguments": args_fields}
+
 def _get_models_dir():
     try:
         from backend.services.config_service import get_models_dir
@@ -782,9 +886,15 @@ async def tool_chat(req: ToolChatRequest):
                                 tool_name = func.get("name", "")
                                 raw_args = func.get("arguments", "{}")
                                 try:
-                                    tool_args = _json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                                    if isinstance(raw_args, str):
+                                        tool_args = _json.loads(raw_args)
+                                    else:
+                                        tool_args = raw_args
                                 except _json.JSONDecodeError:
-                                    tool_args = {}
+                                    try:
+                                        tool_args = _json.loads(raw_args.replace('\n', '\\n').replace('\r', ''))
+                                    except _json.JSONDecodeError:
+                                        tool_args = {}
                                 tc_id = tc.get("id", f"native_{iteration}_{total_tool_calls}")
 
                                 yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
@@ -853,7 +963,8 @@ async def tool_chat(req: ToolChatRequest):
                             tc_json_match = _TC_JSON_RE.search(raw_tc_content)
                             if tc_json_match:
                                 try:
-                                    tc_data = _json.loads(tc_json_match.group())
+                                    raw_json_str = tc_json_match.group()
+                                    tc_data = _parse_tool_call_json(raw_json_str)
                                     tool_name = tc_data.get("name", "")
                                     raw_args = tc_data.get("arguments", tc_data.get("args", {}))
                                     tool_args = _json.loads(raw_args) if isinstance(raw_args, str) else raw_args
@@ -894,7 +1005,7 @@ async def tool_chat(req: ToolChatRequest):
                                     tool_executed_this_pass = True
                                     pass_text = ""  # reset for next pass
                                 except (_json.JSONDecodeError, Exception) as parse_err:
-                                    logger.warning(f"[tool-chat] failed to parse inline tool_call: {parse_err}")
+                                    logger.warning(f"[tool-chat] failed to parse inline tool_call: {parse_err} — content[:200]: {raw_tc_content[:200]!r}")
 
             except Exception as e:
                 logger.error(f"[tool-chat] generate error: {e}")
