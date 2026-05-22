@@ -381,12 +381,21 @@ export interface WorkspaceFile {
   modified: number
 }
 
+export interface AgentStep {
+  type: string
+  tool?: string
+  args?: Record<string, unknown>
+  result_preview?: string
+  status?: string
+}
+
 export interface ToolCall {
   id: string
   tool: string
   args: Record<string, unknown>
   result?: string
   status: 'pending' | 'running' | 'done' | 'error'
+  agentSteps?: AgentStep[]
 }
 
 export interface ToolChatRequest {
