@@ -40,17 +40,18 @@ export function ToolCallBody({ toolName, argsDisplay, streaming }: {
   // Use parsed args when available (complete JSON), fall back to regex for partial JSON
   const filePath: string = args?.path ?? _extractField(argsDisplay, 'path')
   const rawCode: string = args?.content ?? _extractField(argsDisplay, 'content')
-  const lang = filePath ? _langFromPath(filePath) : 'plaintext'
+  const lang = filePath ? _langFromPath(filePath) : (rawCode ? 'auto' : 'plaintext')
 
   const highlighted = useMemo(() => {
-    if (!isCodeTool || !rawCode || streaming) return null
+    if (!isCodeTool || !rawCode) return null
     const code = _unescapeContent(rawCode)
     try {
+      if (lang === 'auto') return hljs.highlightAuto(code).value
       return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value
     } catch {
       return hljs.highlightAuto(code).value
     }
-  }, [isCodeTool, rawCode, lang, streaming])
+  }, [isCodeTool, rawCode, lang])
 
   if (isCodeTool && (streaming || rawCode)) {
     const displayCode = streaming ? _unescapeContent(rawCode) : _unescapeContent(rawCode)
@@ -68,6 +69,7 @@ export function ToolCallBody({ toolName, argsDisplay, streaming }: {
           {highlighted ? (
             <pre className="p-3 text-xs leading-relaxed font-mono overflow-x-auto">
               <code dangerouslySetInnerHTML={{ __html: highlighted }} />
+              {streaming && <span className="inline-block w-1 h-3 bg-text-muted/40 animate-pulse rounded-sm ml-0.5 align-middle" />}
             </pre>
           ) : (
             <pre className="p-3 text-xs text-text-muted/55 leading-relaxed font-mono whitespace-pre overflow-x-auto">
