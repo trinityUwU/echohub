@@ -61,13 +61,32 @@ def _strip_think(content: str) -> str:
     return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
 
 
-def _invoke_agent(args: dict[str, Any], project_id: str, conv_id: str) -> str:
+def _invoke_agent(
+    args: dict[str, Any],
+    project_id: str,
+    conv_id: str,
+    progress_cb: Any = None,  # Optional[Callable[[dict], None]]
+) -> str:
+    """
+    progress_cb(event: dict) is called for each sub-agent step:
+      {"type": "agent_thinking"}
+      {"type": "agent_tool_start", "tool": name, "args": {}}
+      {"type": "agent_tool_done", "tool": name, "result_preview": str}
+      {"type": "agent_done", "status": str}
+    """
     task = args.get("task", "")
     harness = args.get("harness", "read_strict")
     if not task:
         return json.dumps({"status": "failed", "summary": "task is required", "findings": {}, "actions_taken": []})
     if harness not in _HARNESS_TOOLS:
         harness = "read_strict"
+
+    def _emit(event: dict) -> None:
+        if progress_cb:
+            try:
+                progress_cb(event)
+            except Exception:
+                pass
 
     from backend.services import engine_router
     if engine_router.get_status() is None:
@@ -111,6 +130,9 @@ def _invoke_agent(args: dict[str, Any], project_id: str, conv_id: str) -> str:
             clean_content = _TC_RE.sub("", raw_content).strip()
             clean_content = _strip_think(clean_content)
 
+            if clean_content and not tool_calls:
+                _emit({"type": "agent_thinking"})
+
             messages.append({"role": "assistant", "content": clean_content, "tool_calls": tool_calls if tool_calls else None})
 
             if not tool_calls:
@@ -120,9 +142,11 @@ def _invoke_agent(args: dict[str, Any], project_id: str, conv_id: str) -> str:
                     try:
                         result = json.loads(json_match.group())
                         result.setdefault("actions_taken", actions_taken)
+                        _emit({"type": "agent_done", "status": result.get("status", "success")})
                         return json.dumps(result)
                     except (json.JSONDecodeError, ValueError):
                         pass
+                _emit({"type": "agent_done", "status": "success"})
                 return json.dumps({
                     "status": "success",
                     "summary": content or "No response",
@@ -140,6 +164,7 @@ def _invoke_agent(args: dict[str, Any], project_id: str, conv_id: str) -> str:
                     t_args = {}
 
                 logger.info(f"[invoke_agent] {t_name}({list(t_args.keys())})")
+                _emit({"type": "agent_tool_start", "tool": t_name, "args": t_args})
 
                 if t_name not in enabled:
                     tool_result = f"Error: tool '{t_name}' not available in harness '{harness}'"
@@ -160,6 +185,9 @@ def _invoke_agent(args: dict[str, Any], project_id: str, conv_id: str) -> str:
                             except Exception as he:
                                 logger.warning("[invoke_agent] harness error: {}", he)
 
+                preview = tool_result[:120].replace("\n", " ") if tool_result else ""
+                _emit({"type": "agent_tool_done", "tool": t_name, "result_preview": preview})
+
                 actions_taken.append(f"{t_name}({list(t_args.keys())})")
                 messages.append({
                     "role": "tool",
@@ -167,12 +195,14 @@ def _invoke_agent(args: dict[str, Any], project_id: str, conv_id: str) -> str:
                     "content": tool_result,
                 })
 
-        return json.dumps({
+        result = json.dumps({
             "status": "partial",
             "summary": f"Reached tool call limit ({_MAX_AGENT_TOOL_CALLS})",
             "findings": {},
             "actions_taken": actions_taken,
         })
+        _emit({"type": "agent_done", "status": "partial"})
+        return result
 
     except Exception as e:
         logger.error(f"[invoke_agent] error: {e}")

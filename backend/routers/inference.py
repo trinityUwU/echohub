@@ -652,6 +652,22 @@ async def tool_chat(req: ToolChatRequest):
                 )
             return f"\n\n[Context: {used:,}/{_ctx_window:,} tokens ({pct:.0%} used)]"
 
+        # SSE queue — invoke_agent pushes agent_step events here; the main loop yields them
+        import queue as _queue_mod
+        _agent_sse_queue: _queue_mod.Queue = _queue_mod.Queue()
+        _AGENT_SENTINEL = object()
+
+        async def _drain_agent_sse():
+            """Yield all pending agent_step SSE events from the queue (non-blocking)."""
+            while True:
+                try:
+                    event = _agent_sse_queue.get_nowait()
+                except _queue_mod.Empty:
+                    break
+                if event is _AGENT_SENTINEL:
+                    break
+                yield f"data: {_json.dumps({'type': 'agent_step', **event})}\n\n"
+
         async def _execute_tool_with_intercept(tool_name: str, tool_args: dict) -> str:
             nonlocal MAX_TOOL_CALLS, _cap_warning_injected, _context_exhausted
             if _context_exhausted:
@@ -693,10 +709,24 @@ async def tool_chat(req: ToolChatRequest):
                 logger.warning(f"[tool-chat] MCP routing check failed: {e}")
             import asyncio as _asyncio
             loop = _asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                _tool_executor,
-                lambda: execute_tool(tool_name, tool_args, req.project_id, req.conv_id)
-            )
+
+            if tool_name == "invoke_agent":
+                from backend.services.tool_agent import _invoke_agent as _run_agent
+                _SENTINEL = object()
+
+                def _run_with_progress() -> str:
+                    def _cb(event: dict) -> None:
+                        _agent_sse_queue.put(event)
+                    res = _run_agent(tool_args, req.project_id, req.conv_id, progress_cb=_cb)
+                    _agent_sse_queue.put(_AGENT_SENTINEL)
+                    return res
+
+                result = await loop.run_in_executor(_tool_executor, _run_with_progress)
+            else:
+                result = await loop.run_in_executor(
+                    _tool_executor,
+                    lambda: execute_tool(tool_name, tool_args, req.project_id, req.conv_id)
+                )
             result += _context_footer(messages)
             if _estimate_tokens(messages) / _ctx_window >= _CTX_STOP_PCT:
                 _context_exhausted = True
@@ -769,6 +799,8 @@ async def tool_chat(req: ToolChatRequest):
 
                                 yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
                                 tool_result = await _execute_tool_with_intercept(tool_name, tool_args)
+                                async for _sse in _drain_agent_sse():
+                                    yield _sse
                                 yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
 
                                 messages.append({"role": "assistant", "content": pass_text or "", "tool_calls": [tc]})
@@ -845,6 +877,8 @@ async def tool_chat(req: ToolChatRequest):
 
                                     yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
                                     tool_result = await _execute_tool_with_intercept(tool_name, tool_args)
+                                    async for _sse in _drain_agent_sse():
+                                        yield _sse
                                     yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
 
                                     tc_id = f"tc_{iteration}_{total_tool_calls}"

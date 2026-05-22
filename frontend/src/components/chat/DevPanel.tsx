@@ -216,15 +216,47 @@ export function DevPanel({
                             initial={{ opacity: 0, x: -8 }}
                             animate={{ opacity: 1, x: 0 }}
                             transition={{ duration: 0.18, ease: 'easeOut' }}
-                            className="flex items-center gap-2 px-3 py-1.5 hover:bg-overlay/40 transition-colors"
+                            className="flex flex-col"
                           >
-                            <ToolStatusIcon status={tc.status} />
-                            <span className="text-xs text-text-secondary truncate flex-1 min-w-0">
-                              <span className="text-text-primary font-medium">{tc.tool}</span>
-                              {tc.args.path ? (
-                                <span className="text-text-muted"> {String(tc.args.path)}</span>
-                              ) : null}
-                            </span>
+                            <div className="flex items-center gap-2 px-3 py-1.5 hover:bg-overlay/40 transition-colors">
+                              <ToolStatusIcon status={tc.status} />
+                              <span className="text-xs text-text-secondary truncate flex-1 min-w-0">
+                                <span className="text-text-primary font-medium">{tc.tool}</span>
+                                {tc.args.path ? (
+                                  <span className="text-text-muted"> {String(tc.args.path)}</span>
+                                ) : null}
+                              </span>
+                            </div>
+                            {tc.agentSteps && tc.agentSteps.length > 0 && (
+                              <div className="ml-7 pb-1 space-y-0.5">
+                                {tc.agentSteps.map((step, i) => (
+                                  <div key={i} className="flex items-center gap-1.5 px-2 py-0.5">
+                                    {step.type === 'agent_tool_start' && (
+                                      <motion.svg className="w-2.5 h-2.5 flex-shrink-0 text-text-muted/50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                                        animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}>
+                                        <path d="M21 12a9 9 0 1 1-6.22-8.56"/>
+                                      </motion.svg>
+                                    )}
+                                    {step.type === 'agent_tool_done' && (
+                                      <svg className="w-2.5 h-2.5 flex-shrink-0 text-green/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <polyline points="20 6 9 17 4 12"/>
+                                      </svg>
+                                    )}
+                                    {step.type === 'agent_thinking' && (
+                                      <svg className="w-2.5 h-2.5 flex-shrink-0 text-text-muted/40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>
+                                      </svg>
+                                    )}
+                                    <span className="text-[10px] text-text-muted/50 font-mono truncate">
+                                      {step.type === 'agent_tool_start' && `→ ${String(step.tool ?? '')}`}
+                                      {step.type === 'agent_tool_done' && `✓ ${String(step.tool ?? '')}`}
+                                      {step.type === 'agent_thinking' && 'thinking…'}
+                                      {step.type === 'agent_done' && `done (${String(step.status ?? '')})`}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </motion.div>
                         ))}
                       </AnimatePresence>

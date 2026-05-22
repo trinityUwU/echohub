@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toolChat, summarizeMessages } from '@/api/client'
-import type { ChatMessage, GenerationStats, SkillsConfig, ToolCall, WorkspaceFile } from '@/types'
+import type { AgentStep, ChatMessage, GenerationStats, SkillsConfig, ToolCall, WorkspaceFile } from '@/types'
 import { emitTimings } from '@/api/engineTimings'
 import { addToast } from '@/hooks/useToast'
 
@@ -241,6 +241,8 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     let inToolCallBlock = false
     // tool name for the current pending tool (set when tool_call_streaming starts)
     let pendingToolName = ''
+    // buffer of agent steps per tool name (for invoke_agent)
+    const agentStepsBuf: Record<string, Record<string, unknown>[]> = {}
 
     const req = {
       messages: historyToSend,
@@ -306,6 +308,16 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
             const tcId = crypto.randomUUID()
             const tc: ToolCall = { id: tcId, tool: raw.tool, args: raw.args, status: 'running' }
             setToolCalls(prev => [...prev, tc])
+          } else if ((raw as {type: string}).type === 'agent_step') {
+            // Accumulate sub-agent steps — visible in DevPanel live
+            const step = raw as unknown as AgentStep
+            if (!agentStepsBuf[pendingToolName]) agentStepsBuf[pendingToolName] = []
+            agentStepsBuf[pendingToolName].push(step as unknown as Record<string, unknown>)
+            setToolCalls(prev => prev.map(tc =>
+              tc.tool === pendingToolName
+                ? { ...tc, agentSteps: [...(tc.agentSteps ?? []), step as AgentStep] }
+                : tc
+            ))
           } else if (raw.type === 'tool_result') {
             // Update DevPanel sidebar status
             setToolCalls(prev =>
