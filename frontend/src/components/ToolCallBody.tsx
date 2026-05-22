@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import hljs from 'highlight.js'
+import { useScrollToBottom } from '@/hooks/useAutoScroll'
 
 const _CODE_TOOLS = new Set(['create_file', 'edit_file'])
 
@@ -53,8 +54,10 @@ export function ToolCallBody({ toolName, argsDisplay, streaming }: {
     }
   }, [isCodeTool, rawCode, lang])
 
+  const codeScrollRef = useScrollToBottom([rawCode], streaming) as React.RefObject<HTMLDivElement>
+
   if (isCodeTool && (streaming || rawCode)) {
-    const displayCode = streaming ? _unescapeContent(rawCode) : _unescapeContent(rawCode)
+    const displayCode = _unescapeContent(rawCode)
     return (
       <div className="border-t border-white/5">
         <div className="flex items-center gap-2 px-3 py-1.5 bg-white/[0.02] border-b border-white/5">
@@ -65,7 +68,7 @@ export function ToolCallBody({ toolName, argsDisplay, streaming }: {
           <span className="text-[10px] font-mono text-text-muted/30 uppercase">{lang}</span>
           {streaming && <span className="w-1.5 h-1.5 rounded-full bg-accent/60 animate-pulse" />}
         </div>
-        <div className="max-h-72 overflow-y-auto">
+        <div ref={codeScrollRef as React.RefObject<HTMLDivElement>} className="max-h-72 overflow-y-auto">
           {highlighted ? (
             <pre className="p-3 text-xs leading-relaxed font-mono overflow-x-auto">
               <code dangerouslySetInnerHTML={{ __html: highlighted }} />
@@ -82,8 +85,12 @@ export function ToolCallBody({ toolName, argsDisplay, streaming }: {
     )
   }
 
+  const defaultScrollRef = useScrollToBottom([argsDisplay], streaming) as React.RefObject<HTMLPreElement>
   return (
-    <pre className="px-3 pb-3 pt-2 text-xs text-text-muted/60 leading-relaxed whitespace-pre-wrap border-t border-white/5 font-mono max-h-64 overflow-y-auto">
+    <pre
+      ref={defaultScrollRef}
+      className="px-3 pb-3 pt-2 text-xs text-text-muted/60 leading-relaxed whitespace-pre-wrap border-t border-white/5 font-mono max-h-64 overflow-y-auto"
+    >
       {streaming && !argsDisplay.trim()
         ? <span className="text-text-muted/40 italic">Executing…</span>
         : argsDisplay}
