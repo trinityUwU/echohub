@@ -1,3 +1,4 @@
+import concurrent.futures
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +18,10 @@ from backend.services.tool_service import (
 )
 
 router = APIRouter(prefix="/inference", tags=["inference"])
+
+# Dedicated executor for blocking tool calls (invoke_agent, etc.) — isolated
+# from the default asyncio thread pool to avoid deadlocks with the stream thread.
+_tool_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="tool_exec")
 
 def _get_models_dir():
     try:
@@ -686,7 +691,12 @@ async def tool_chat(req: ToolChatRequest):
                 pass
             except Exception as e:
                 logger.warning(f"[tool-chat] MCP routing check failed: {e}")
-            result = execute_tool(tool_name, tool_args, req.project_id, req.conv_id)
+            import asyncio as _asyncio
+            loop = _asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                _tool_executor,
+                lambda: execute_tool(tool_name, tool_args, req.project_id, req.conv_id)
+            )
             result += _context_footer(messages)
             if _estimate_tokens(messages) / _ctx_window >= _CTX_STOP_PCT:
                 _context_exhausted = True
