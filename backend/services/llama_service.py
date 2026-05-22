@@ -725,6 +725,7 @@ async def generate_with_tools(
         accumulated_tool_calls: list = []
 
         try:
+            logger.debug(f"[llama] generate_with_tools — {len(tools)} tools: {[t['function']['name'] for t in tools]}")
             try:
                 chunks = _llm.create_chat_completion(
                     messages=messages,

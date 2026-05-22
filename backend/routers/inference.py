@@ -418,7 +418,10 @@ async def tool_chat(req: ToolChatRequest):
     if engine_router.get_status() is None:
         raise HTTPException(status_code=404, detail="No model loaded.")
 
-    tools = get_tools(req.enabled_tools)
+    _enabled = req.enabled_tools
+    if _enabled is not None and "invoke_agent" not in _enabled:
+        _enabled = list(_enabled) + ["invoke_agent"]
+    tools = get_tools(_enabled)
     _mcp_awareness_blocks: list[str] = []
     # Inject tools from running MCP servers + collect their awareness blocks
     try:
@@ -477,12 +480,16 @@ async def tool_chat(req: ToolChatRequest):
             "- Be precise and factual. Flag uncertainty explicitly."
         )
         _RESEARCH_SYSTEM_PROMPT = (
-            "You are a research assistant with access to web search and browsing tools.\n\n"
+            "You are a research orchestrator. For any research task, you MUST delegate to a sub-agent using invoke_agent.\n\n"
+            "MANDATORY WORKFLOW:\n"
+            "1. Call invoke_agent with harness='web_research' and a complete self-contained brief.\n"
+            "2. The brief must include: the exact topic, what sources to find, what data to extract, and the expected output format.\n"
+            "3. Once invoke_agent returns, synthesize its findings into a clear answer for the user.\n\n"
             "RULES:\n"
-            "- Use web_search to find sources, fetch_url to read them.\n"
-            "- Always verify claims with at least one source before stating them as facts.\n"
-            "- Cite URLs for all factual claims.\n"
-            "- Synthesize findings into a clear, structured answer."
+            "- NEVER answer from memory or training data. Always use invoke_agent first.\n"
+            "- NEVER call web_search or fetch_url directly — delegate to invoke_agent with harness='web_research'.\n"
+            "- If the user asks a factual question about current events, tools, benchmarks, or any external topic: invoke_agent first.\n"
+            "- Synthesize the sub-agent JSON result into a readable answer with citations."
         )
 
         # Select base system prompt by project mode
