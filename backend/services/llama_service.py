@@ -78,6 +78,7 @@ _eject_requested: bool = False
 from backend.services.llama_lock import get_lock as _get_llama_lock
 _lock = _get_llama_lock()
 _load_config: Optional[dict] = None           # params used at last successful load
+_generation_lock = threading.Lock()           # serializes all _llm.create_chat_completion calls
 
 LOG_PATH = Path(__file__).resolve().parents[2] / "logs" / "llama.log"
 
@@ -694,32 +695,33 @@ def chat_completion_sync(
     **_ignored,
 ) -> dict | None:
     """Blocking (non-streaming) tool completion for sub-agent use.
-    Called from a regular thread — must NOT be called from the async stream path."""
+    Acquires _generation_lock — waits for any active stream to finish first."""
     if _llm is None:
         raise RuntimeError("No model loaded")
-    try:
-        response = _llm.create_chat_completion(
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=False,
-        )
-    except Exception as e:
-        logger.warning(f"[llama] chat_completion_sync tools failed ({e}), retrying without tools")
-        response = _llm.create_chat_completion(
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=False,
-        )
-    choices = response.get("choices", [{}])
-    msg = choices[0].get("message", {}) if choices else {}
-    return {
-        "type": "response",
-        "choices": [{"message": msg, "finish_reason": choices[0].get("finish_reason") if choices else "stop"}],
-    }
+    with _generation_lock:
+        try:
+            response = _llm.create_chat_completion(
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=False,
+            )
+        except Exception as e:
+            logger.warning(f"[llama] chat_completion_sync tools failed ({e}), retrying without tools")
+            response = _llm.create_chat_completion(
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=False,
+            )
+        choices = response.get("choices", [{}])
+        msg = choices[0].get("message", {}) if choices else {}
+        return {
+            "type": "response",
+            "choices": [{"message": msg, "finish_reason": choices[0].get("finish_reason") if choices else "stop"}],
+        }
 
 
 async def generate_with_tools(
@@ -760,6 +762,7 @@ async def generate_with_tools(
         accumulated_text = ""
         accumulated_tool_calls: list = []
 
+        _generation_lock.acquire()
         try:
             logger.debug(f"[llama] generate_with_tools — {len(tools)} tools: {[t['function']['name'] for t in tools]}")
             try:
@@ -860,6 +863,7 @@ async def generate_with_tools(
                 asyncio.run_coroutine_threadsafe(queue.put({"type": "error", "error": str(e)}), loop)
         finally:
             asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+            _generation_lock.release()
 
     threading.Thread(target=_stream_sync, daemon=True).start()
 
