@@ -387,6 +387,9 @@ export interface AgentStep {
   args?: Record<string, unknown>
   result_preview?: string
   status?: string
+  summary?: string
+  content?: string   // for agent_text_chunk / agent_thinking_chunk
+  error?: string
 }
 
 export interface ToolCall {
