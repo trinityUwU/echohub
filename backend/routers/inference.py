@@ -421,6 +421,9 @@ async def tool_chat(req: ToolChatRequest):
     _enabled = req.enabled_tools
     if _enabled is not None and "invoke_agent" not in _enabled:
         _enabled = list(_enabled) + ["invoke_agent"]
+    # Research mode: only invoke_agent — block direct web_search/fetch_url
+    if (req.project_mode or "") == "research":
+        _enabled = ["invoke_agent"]
     tools = get_tools(_enabled)
     _mcp_awareness_blocks: list[str] = []
     # Inject tools from running MCP servers + collect their awareness blocks
