@@ -5,6 +5,7 @@ Provides _invoke_agent, _HARNESS_TOOLS, _SUB_AGENT_SYSTEM, _MAX_AGENT_TOOL_CALLS
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from loguru import logger
@@ -20,15 +21,44 @@ _HARNESS_TOOLS: dict[str, list[str]] = {
 }
 
 _SUB_AGENT_SYSTEM = (
-    "You are a sub-agent running in an isolated context. "
-    "You have been given a precise task. Complete it using the available tools. "
-    "When done, output a structured result in this exact JSON format:\n"
-    '{"status": "success|partial|failed", "summary": "...", "findings": {}, "actions_taken": []}\n'
-    "Do not include anything outside this JSON in your final response. "
-    "Be concise. If you cannot complete the task, set status to 'failed' and explain why in summary."
+    "You are a sub-agent. Complete the task using the available tools.\n"
+    "When done, output ONLY this JSON (no other text):\n"
+    '{"status": "success|partial|failed", "summary": "one sentence", "findings": {}, "actions_taken": []}\n'
+    "Do not explain. Do not add markdown. Just the JSON."
 )
 
 _MAX_AGENT_TOOL_CALLS = 15
+
+# Regex to extract <tool_call>...</tool_call> blocks (Qwen3 XML format)
+_TC_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
+
+
+def _parse_xml_tool_calls(content: str) -> list[dict]:
+    """Extract tool calls from Qwen3 XML <tool_call> format."""
+    results = []
+    for i, m in enumerate(_TC_RE.finditer(content)):
+        try:
+            data = json.loads(m.group(1).strip())
+            name = data.get("name", "")
+            args = data.get("arguments", data.get("args", {}))
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except (json.JSONDecodeError, ValueError):
+                    args = {}
+            results.append({
+                "id": f"xml_{i}",
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(args)},
+            })
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return results
+
+
+def _strip_think(content: str) -> str:
+    """Remove <think>...</think> blocks from content."""
+    return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
 
 
 def _invoke_agent(args: dict[str, Any], project_id: str, conv_id: str) -> str:
@@ -40,11 +70,9 @@ def _invoke_agent(args: dict[str, Any], project_id: str, conv_id: str) -> str:
         harness = "read_strict"
 
     from backend.services import engine_router
-    status = engine_router.get_status()
-    if status is None:
+    if engine_router.get_status() is None:
         return json.dumps({"status": "failed", "summary": "No model loaded", "findings": {}, "actions_taken": []})
 
-    # Local import to avoid circular dependency
     from backend.services.tool_service import execute_tool, get_tools, get_workspace_path
 
     enabled = _HARNESS_TOOLS[harness]
@@ -57,7 +85,6 @@ def _invoke_agent(args: dict[str, Any], project_id: str, conv_id: str) -> str:
 
     actions_taken: list[str] = []
     tool_calls_count = 0
-    max_tokens = 2048
 
     try:
         while tool_calls_count < _MAX_AGENT_TOOL_CALLS:
@@ -65,31 +92,43 @@ def _invoke_agent(args: dict[str, Any], project_id: str, conv_id: str) -> str:
                 messages=messages,
                 tools=agent_tools,
                 temperature=0.1,
-                max_tokens=max_tokens,
+                max_tokens=2048,
             )
             if response is None:
                 break
 
             choice = response.get("choices", [{}])[0]
             msg = choice.get("message", {})
-            tool_calls = msg.get("tool_calls") or []
-            content = msg.get("content") or ""
+            raw_content = msg.get("content") or ""
+            content = _strip_think(raw_content)
 
-            messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
+            # Try native tool_calls first, fall back to XML parsing
+            tool_calls: list[dict] = msg.get("tool_calls") or []
+            if not tool_calls and "<tool_call>" in raw_content:
+                tool_calls = _parse_xml_tool_calls(raw_content)
+
+            # Strip <tool_call> blocks from visible content before appending
+            clean_content = _TC_RE.sub("", raw_content).strip()
+            clean_content = _strip_think(clean_content)
+
+            messages.append({"role": "assistant", "content": clean_content, "tool_calls": tool_calls if tool_calls else None})
 
             if not tool_calls:
-                # Final response — parse JSON result
-                try:
-                    result = json.loads(content)
-                    result.setdefault("actions_taken", actions_taken)
-                    return json.dumps(result)
-                except (json.JSONDecodeError, ValueError):
-                    return json.dumps({
-                        "status": "success",
-                        "summary": content,
-                        "findings": {},
-                        "actions_taken": actions_taken,
-                    })
+                # Final answer — extract JSON from content
+                json_match = re.search(r"\{.*\}", content, re.DOTALL)
+                if json_match:
+                    try:
+                        result = json.loads(json_match.group())
+                        result.setdefault("actions_taken", actions_taken)
+                        return json.dumps(result)
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+                return json.dumps({
+                    "status": "success",
+                    "summary": content or "No response",
+                    "findings": {},
+                    "actions_taken": actions_taken,
+                })
 
             for tc in tool_calls:
                 tool_calls_count += 1
@@ -100,12 +139,13 @@ def _invoke_agent(args: dict[str, Any], project_id: str, conv_id: str) -> str:
                 except (json.JSONDecodeError, ValueError):
                     t_args = {}
 
+                logger.info(f"[invoke_agent] {t_name}({list(t_args.keys())})")
+
                 if t_name not in enabled:
                     tool_result = f"Error: tool '{t_name}' not available in harness '{harness}'"
                 else:
                     tool_result = execute_tool(t_name, t_args, project_id, conv_id)
 
-                    # Harness validation after file mutations
                     if t_name in ("create_file", "edit_file") and "Error:" not in tool_result:
                         file_path = t_args.get("path", "")
                         if file_path:
