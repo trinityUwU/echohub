@@ -746,7 +746,7 @@ function ProjectWorkspace({
             Logs
           </button>
         </motion.div>
-        {isDevOnlyMode && (
+        {(
           <PanelWrapper side="left" collapsed={convSidebarCollapsed} onToggle={() => setConvSidebarCollapsed(v => !v)}>
             <ProjectConvSidebar
               conversations={convHook.conversations}
