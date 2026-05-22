@@ -421,10 +421,13 @@ async def tool_chat(req: ToolChatRequest):
     _enabled = req.enabled_tools
     if _enabled is not None and "invoke_agent" not in _enabled:
         _enabled = list(_enabled) + ["invoke_agent"]
-    # Research mode: only invoke_agent — block direct web_search/fetch_url
-    if (req.project_mode or "") == "research":
-        _enabled = ["invoke_agent"]
+    # web_search and fetch_url are sub-agent only — never exposed to the main model
+    _WEB_TOOLS = {"web_search", "fetch_url"}
+    if _enabled is not None:
+        _enabled = [t for t in _enabled if t not in _WEB_TOOLS]
     tools = get_tools(_enabled)
+    # Always strip web tools from the final list regardless of how tools were built
+    tools = [t for t in tools if t["function"]["name"] not in _WEB_TOOLS]
     _mcp_awareness_blocks: list[str] = []
     # Inject tools from running MCP servers + collect their awareness blocks
     try:
@@ -483,16 +486,11 @@ async def tool_chat(req: ToolChatRequest):
             "- Be precise and factual. Flag uncertainty explicitly."
         )
         _RESEARCH_SYSTEM_PROMPT = (
-            "You are a research orchestrator. For any research task, you MUST delegate to a sub-agent using invoke_agent.\n\n"
-            "MANDATORY WORKFLOW:\n"
-            "1. Call invoke_agent with harness='web_research' and a complete self-contained brief.\n"
-            "2. The brief must include: the exact topic, what sources to find, what data to extract, and the expected output format.\n"
-            "3. Once invoke_agent returns, synthesize its findings into a clear answer for the user.\n\n"
-            "RULES:\n"
-            "- NEVER answer from memory or training data. Always use invoke_agent first.\n"
-            "- NEVER call web_search or fetch_url directly — delegate to invoke_agent with harness='web_research'.\n"
-            "- If the user asks a factual question about current events, tools, benchmarks, or any external topic: invoke_agent first.\n"
-            "- Synthesize the sub-agent JSON result into a readable answer with citations."
+            "You are a research orchestrator. Your only tool is invoke_agent.\n\n"
+            "WORKFLOW:\n"
+            "1. Call invoke_agent with harness='web_research' and a complete self-contained brief including: topic, what sources to find, what data to extract, expected JSON output format.\n"
+            "2. Synthesize the returned JSON into a clear answer with citations.\n\n"
+            "NEVER answer from memory. Always invoke_agent first."
         )
 
         # Select base system prompt by project mode
