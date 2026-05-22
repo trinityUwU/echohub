@@ -331,6 +331,37 @@ async def generate_with_tools(
         raise RuntimeError("No model loaded")
 
 
+def chat_completion(messages: list[dict], tools: list[dict], **kwargs) -> dict | None:
+    """Blocking wrapper around generate_with_tools for sub-agent use."""
+    import asyncio
+
+    final_response: dict | None = None
+
+    async def _run() -> None:
+        nonlocal final_response
+        async for chunk in generate_with_tools(messages=messages, tools=tools, **kwargs):
+            if isinstance(chunk, dict) and chunk.get("type") == "response":
+                final_response = chunk
+            elif isinstance(chunk, dict) and chunk.get("type") == "error":
+                raise RuntimeError(chunk.get("error", "unknown error"))
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(asyncio.run, _run())
+                future.result(timeout=300)
+        else:
+            loop.run_until_complete(_run())
+    except Exception as e:
+        from loguru import logger
+        logger.error(f"[engine_router] chat_completion error: {e}")
+        return None
+
+    return final_response
+
+
 def get_engine_log(n_lines: int = 100) -> str:
     from backend.services import llama_service, vllm_service
     if _active_engine == "llama":
