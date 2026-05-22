@@ -258,35 +258,35 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
 
     ;(async (): Promise<void> => {
       try {
+        // Throttle: render at most every RENDER_INTERVAL_MS to avoid React thrashing.
+        // Declared outside the for-await so the timer persists across events.
+        const RENDER_INTERVAL_MS = 50
+        let lastRenderTime = 0
+        const updateAccumulated = (snap: string, force = false): void => {
+          const now = Date.now()
+          if (!force && now - lastRenderTime < RENDER_INTERVAL_MS) return
+          lastRenderTime = now
+          const historyChars = messagesRef.current.reduce((sum, m) => {
+            const c = typeof m.content === 'string' ? m.content : ''
+            return sum + c.length
+          }, 0)
+          _setUsedTokens(Math.round((historyChars + snap.length) / 4))
+          setMessages(prev => {
+            const updated = [...prev]
+            updated[updated.length - 1] = { role: 'assistant', content: snap, id: assistantId }
+            messagesRef.current = updated
+            return updated
+          })
+        }
+
         for await (const raw of toolChat(req)) {
           if (controller.signal.aborted) break
-          // Handle timings before the typed SseEvent check
           if (typeof raw === 'object' && raw !== null && 'timings' in raw) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             emitTimings((raw as any).timings)
             continue
           }
           if (!isSseEvent(raw)) continue
-
-          // Helper — update message + token counter after every content change
-          const RENDER_INTERVAL_MS = 80
-          let lastRenderTime = 0
-          const updateAccumulated = (snap: string, force = false): void => {
-            const now = Date.now()
-            if (!force && now - lastRenderTime < RENDER_INTERVAL_MS) return
-            lastRenderTime = now
-            const historyChars = messagesRef.current.reduce((sum, m) => {
-              const c = typeof m.content === 'string' ? m.content : ''
-              return sum + c.length
-            }, 0)
-            _setUsedTokens(Math.round((historyChars + snap.length) / 4))
-            setMessages(prev => {
-              const updated = [...prev]
-              updated[updated.length - 1] = { role: 'assistant', content: snap, id: assistantId }
-              messagesRef.current = updated
-              return updated
-            })
-          }
 
           if (raw.type === 'tool_call_pending') {
             // no-op

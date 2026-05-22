@@ -106,6 +106,16 @@ export function ToolCallBlock({ content, streaming, agentSteps = [] }: {
                 milestones={milestones}
                 agentRunning={agentRunning}
               />
+            ) : isInvokeAgent && streaming ? (
+              // invoke_agent is being written — show brief preview, not raw JSON
+              <div className="px-3 py-2 border-t border-white/5">
+                <div className="flex items-center gap-2">
+                  <motion.div className="w-1.5 h-1.5 rounded-full bg-accent/60 flex-shrink-0"
+                    animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1 }} />
+                  <span className="text-[11px] text-text-muted/50 font-mono">Preparing brief…</span>
+                  <span className="text-[10px] text-text-muted/30 font-mono ml-auto">{argsDisplay.length}c</span>
+                </div>
+              </div>
             ) : (
               <pre className="px-3 pb-3 pt-2 text-xs text-text-muted/60 leading-relaxed whitespace-pre-wrap border-t border-white/5 font-mono max-h-64 overflow-y-auto">
                 {streaming && !argsDisplay.trim() ? (

@@ -33,11 +33,14 @@ function parseSegments(content: string): Segment[] {
   while (remaining.length > 0) {
     if (!inThink && !inToolCall && !inToolResult) {
       const thinkOpen = remaining.indexOf('<think>')
+      const thinkClose = remaining.indexOf('</think>')  // orphan close — Qwen3 omits opening tag
       const tcOpen = remaining.indexOf('<tool_call>')
       const trOpen = remaining.indexOf('<tool_result')
 
       const candidates = [
         thinkOpen >= 0 ? thinkOpen : Infinity,
+        // treat orphan </think> as an implicit <think> opened at position 0
+        thinkClose >= 0 && (thinkOpen < 0 || thinkClose < thinkOpen) ? thinkClose : Infinity,
         tcOpen >= 0 ? tcOpen : Infinity,
         trOpen >= 0 ? trOpen : Infinity,
       ]
@@ -50,6 +53,15 @@ function parseSegments(content: string): Segment[] {
       }
 
       buffer += remaining.slice(0, first)
+
+      // Orphan </think> — treat everything before it as implicit thinking content
+      if (first === thinkClose && (thinkOpen < 0 || thinkClose < thinkOpen)) {
+        push('text')
+        segments.push({ type: 'thinking', content: buffer || remaining.slice(0, thinkClose), open: false })
+        buffer = ''
+        remaining = remaining.slice(thinkClose + '</think>'.length)
+        continue
+      }
 
       if (first === thinkOpen) {
         push('text')
