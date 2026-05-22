@@ -1,104 +1,114 @@
 # STATE — EchoHub
-*Dernière mise à jour : 2026-05-22 (session 24)*
+*Dernière mise à jour : 2026-05-22 (session 25)*
 
 ## Résumé de l'état actuel
 
-Application Tauri v2 stable. Session 24 = deux grands blocs : (1) **v1.1 mémoire sémantique + agents natifs** — ConversationManager JSON, embedding nomic-embed CPU, ChromaDB memory layer, tools search/store/invoke_agent, harness universel, Settings > Memory UI, system prompts conditionnels. (2) **Bugfixes vLLM + chat** — GPTQ/AWQ "No model loaded" (import stale), tool-use 400 (flags manquants), réponse vide vLLM, N-gram segfault, system prompts, footers, ctx adaptatif auto-reload. 35+ commits sur master.
+Application Tauri v2 stable. Session 25 = deux blocs : (1) **Types projets Docs+Research fonctionnels** — tables DB `project_context_files`/`project_sources`, endpoints REST upload/list/delete, injection automatique dans system prompt selon mode, panels frontend drag-drop. (2) **invoke_agent débogué** — chaîne complète fonctionnelle (SIGSEGV→SIGABRT→deadlock→XML parsing), sous-agent exécute vraiment web_search+fetch_url, progress streaming implémenté côté backend+frontend. **Problème ouvert critique** : les steps du sous-agent ne s'affichent pas visuellement dans le ToolCallBlock pendant l'exécution — le bloc reste statique "running" sans feedback visible.
 
-## Ce qui a été fait — session 24 (2026-05-22)
+## Ce qui a été fait — session 25 (2026-05-22)
 
-### v1.1 — ConversationManager JSON (Step 1)
-- `backend/services/conversation_manager.py` : CRUD chat + project convs sur JSON
-- `~/.local/share/echohub/conversations/{id}.json` + `_index.json`
-- Migration one-shot SQLite→JSON au boot, `to_context(max_tokens)` sliding window
-- Routers `conversations.py` + `projects.py` branchés, `db.py` hors loop pour convs
+### Types projets Docs + Research
+- DB : tables `project_context_files` + `project_sources` avec CRUD complet (`db.py`)
+- Endpoints REST : `GET/POST/DELETE /{project_id}/context-files` + `/{project_id}/sources` + upload multipart (`projects.py`)
+- Inférence : injection auto des fichiers/sources dans `combined_system` selon `project_mode` (docs/research) — `inference.py`
+- Frontend : `DocsPanel` drag-drop + liste fichiers avec suppression, `ResearchPanel` input URL + drag-drop doc
+- Hook `useProjectContext.ts` : `useContextFiles` + `useProjectSources` avec refresh auto
+- `apiUpload()` ajouté dans `base.ts` pour multipart
+- `ProjectsPanel.tsx` : helpers partagés `DropZone`, `UploadingRow`, icons
 
-### v1.1 — Embedding + ChromaDB + Tools (Steps 2–4)
-- `embedding_service.py` : nomic-embed-text-v1.5 GGUF CPU-only, auto-download HF, 768 dims ~100ms
-- `llama_lock.py` : mutex global partagé — résout "Memory is not initialized" (état C global llama.cpp)
-- `memory_service.py` : ChromaDB cosine, scope conv_id/project_id, routes `/memory/*`
-- `search_memory`, `store_memory`, `invoke_agent` dans TOOLS[] + `execute_tool()`
-- `invoke_agent` : boucle tool-use isolée sur le modèle chargé, 3 harness profiles
+### invoke_agent — fix complet de la chaîne
+- **Routing** : en mode docs/research/chat, le chat passait par `/inference/chat` sans tools. Fix : `isDevMode = true` pour tous les modes projet, `isDevOnlyMode` pour UI dev-only
+- **web_search exposé direct** : le modèle appelait `web_search` lui-même au lieu d'`invoke_agent`. Fix : `web_search`+`fetch_url` retirés des tools du modèle principal — réservés sous-agents uniquement
+- **invoke_agent absent** : toujours injecté dans `enabled_tools` même si pas dans la liste skills
+- **SIGSEGV** : appel concurrent `_llm.create_chat_completion` depuis threads différents. Fix : `chat_completion_sync()` dans `llama_service` + `_generation_lock` mutex
+- **SIGABRT** : `asyncio.run()` dans thread depuis event loop uvicorn. Fix : `chat_completion_sync` appel direct sans asyncio
+- **Deadlock** : `execute_tool` bloquait l'event loop. Fix : `loop.run_in_executor(_tool_executor, ...)` avec executor dédié
+- **XML tool_calls** : Qwen3 génère `<tool_call>` XML, `tool_agent.py` ne parsait que le format natif. Fix : `_parse_xml_tool_calls()` + `_strip_think()` dans tool_agent
+- **harness web_research** : ajouté dans `_HARNESS_TOOLS` avec `[web_search, fetch_url]`
+- **Research system prompt** : forcé `invoke_agent` only, interdit direct web_search
 
-### v1.1 — Harness + UI + System prompts (Steps 5–7)
-- `harness_service.py` : language detection + syntax (ast/tsc) + lint (ruff) + result normalizer
-- `MemoryTab.tsx` + toggle Memory dans ChatTopBar + `toggleMemory()` dans useConversations
-- System prompts dynamiques : Dev→dev prompt, Docs→analyse, Research→web, Chat→helpful assistant
-- `project_mode` dans `ToolChatRequest`, inject memories si `memory_enabled` sur la conv
-
-### Refactoring modules (normes < 500L)
-- `vllm_service.py` splitté : `vllm_generate` + `vllm_loader` + `vllm_process` + `vllm_vram`
-- `tool_service.py` splitté : `tool_agent` + `tool_memory` + `tool_definitions`
-- `/lint` command + `scripts/lint_standards.py` + copie globale `~/.claude/lint_standards.py`
-
-### Bugfixes vLLM critiques
-- **GPTQ/AWQ "No model loaded"** : `vllm_generate._current_model` stale (import = copy). Fix : `_model()` via `sys.modules`
-- **Tool-use 400** : flags `--enable-auto-tool-choice --tool-call-parser` ajoutés au launch. `_detect_tool_parser()` auto selon famille
-- **Réponse vide tool-chat vLLM** : `generate_with_tools` yieldait strings SSE brutes vs dicts attendus. Fix : `_stream_and_parse()` dans vllm_generate
-- **Circular import** : `parse_load_error` dans vllm_loader ne dépend plus de vllm_service
-
-### Bugfixes llama.cpp + chat UI
-- **N-gram segfault** : défaut `'off'` dans useModels/App.tsx/LoadModelModal (était `'ngram'`)
-- **Footer stats disparaissent** : memo React ne comparait pas `message.stats` ni `message.loadConfig`
-- **Stats persistées** : `useToolChat done` attach stats au message state + DB via `onSaveMessage`
-- **Bouton reload** : `loadConfig` sauvegardé dans messages depuis `useChat`/`useToolChat`
-- **Regenerate/editUser mode skills** : `sendFromHistory()` ajouté dans `useToolChat`
-- **Conv switch** : `stop()` + `setMessages()` forcés au changement de conv même si `streaming=true`
-- **Delete conv archivée** : filtrait seulement `conversations[]`, pas `archivedConversations[]`
-- **ctx adaptatif** : auto-reload sans toast si `ctx_mode='adaptive'`, `ctxMode` dans `activeLoadConfig`
+### Progress streaming invoke_agent
+- `tool_agent.py` : `progress_cb` optionnel, émet `agent_tool_start/agent_tool_done/agent_thinking/agent_done`
+- `inference.py` : interception `invoke_agent` dans `_execute_tool_with_intercept`, `_agent_sse_queue` + `_drain_agent_sse()`, events `agent_step` streamés en SSE
+- `useToolChat.ts` : handler `agent_step`, accumulation dans `agentStepsBuf`, mise à jour `ToolCall.agentSteps`
+- `types/index.ts` : `AgentStep` interface + `agentSteps?: AgentStep[]` dans `ToolCall`
+- `DevPanel.tsx` : affichage steps sous chaque tool call (spinner/check/dots)
+- `MessageContent.tsx` : `ToolCallBlock` reçoit `agentSteps`, affiche steps live (icons + texte)
+- `MessageRow.tsx` : prop `agentStepsMap` passée depuis `ChatPage`
+- `ChatPage.tsx` : `agentStepsMap` construit depuis `toolCalls`, `skillChatHook.toolCalls` (pas `[]`) en chat normal
 
 ## Décisions prises
 
 | Décision | Raison | Date |
 |----------|--------|------|
-| ConversationManager JSON | SQLite non searchable sémantiquement, sliding window natif | 2026-05-22 |
-| nomic-embed CPU-only | Zéro impact VRAM modèle principal | 2026-05-22 |
-| Mutex llama.cpp global (llama_lock.py) | État C global — deux instances concurrentes = segfault | 2026-05-22 |
-| ChromaDB = layer sémantique uniquement | Messages bruts dans JSON, jamais ChromaDB | 2026-05-22 |
-| invoke_agent = même modèle, contexte isolé | Zéro reload VRAM, contexte parent jamais exposé | 2026-05-22 |
-| N-gram OFF par défaut | Segfault numpy shape sur Qwen3 GGUF et autres | 2026-05-22 |
-| vllm_generate._model() via sys.modules | Import direct = stale copy à None — accès live obligatoire | 2026-05-22 |
-| --enable-auto-tool-choice au launch | vLLM 0.21 nécessite flag explicite, non-défaut | 2026-05-22 |
-| ctx_mode='adaptive' → auto-reload sans modal | UX : user ne gère pas les limites de contexte | 2026-05-22 |
+| `web_search`/`fetch_url` jamais exposés au modèle principal | Modèle choisit la voie directe — forcer invoke_agent | 2026-05-22 |
+| `_generation_lock` mutex pour `_llm.create_chat_completion` | llama.cpp non thread-safe — SIGABRT si appel concurrent | 2026-05-22 |
+| `_tool_executor` dédié pour `execute_tool` | Éviter deadlock event loop asyncio avec thread stream | 2026-05-22 |
+| `chat_completion_sync()` appel direct sans asyncio | `asyncio.run()` dans thread depuis uvicorn = SIGSEGV/SIGABRT | 2026-05-22 |
+| XML tool_call parsing dans tool_agent | Qwen3 génère `<tool_call>` XML, format natif pas toujours présent | 2026-05-22 |
+| Docs/Research injèrent contexte dans system prompt (8K/fichier) | Pas de RAG complet encore, injection directe suffisante | 2026-05-22 |
+| `isDevMode = true` pour tous les modes projet | Docs/Research doivent aussi utiliser tool-chat pour invoke_agent | 2026-05-22 |
+
+## Problème ouvert CRITIQUE — À RÉSOUDRE EN PRIORITÉ
+
+### invoke_agent : steps non visibles dans le ToolCallBlock
+
+**Symptôme** : Quand `invoke_agent` tourne, le bloc reste statique "running" sans afficher les steps (web_search, fetch_url, etc.) en temps réel. L'utilisateur voit un spinner mais aucune progression.
+
+**Ce qui a été implémenté** (côté backend OK, validé par logs) :
+- `progress_cb` dans `tool_agent.py` émet les events
+- `_agent_sse_queue` + `_drain_agent_sse()` dans `inference.py` streamé en SSE
+- Events `agent_step` envoyés avant le `tool_result` SSE
+
+**Ce qui est suspecté ne pas fonctionner** (côté frontend) :
+- `_drain_agent_sse()` est appelé APRÈS que `run_in_executor` a terminé — les events sont donc drainés après coup, pas pendant l'exécution
+- Le vrai bug : `await loop.run_in_executor(_tool_executor, _run_with_progress)` attend la fin avant de retourner, donc `_drain_agent_sse()` n'est jamais appelé pendant que le sous-agent tourne
+- La queue se remplit pendant l'exécution mais personne ne la lit jusqu'à ce que `_execute_tool_with_intercept` retourne
+
+**Solution à implémenter** :
+- Lancer le sous-agent en background, lire la queue en concurrent pendant qu'il tourne, yield les events en SSE temps réel
+- Pattern correct : `asyncio.create_task()` pour lancer l'agent, `asyncio.Queue` async (pas `queue.Queue` threading), loop `while not done: event = await async_queue.get(); yield sse`
+- OU : thread séparé qui push dans queue, coroutine qui poll la queue en `asyncio.sleep(0)` loop et yield SSE tant que sentinel pas reçu
 
 ## Contexte non-évident
 
-- `llama_lock.py` : mutex singleton — TOUT appel llama.cpp (inférence + embedding) passe par ce lock
-- `vllm_generate.py` : lire `_current_model` via `sys.modules['backend.services.vllm_service']._current_model` — import direct = stale
-- `Path(os.getenv("CHROMA_DIR", ""))` est bugué (`Path("")` truthy). Corrigé par `if os.getenv(...) else default`
-- Convs migrées dans `~/.local/share/echohub/conversations/`. Marqueur `.conv_migrated` empêche double migration
-- `ctx_mode` : snake_case dans `types/index.ts LoadConfig`, camelCase dans `useModels.LoadConfig` local — conversions fragiles
-- `MessageRow` memo doit comparer `message.stats` et `message.loadConfig` — sinon re-render bloqué
-- `streaming=true` bloquait `setMessages(activeMessages)` — `stop()` forcé au changement de conv
-- `chroma.sqlite3` créé à la racine (bug CHROMA_DIR) — fichier parasite à supprimer
+- `_generation_lock` dans llama_service : acquis par `_stream_sync` thread au début, relâché dans `finally`. `chat_completion_sync` attend ce lock — donc jamais concurrent avec le stream.
+- `tool_agent.py` parse XML `<tool_call>` via `_TC_RE` regex + `_strip_think()` pour nettoyer le thinking Qwen3
+- `_tool_executor = ThreadPoolExecutor(max_workers=4)` global dans inference.py — évite que execute_tool bloque l'event loop uvicorn
+- `isDevOnlyMode = project.mode === 'dev'` — contrôle uniquement UI (conv sidebar, workspace files). `isDevMode = true` pour tous (tool-chat routing)
+- `web_research` harness = `[web_search, fetch_url]` — seuls tools disponibles pour le sous-agent de recherche
+- Fichiers context (Docs) tronqués à 8K chars par fichier dans system prompt — pas de RAG encore
+- `chroma.sqlite3` à la racine = fichier parasite (bug CHROMA_DIR) — à supprimer
 
 ## Prochaines étapes (ordre prioritaire)
 
-1. **Tester vLLM tool-use** après reload avec `--enable-auto-tool-choice` (modèle actuel chargé sans ces flags)
-2. **Types projets Dev/Docs/Research** — layouts fonctionnels (file tree IDE-like, drag-drop docs, sources URL)
-3. **RAG natif projets** — PDF/DOCX/MD → ChromaDB par projet, retrieval injecté
-4. **Remote Access** — Cloudflare Tunnel toggle, Telegram adapter
-5. **Parallel models** — load plusieurs modèles simultanément
-6. **MCP logs dans card skill** — GET /skills/{id}/mcp/logs?lines=50
-7. Supprimer `chroma.sqlite3` à la racine
+1. **CRITIQUE : Fixer l'affichage temps réel des steps invoke_agent** — voir section "Problème ouvert CRITIQUE" ci-dessus. Pattern async correct requis.
+2. Scoring qualité algorithmique dans les benchmarks (sans LLM juge)
+3. Nouveaux profils benchmark conversation
+4. RAG natif complet dans les projets (PDF, DOCX, etc.)
+5. Remote Access — Cloudflare Tunnel + Telegram
+6. Parallel models
 
 ## Points en suspens
 
-- `useToolChat` ne sauvegarde pas message user dans certains cas (conv "ping" = 1 seul message assistant) — à investiguer
-- Stats à zéro dans done event si `_total_text_len=0` (path vLLM tool-chat sans text_chunk comptabilisé)
-- Erreur TS pré-existante App.tsx:344 (type LoadConfig mismatch) — non bloquante
-- Violations lint dans nos propres fichiers (_invoke_agent 106L, _edit_file 48L) — acceptées, cohésion forte
+- Erreur TS pré-existante App.tsx:354 (type LoadConfig mismatch) — non bloquante
+- Stats à zéro dans done event vLLM (path tool-chat sans text_chunk) — non bloquant
+- `chroma.sqlite3` parasite à la racine — à supprimer
+- invoke_agent progress visible uniquement après fin (drain post-exécution) — bug critique session 25
 
 ## Historique
 
+### Session 24 (2026-05-22)
+v1.1 mémoire sémantique + agents natifs livré (ConversationManager JSON, embedding nomic-embed, ChromaDB, tools search/store/invoke_agent, harness universel, Settings Memory UI, system prompts dynamiques). 35+ bugfixes vLLM/chat.
+
 ### Session 23 (2026-05-21)
-Load profiles (Performance/Balanced/Gaming/Minimal), offload_kqv, n_batch, smart cap ctx, multi-GPU llama+vLLM, speculative decoding ngram/MTP/draft, n_threads adaptatif, notifications persistantes localStorage.
+Load profiles (Performance/Balanced/Gaming/Minimal), offload_kqv, multi-GPU, speculative decoding, n_threads adaptatif, notifications persistantes.
 
 ### Session 22 (2026-05-21)
-Context bar 4 couleurs, toast ctx exceeded, KV quant Q4_0 défaut, throttle render 80ms, smart ctx initial 8K reasoning, fix LOG_PATH parents[2], watchdog backend Tauri.
+Context bar, KV quant, throttle render, smart ctx initial, fix LOG_PATH, watchdog backend Tauri.
 
 ### Session 21 (2026-05-20)
-Projects workspace (Dev/Docs/Research), tool calling natif, MCP/Skills intelligence, Discover filtres avancés, benchmark leaderboard, streaming token counter.
+Projects workspace (Dev/Docs/Research), tool calling natif, MCP/Skills intelligence, Discover filtres, benchmark leaderboard, streaming token counter.
 
 ### Sessions 1–20
 Foundation Tauri → vLLM multi-venv → UX → automation → benchmarks → GPU → vision → fine-tuning → MCP skills.
