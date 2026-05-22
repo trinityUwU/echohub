@@ -2,6 +2,14 @@ import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { AgentStep } from '@/types'
 
+function _extractTaskFromArgs(raw: string): string {
+  // Extract "task" field from partial JSON — works even when the JSON is incomplete
+  const m = raw.match(/"task"\s*:\s*"([\s\S]*)/)
+  if (!m) return raw.slice(0, 200)
+  // Unescape \n sequences, trim trailing incomplete chars
+  return m[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/, '"')
+}
+
 // ── ToolCallBlock ─────────────────────────────────────────────────────────────
 
 export function ToolCallBlock({ content, streaming, agentSteps = [] }: {
@@ -107,14 +115,12 @@ export function ToolCallBlock({ content, streaming, agentSteps = [] }: {
                 agentRunning={agentRunning}
               />
             ) : isInvokeAgent && streaming ? (
-              // invoke_agent is being written — show brief preview, not raw JSON
-              <div className="px-3 py-2 border-t border-white/5">
-                <div className="flex items-center gap-2">
-                  <motion.div className="w-1.5 h-1.5 rounded-full bg-accent/60 flex-shrink-0"
-                    animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1 }} />
-                  <span className="text-[11px] text-text-muted/50 font-mono">Preparing brief…</span>
-                  <span className="text-[10px] text-text-muted/30 font-mono ml-auto">{argsDisplay.length}c</span>
-                </div>
+              // invoke_agent brief being written — stream the task content live
+              <div className="px-3 pt-2 pb-2.5 border-t border-white/5">
+                <p className="text-[11px] text-text-muted/50 font-mono leading-relaxed whitespace-pre-wrap max-h-32 overflow-hidden">
+                  {_extractTaskFromArgs(argsDisplay)}
+                  <span className="inline-block w-1 h-3 bg-text-muted/30 animate-pulse rounded-sm ml-0.5 align-middle" />
+                </p>
               </div>
             ) : (
               <pre className="px-3 pb-3 pt-2 text-xs text-text-muted/60 leading-relaxed whitespace-pre-wrap border-t border-white/5 font-mono max-h-64 overflow-y-auto">
