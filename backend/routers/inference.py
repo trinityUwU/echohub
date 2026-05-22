@@ -652,44 +652,33 @@ async def tool_chat(req: ToolChatRequest):
                 )
             return f"\n\n[Context: {used:,}/{_ctx_window:,} tokens ({pct:.0%} used)]"
 
-        # SSE queue — invoke_agent pushes agent_step events here; the main loop yields them
-        import queue as _queue_mod
-        _agent_sse_queue: _queue_mod.Queue = _queue_mod.Queue()
-        _AGENT_SENTINEL = object()
-
-        async def _drain_agent_sse():
-            """Yield all pending agent_step SSE events from the queue (non-blocking)."""
-            while True:
-                try:
-                    event = _agent_sse_queue.get_nowait()
-                except _queue_mod.Empty:
-                    break
-                if event is _AGENT_SENTINEL:
-                    break
-                yield f"data: {_json.dumps({'type': 'agent_step', **event})}\n\n"
-
-        async def _execute_tool_with_intercept(tool_name: str, tool_args: dict) -> str:
+        async def _execute_tool_with_intercept(tool_name: str, tool_args: dict):
+            """Async generator. Yields SSE strings during execution, then ("RESULT", str) as final item."""
             nonlocal MAX_TOOL_CALLS, _cap_warning_injected, _context_exhausted
             if _context_exhausted:
-                return "[BLOCKED: context window exhausted. You must stop tool calls and give your final answer now.]"
+                yield ("RESULT", "[BLOCKED: context window exhausted. You must stop tool calls and give your final answer now.]")
+                return
             if tool_name == "set_tool_limit":
                 new_limit = int(tool_args.get("new_limit", 0))
                 reason = str(tool_args.get("reason", ""))
                 if new_limit <= MAX_TOOL_CALLS:
-                    return f"Error: new_limit ({new_limit}) must be greater than current limit ({MAX_TOOL_CALLS})."
+                    yield ("RESULT", f"Error: new_limit ({new_limit}) must be greater than current limit ({MAX_TOOL_CALLS}).")
+                    return
                 if new_limit > ABSOLUTE_CAP:
-                    return f"Error: new_limit ({new_limit}) exceeds the absolute maximum ({ABSOLUTE_CAP})."
+                    yield ("RESULT", f"Error: new_limit ({new_limit}) exceeds the absolute maximum ({ABSOLUTE_CAP}).")
+                    return
                 old = MAX_TOOL_CALLS
                 MAX_TOOL_CALLS = new_limit
                 _cap_warning_injected = False
-                logger.info(f"[tool-chat] set_tool_limit {old} → {new_limit} (reason: {reason})")
-                return f"Tool limit updated: {old} → {new_limit}. Reason recorded: {reason}"
+                logger.info(f"[tool-chat] set_tool_limit {old} \u2192 {new_limit} (reason: {reason})")
+                yield ("RESULT", f"Tool limit updated: {old} \u2192 {new_limit}. Reason recorded: {reason}")
+                return
             # Route MCP tools directly
             try:
                 from backend.services.mcp_client import is_mcp_tool, call_mcp_tool
                 is_mcp, skill_id = is_mcp_tool(tool_name, req.project_id)
                 if is_mcp and skill_id:
-                    logger.info(f"[tool-chat] routing {tool_name!r} → MCP server {skill_id!r}")
+                    logger.info(f"[tool-chat] routing {tool_name!r} \u2192 MCP server {skill_id!r}")
                     import asyncio as _asyncio
                     try:
                         mcp_result = await _asyncio.wait_for(
@@ -702,28 +691,30 @@ async def tool_chat(req: ToolChatRequest):
                     if _estimate_tokens(messages) / _ctx_window >= _CTX_STOP_PCT:
                         _context_exhausted = True
                         mcp_result += "\n\n[HARD STOP: context window at 92%+. No more tool calls allowed. Summarize now.]"
-                    return mcp_result
+                    yield ("RESULT", mcp_result)
+                    return
             except ImportError:
                 pass
             except Exception as e:
                 logger.warning(f"[tool-chat] MCP routing check failed: {e}")
-            import asyncio as _asyncio
-            loop = _asyncio.get_event_loop()
 
             if tool_name == "invoke_agent":
-                from backend.services.tool_agent import _invoke_agent as _run_agent
-                _SENTINEL = object()
-
-                def _run_with_progress() -> str:
-                    def _cb(event: dict) -> None:
-                        _agent_sse_queue.put(event)
-                    res = _run_agent(tool_args, req.project_id, req.conv_id, progress_cb=_cb)
-                    _agent_sse_queue.put(_AGENT_SENTINEL)
-                    return res
-
-                result = await loop.run_in_executor(_tool_executor, _run_with_progress)
+                from backend.services.agent_runner import run_agent_streaming
+                result = None
+                async for agent_event in run_agent_streaming(tool_args, req.project_id, req.conv_id):
+                    if agent_event.get("type") == "agent_done":
+                        result = agent_event.get("result_json", "{}")
+                        yield f"data: {_json.dumps({'type': 'agent_step', **{k: v for k, v in agent_event.items() if k != 'result_json'}})}\n\n"
+                    elif agent_event.get("type") == "agent_error":
+                        result = _json.dumps({"status": "failed", "summary": agent_event.get("error", ""), "findings": {}, "actions_taken": []})
+                        yield f"data: {_json.dumps({'type': 'agent_step', **agent_event})}\n\n"
+                    else:
+                        yield f"data: {_json.dumps({'type': 'agent_step', **agent_event})}\n\n"
+                if result is None:
+                    result = _json.dumps({"status": "failed", "summary": "No result", "findings": {}, "actions_taken": []})
             else:
-                result = await loop.run_in_executor(
+                import asyncio as _asyncio
+                result = await _asyncio.get_running_loop().run_in_executor(
                     _tool_executor,
                     lambda: execute_tool(tool_name, tool_args, req.project_id, req.conv_id)
                 )
@@ -731,7 +722,8 @@ async def tool_chat(req: ToolChatRequest):
             if _estimate_tokens(messages) / _ctx_window >= _CTX_STOP_PCT:
                 _context_exhausted = True
                 result += "\n\n[HARD STOP: context window at 92%+. No more tool calls allowed. Summarize now.]"
-            return result
+            yield ("RESULT", result)
+
 
         def _maybe_inject_cap_warning() -> None:
             nonlocal _cap_warning_injected
@@ -798,9 +790,12 @@ async def tool_chat(req: ToolChatRequest):
                                 tc_id = tc.get("id", f"native_{iteration}_{total_tool_calls}")
 
                                 yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
-                                tool_result = await _execute_tool_with_intercept(tool_name, tool_args)
-                                async for _sse in _drain_agent_sse():
-                                    yield _sse
+                                tool_result = None
+                                async for _item in _execute_tool_with_intercept(tool_name, tool_args):
+                                    if isinstance(_item, tuple) and _item[0] == "RESULT":
+                                        tool_result = _item[1]
+                                    else:
+                                        yield _item
                                 yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
 
                                 messages.append({"role": "assistant", "content": pass_text or "", "tool_calls": [tc]})
@@ -876,9 +871,12 @@ async def tool_chat(req: ToolChatRequest):
                                     stop_event.set()
 
                                     yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
-                                    tool_result = await _execute_tool_with_intercept(tool_name, tool_args)
-                                    async for _sse in _drain_agent_sse():
-                                        yield _sse
+                                    tool_result = None
+                                    async for _item in _execute_tool_with_intercept(tool_name, tool_args):
+                                        if isinstance(_item, tuple) and _item[0] == "RESULT":
+                                            tool_result = _item[1]
+                                        else:
+                                            yield _item
                                     yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
 
                                     tc_id = f"tc_{iteration}_{total_tool_calls}"
