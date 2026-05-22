@@ -590,12 +590,13 @@ function ProjectWorkspace({
 
   const projectSkillsHook = useSkills()
   const projectAlertHook = useAlert()
-  const isDevMode = project.mode === 'dev'
+  const isDevMode = true  // all project modes use toolChat (tools + system prompt routing)
+  const isDevOnlyMode = project.mode === 'dev'  // dev-specific UI: conv sidebar, workspace files
 
   // Load history when active conversation changes
   const prevConvId = useRef<string | null>(null)
   useEffect(() => {
-    if (!isDevMode || !convHook.activeId) return
+    if (!isDevOnlyMode || !convHook.activeId) return
     if (convHook.activeId === prevConvId.current) return
     prevConvId.current = convHook.activeId
     convHook.loadMessages(convHook.activeId).then(msgs => {
@@ -609,8 +610,8 @@ function ProjectWorkspace({
   const oomError = isDevMode ? false : chatHook.oomError
   const usedTokens = isDevMode ? toolChatHook.usedTokens : chatHook.usedTokens
   const isTokensExact = isDevMode ? false : chatHook.isTokensExact
-  const toolCalls = isDevMode ? toolChatHook.toolCalls : []
-  const workspaceFiles = isDevMode ? toolChatHook.workspaceFiles : []
+  const toolCalls = isDevOnlyMode ? toolChatHook.toolCalls : []
+  const workspaceFiles = isDevOnlyMode ? toolChatHook.workspaceFiles : []
 
   const stop = isDevMode ? toolChatHook.stop : chatHook.stop
 
@@ -745,7 +746,7 @@ function ProjectWorkspace({
             Logs
           </button>
         </motion.div>
-        {isDevMode && (
+        {isDevOnlyMode && (
           <PanelWrapper side="left" collapsed={convSidebarCollapsed} onToggle={() => setConvSidebarCollapsed(v => !v)}>
             <ProjectConvSidebar
               conversations={convHook.conversations}
@@ -777,10 +778,7 @@ function ProjectWorkspace({
           onRefreshFiles={() => {}}
           onRegenerate={handleRegenerate}
           onEditUser={handleEditUser}
-          onSend={isDevMode
-            ? (text) => toolChatHook.send(text, buildDevSystemPrompt(params), projectSkillsHook)
-            : (text, attachments) => chatHook.send(text, !!loadedModel, attachments, loadedModel ? { model_id: loadedModel.id, engine: loadedModel.engine ?? undefined } : null)
-          }
+          onSend={(text) => toolChatHook.send(text, isDevOnlyMode ? buildDevSystemPrompt(params) : '', projectSkillsHook)}
           onStop={stop}
           onLoadModel={onLoadModel}
           showLogs={showLogs}

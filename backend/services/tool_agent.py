@@ -16,6 +16,7 @@ _HARNESS_TOOLS: dict[str, list[str]] = {
                         "get_workspace_info", "web_search"],
     "shell_safe":     ["read_file", "list_files", "create_file", "edit_file", "delete_file",
                         "get_workspace_info", "web_search", "run_command"],
+    "web_research":   ["web_search", "fetch_url"],
 }
 
 _SUB_AGENT_SYSTEM = (

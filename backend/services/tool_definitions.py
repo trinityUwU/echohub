@@ -253,8 +253,8 @@ TOOLS: list[dict[str, Any]] = [
                     "task": {"type": "string", "description": "Complete self-contained brief for the sub-agent. Include all necessary context, expected output format, and constraints."},
                     "harness": {
                         "type": "string",
-                        "enum": ["read_strict", "write_validated", "shell_safe"],
-                        "description": "Tool set profile. 'read_strict': read-only (find, read, grep). 'write_validated': read + file edits with validation. 'shell_safe': read + write + restricted shell. Default: read_strict.",
+                        "enum": ["read_strict", "write_validated", "shell_safe", "web_research"],
+                        "description": "Tool set profile. 'read_strict': read-only (find, read, grep). 'write_validated': read + file edits with validation. 'shell_safe': read + write + restricted shell. 'web_research': web_search + fetch_url for deep web research. Default: read_strict.",
                         "default": "read_strict",
                     },
                 },
