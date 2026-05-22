@@ -241,6 +241,8 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     let inToolCallBlock = false
     // tool name for the current pending tool (set when tool_call_streaming starts)
     let pendingToolName = ''
+    // id of the current pending TC (set when tool_call fires) — used for precise step association
+    let pendingTcId = ''
     // buffer of agent steps per tool name (for invoke_agent)
     const agentStepsBuf: Record<string, Record<string, unknown>[]> = {}
 
@@ -306,27 +308,33 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
             }
             pendingToolName = raw.tool
             const tcId = crypto.randomUUID()
+            pendingTcId = tcId
             const tc: ToolCall = { id: tcId, tool: raw.tool, args: raw.args, status: 'running' }
             setToolCalls(prev => [...prev, tc])
           } else if ((raw as {type: string}).type === 'agent_step') {
-            // Accumulate sub-agent steps — visible in DevPanel live
-            const step = raw as unknown as AgentStep
+            const step = ((raw as unknown as {step: AgentStep}).step ?? raw) as AgentStep
             if (!agentStepsBuf[pendingToolName]) agentStepsBuf[pendingToolName] = []
             agentStepsBuf[pendingToolName].push(step as unknown as Record<string, unknown>)
+            const targetId = pendingTcId
             setToolCalls(prev => prev.map(tc =>
-              tc.tool === pendingToolName
-                ? { ...tc, agentSteps: [...(tc.agentSteps ?? []), step as AgentStep] }
+              tc.id === targetId
+                ? { ...tc, agentSteps: [...(tc.agentSteps ?? []), step] }
                 : tc
             ))
           } else if (raw.type === 'tool_result') {
-            // Update DevPanel sidebar status
+            // Update TC status by id (pendingTcId) for precision; fall back to tool name match
+            const doneId = pendingTcId
             setToolCalls(prev =>
-              prev.map(tc => tc.tool === raw.tool ? { ...tc, result: raw.result, status: 'done' } : tc)
+              prev.map(tc => (doneId ? tc.id === doneId : tc.tool === raw.tool)
+                ? { ...tc, result: raw.result, status: 'done' }
+                : tc
+              )
             )
             // Inject result inline
             const resultTag = `\n<tool_result tool="${raw.tool}">${raw.result}</tool_result>\n`
             accumulated += resultTag
             pendingToolName = ''
+            pendingTcId = ''
             const snap = accumulated
             setMessages(prev => {
               const updated = [...prev]
@@ -425,8 +433,9 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
         setStreaming(false)
       } finally {
         abortRef.current = null
-        // suppress unused var warning
+        // suppress unused var warnings
         void pendingToolName
+        void pendingTcId
       }
     })()
   }, [projectId])

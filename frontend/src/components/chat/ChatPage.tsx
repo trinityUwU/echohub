@@ -404,14 +404,17 @@ function ChatContent({
   onRegenerate, onEditUser, onSend, onStop, onLoadModel, showLogs,
   onCommand, isDevMode,
 }: ChatContentProps): React.ReactElement {
-  // Build agentStepsMap: tool name → steps, for live sub-agent progress in ToolCallBlock
+  // Build agentStepsMap: tool name → steps, for live sub-agent progress in ToolCallBlock.
+  // We prefer the currently-running invoke_agent TC; fall back to the most recent one with steps.
   const agentStepsMap = useMemo(() => {
     const map: Record<string, import('@/types').AgentStep[]> = {}
-    for (const tc of toolCalls) {
-      if (tc.tool === 'invoke_agent' && tc.agentSteps?.length) {
-        map[tc.tool] = tc.agentSteps
-      }
-    }
+    // Collect all invoke_agent TCs that have steps
+    const invokeTcs = toolCalls.filter(tc => tc.tool === 'invoke_agent' && tc.agentSteps?.length)
+    if (invokeTcs.length === 0) return map
+    // Prefer the running one; if none running, take the last one
+    const running = invokeTcs.find(tc => tc.status === 'running')
+    const target = running ?? invokeTcs[invokeTcs.length - 1]
+    if (target?.agentSteps) map['invoke_agent'] = target.agentSteps
     return map
   }, [toolCalls])
 
@@ -605,16 +608,16 @@ function ProjectWorkspace({
   const isDevMode = true  // all project modes use toolChat (tools + system prompt routing)
   const isDevOnlyMode = project.mode === 'dev'  // dev-specific UI: conv sidebar, workspace files
 
-  // Load history when active conversation changes
+  // Load history when active conversation changes — all modes
   const prevConvId = useRef<string | null>(null)
   useEffect(() => {
-    if (!isDevOnlyMode || !convHook.activeId) return
+    if (!convHook.activeId) return
     if (convHook.activeId === prevConvId.current) return
     prevConvId.current = convHook.activeId
     convHook.loadMessages(convHook.activeId).then(msgs => {
       toolChatHook.loadHistory(msgs)
     }).catch(() => {})
-  }, [convHook.activeId, isDevMode]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [convHook.activeId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const messages = isDevMode ? toolChatHook.messages : chatHook.messages
   const streaming = isDevMode ? toolChatHook.streaming : chatHook.streaming
@@ -622,7 +625,7 @@ function ProjectWorkspace({
   const oomError = isDevMode ? false : chatHook.oomError
   const usedTokens = isDevMode ? toolChatHook.usedTokens : chatHook.usedTokens
   const isTokensExact = isDevMode ? false : chatHook.isTokensExact
-  const toolCalls = isDevOnlyMode ? toolChatHook.toolCalls : []
+  const toolCalls = toolChatHook.toolCalls
   const workspaceFiles = isDevOnlyMode ? toolChatHook.workspaceFiles : []
 
   const stop = isDevMode ? toolChatHook.stop : chatHook.stop
@@ -762,11 +765,14 @@ function ProjectWorkspace({
           <PanelWrapper side="left" collapsed={convSidebarCollapsed} onToggle={() => setConvSidebarCollapsed(v => !v)}>
             <ProjectConvSidebar
               conversations={convHook.conversations}
+              archivedConversations={convHook.archivedConversations}
               activeId={convHook.activeId}
               gpu={gpu}
               onSelect={id => { convHook.selectConversation(id) }}
               onNew={() => { void convHook.createConversation() }}
               onDelete={id => { void convHook.deleteConversation(id) }}
+              onArchive={id => { void convHook.archiveConversation(id) }}
+              onUnarchive={id => { void convHook.unarchiveConversation(id) }}
               onRename={convHook.renameConversation}
             />
           </PanelWrapper>
@@ -809,56 +815,85 @@ function ProjectWorkspace({
 
 interface ProjectConvSidebarProps {
   conversations: ProjectConversation[]
+  archivedConversations: ProjectConversation[]
   activeId: string | null
   gpu: GpuStats | null
   onSelect: (id: string) => void
   onNew: () => void
   onDelete: (id: string) => void
+  onArchive: (id: string) => void
+  onUnarchive: (id: string) => void
   onRename: (id: string, title: string) => Promise<void>
 }
 
 function ProjectConvSidebar({
-  conversations, activeId, gpu, onSelect, onNew, onDelete, onRename,
+  conversations, archivedConversations, activeId, gpu,
+  onSelect, onNew, onDelete, onArchive, onUnarchive, onRename,
 }: ProjectConvSidebarProps): React.ReactElement {
   const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [tab, setTab] = useState<'active' | 'archived'>('active')
   const { open: openCtx } = useContextMenu()
 
-  const handleContextMenu = (e: React.MouseEvent, conv: ProjectConversation): void => {
-    const RenameIcon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-    const DeleteIcon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/></svg>
+  const RenameIcon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+  const ArchiveIcon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+  const DeleteIcon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6m4-6v6"/><path d="M9 6V4h6v2"/></svg>
+
+  const handleContextMenu = (e: React.MouseEvent, conv: ProjectConversation, isArchived: boolean): void => {
     openCtx(e, [
-      { label: 'Rename', icon: RenameIcon, onClick: () => setRenamingId(conv.id) },
+      ...(!isArchived ? [{ label: 'Rename', icon: RenameIcon, onClick: () => setRenamingId(conv.id) }] : []),
+      { label: isArchived ? 'Unarchive' : 'Archive', icon: ArchiveIcon, onClick: () => isArchived ? onUnarchive(conv.id) : onArchive(conv.id) },
       { label: '', separator: true, onClick: () => {} },
       { label: 'Delete', icon: DeleteIcon, danger: true, onClick: () => onDelete(conv.id) },
     ])
   }
 
+  const displayed = tab === 'active' ? conversations : archivedConversations
+
   return (
     <aside className="w-[240px] h-full bg-surface border-r border-border flex flex-col flex-shrink-0 overflow-hidden">
       <div className="flex items-center gap-2 px-3.5 py-3 border-b border-border">
         <h2 className="flex-1 text-xs font-semibold uppercase tracking-widest text-text-muted">Chats</h2>
-        <button onClick={onNew}
-          className="w-[26px] h-[26px] flex items-center justify-center rounded-sm hover:bg-overlay text-text-muted hover:text-text-primary transition-colors cursor-pointer"
-          title="New chat">
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-          </svg>
-        </button>
+        {tab === 'active' && (
+          <button onClick={onNew}
+            className="w-[26px] h-[26px] flex items-center justify-center rounded-sm hover:bg-overlay text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+            title="New chat">
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+          </button>
+        )}
+      </div>
+
+      <div className="flex border-b border-border px-2 pt-1.5 pb-0 gap-1">
+        {(['active', 'archived'] as const).map(t => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`flex-1 text-[11px] pb-1.5 font-medium capitalize transition-colors ${tab === t ? 'text-text-primary border-b-2 border-accent' : 'text-text-muted hover:text-text-secondary'}`}>
+            {t}
+            <span className="ml-1 text-[10px] opacity-60">
+              {t === 'active' ? conversations.length : archivedConversations.length}
+            </span>
+          </button>
+        ))}
       </div>
 
       <div className="flex-1 overflow-y-auto p-2">
-        {conversations.length === 0 && (
-          <div className="text-xs text-text-muted text-center py-8 px-2">No conversations yet.<br/>Click + to start.</div>
+        {displayed.length === 0 && (
+          <div className="text-xs text-text-muted text-center py-8 px-2">
+            {tab === 'active' ? <>No conversations yet.<br/>Click + to start.</> : 'No archived conversations.'}
+          </div>
         )}
-        {conversations.map(conv => (
+        {displayed.map(conv => (
           <ProjConvItem
             key={conv.id}
             conv={conv}
             active={conv.id === activeId}
-            renaming={renamingId === conv.id}
+            renaming={renamingId === conv.id && tab === 'active'}
+            isArchived={tab === 'archived'}
             onClick={() => { if (renamingId !== conv.id) onSelect(conv.id) }}
-            onContextMenu={e => handleContextMenu(e, conv)}
+            onContextMenu={e => handleContextMenu(e, conv, tab === 'archived')}
             onDelete={() => onDelete(conv.id)}
+            onArchive={() => onArchive(conv.id)}
+            onUnarchive={() => onUnarchive(conv.id)}
             onRenameStart={() => setRenamingId(conv.id)}
             onRenameSubmit={title => { setRenamingId(null); void onRename(conv.id, title) }}
             onRenameCancel={() => setRenamingId(null)}
@@ -871,11 +906,11 @@ function ProjectConvSidebar({
   )
 }
 
-function ProjConvItem({ conv, active, renaming, onClick, onContextMenu, onDelete, onRenameStart, onRenameSubmit, onRenameCancel }: {
-  conv: ProjectConversation; active: boolean; renaming: boolean
+function ProjConvItem({ conv, active, renaming, isArchived, onClick, onContextMenu, onDelete, onArchive, onUnarchive, onRenameStart, onRenameSubmit, onRenameCancel }: {
+  conv: ProjectConversation; active: boolean; renaming: boolean; isArchived: boolean
   onClick: () => void; onContextMenu: (e: React.MouseEvent) => void
-  onDelete: () => void; onRenameStart: () => void
-  onRenameSubmit: (t: string) => void; onRenameCancel: () => void
+  onDelete: () => void; onArchive: () => void; onUnarchive: () => void
+  onRenameStart: () => void; onRenameSubmit: (t: string) => void; onRenameCancel: () => void
 }): React.ReactElement {
   const [val, setVal] = useState(conv.title)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -891,23 +926,28 @@ function ProjConvItem({ conv, active, renaming, onClick, onContextMenu, onDelete
       onContextMenu={onContextMenu}
     >
       {renaming ? (
-        <input
-          ref={inputRef}
-          className="flex-1 px-2.5 py-1.5 text-sm bg-transparent outline-none"
-          value={val}
-          onChange={e => setVal(e.target.value)}
-          onBlur={submit}
+        <input ref={inputRef} className="flex-1 px-2.5 py-1.5 text-sm bg-transparent outline-none"
+          value={val} onChange={e => setVal(e.target.value)} onBlur={submit}
           onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') onRenameCancel() }}
-          onClick={e => e.stopPropagation()}
-        />
+          onClick={e => e.stopPropagation()} />
       ) : (
         <>
           <span className="flex-1 px-2.5 py-1.5 text-sm truncate">{conv.title}</span>
           <div className="hidden group-hover:flex items-center gap-0.5 pr-1">
-            <button title="Rename" onClick={e => { e.stopPropagation(); onRenameStart() }}
+            {!isArchived && (
+              <button title="Rename" onClick={e => { e.stopPropagation(); onRenameStart() }}
+                className="w-5 h-5 flex items-center justify-center rounded hover:bg-overlay text-text-muted hover:text-text-secondary cursor-pointer">
+                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+              </button>
+            )}
+            <button title={isArchived ? 'Unarchive' : 'Archive'} onClick={e => { e.stopPropagation(); isArchived ? onUnarchive() : onArchive() }}
               className="w-5 h-5 flex items-center justify-center rounded hover:bg-overlay text-text-muted hover:text-text-secondary cursor-pointer">
               <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                {isArchived
+                  ? <><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><polyline points="10 12 12 14 14 12"/><line x1="12" y1="14" x2="12" y2="9"/></>
+                  : <><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></>}
               </svg>
             </button>
             <button title="Delete" onClick={e => { e.stopPropagation(); onDelete() }}

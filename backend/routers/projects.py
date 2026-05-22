@@ -24,9 +24,9 @@ class SaveMessageBody(BaseModel):
 
 
 @router.get("/{project_id}/conversations")
-def list_conversations(project_id: str) -> list[dict]:
+def list_conversations(project_id: str, archived: bool = False) -> list[dict]:
     try:
-        return cm.list_project_conversations(project_id)
+        return cm.list_project_conversations(project_id, archived=archived)
     except Exception as exc:
         logger.error("list_conversations error: {}", exc)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -76,6 +76,24 @@ def save_message(project_id: str, conv_id: str, body: SaveMessageBody) -> dict:
         return cm.save_project_message(conv_id, body.role, body.content)
     except Exception as exc:
         logger.error("save_message error: {}", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.patch("/{project_id}/conversations/{conv_id}/archive")
+def archive_conversation(project_id: str, conv_id: str) -> dict:
+    try:
+        cm.archive_project_conversation(conv_id, archived=True)
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.patch("/{project_id}/conversations/{conv_id}/unarchive")
+def unarchive_conversation(project_id: str, conv_id: str) -> dict:
+    try:
+        cm.archive_project_conversation(conv_id, archived=False)
+        return {"ok": True}
+    except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

@@ -255,13 +255,14 @@ def create_project_conversation(project_id: str, title: str = "New conversation"
         "id": conv_id,
         "project_id": project_id,
         "title": title,
+        "archived": False,
         "memory_enabled": False,
         "created_at": now,
         "updated_at": now,
         "messages": [],
     }
     _proj_conv_path(conv_id).write_text(json.dumps(conv, ensure_ascii=False, indent=2), encoding="utf-8")
-    meta = {k: conv[k] for k in ("id", "project_id", "title", "memory_enabled", "created_at", "updated_at")}
+    meta = {k: conv[k] for k in ("id", "project_id", "title", "archived", "memory_enabled", "created_at", "updated_at")}
     meta["message_count"] = 0
     _upsert_index(_proj_index_path(), _proj_index_lock, meta)
     return meta
@@ -279,10 +280,28 @@ def get_project_conversation(conv_id: str) -> dict | None:
         return None
 
 
-def list_project_conversations(project_id: str) -> list[dict]:
+def list_project_conversations(project_id: str, archived: bool = False) -> list[dict]:
     with _proj_index_lock:
         entries = _read_index(_proj_index_path())
-    return [e for e in entries if e.get("project_id") == project_id]
+    return [e for e in entries if e.get("project_id") == project_id and bool(e.get("archived", False)) == archived]
+
+
+def archive_project_conversation(conv_id: str, archived: bool) -> None:
+    p = _proj_conv_path(conv_id)
+    if not p.exists():
+        return
+    data = json.loads(p.read_text(encoding="utf-8"))
+    data["archived"] = archived
+    data["updated_at"] = _now()
+    p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    with _proj_index_lock:
+        entries = _read_index(_proj_index_path())
+        for e in entries:
+            if e["id"] == conv_id:
+                e["archived"] = archived
+                e["updated_at"] = data["updated_at"]
+                break
+        _write_index(_proj_index_path(), entries)
 
 
 def delete_project_conversation(conv_id: str) -> None:

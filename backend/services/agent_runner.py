@@ -130,7 +130,7 @@ async def run_agent_streaming(
             })
 
             if not tool_calls:
-                # Final answer
+                # Final answer — try to parse JSON, fall back to raw text
                 json_match = re.search(r"\{.*\}", clean_content, re.DOTALL)
                 result_data: dict = {
                     "status": "success",
@@ -145,6 +145,17 @@ async def run_agent_streaming(
                         result_data = parsed
                     except (json.JSONDecodeError, ValueError):
                         pass
+
+                # If findings is empty but we have tool results, auto-populate from message history
+                if not result_data.get("findings"):
+                    collected: dict[str, str] = {}
+                    for m in messages:
+                        if m.get("role") == "tool" and m.get("content"):
+                            tool_id = m.get("tool_call_id", f"result_{len(collected)}")
+                            # Keep first 500 chars of each result
+                            collected[tool_id] = str(m["content"])[:500]
+                    if collected:
+                        result_data["findings"] = collected
 
                 yield {
                     "type": "agent_done",

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { AgentStep } from '@/types'
 
@@ -12,6 +12,11 @@ export function ToolCallBlock({ content, streaming, agentSteps = [] }: {
   const lastStep = agentSteps[agentSteps.length - 1]
   const agentRunning = agentSteps.length > 0 && lastStep?.type !== 'agent_done' && lastStep?.type !== 'agent_error'
   const [open, setOpen] = useState(false)
+  // Auto-open when first step arrives — stays open after agent finishes
+  const hasSteps = agentSteps.length > 0
+  useEffect(() => {
+    if (hasSteps) setOpen(true)
+  }, [hasSteps])
   const isOpen = streaming || agentRunning ? true : open
 
   const nameMatch = content.match(/"name"\s*:\s*"([^"]+)"/)
@@ -30,10 +35,15 @@ export function ToolCallBlock({ content, streaming, agentSteps = [] }: {
     } catch { /* raw display */ }
   }
 
-  const liveText = agentSteps
+  const rawLiveText = agentSteps
     .filter(s => s.type === 'agent_text_chunk')
     .map(s => s.content ?? '')
     .join('')
+  // Strip <tool_call>...</tool_call> blocks and </tool_call> fragments — sub-agent emits these as text
+  const liveText = rawLiveText
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
+    .replace(/<\/?tool_call>/g, '')
+    .trim()
 
   const thinkingChunks = agentSteps.filter(s => s.type === 'agent_thinking_chunk').map(s => s.content ?? '').join('')
   const hasThinkingEnd = agentSteps.some(s => s.type === 'agent_thinking_end')
@@ -88,62 +98,22 @@ export function ToolCallBlock({ content, streaming, agentSteps = [] }: {
         {isOpen && (
           <motion.div key="body" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }} style={{ overflow: 'hidden' }}>
-            {isInvokeAgent && agentSteps.length > 0 && (
-              <div className="border-t border-white/5">
-                {thinkingChunks && (
-                  <div className="px-3 pt-2 pb-1">
-                    <div className={`rounded-md px-3 py-2 ${isThinking ? 'bg-amber-500/5 border border-amber-500/10' : 'bg-white/[0.02] border border-white/5'}`}>
-                      <div className="flex items-center gap-1.5 mb-1">
-                        {isThinking ? (
-                          <motion.div className="w-1.5 h-1.5 rounded-full bg-amber-400/60"
-                            animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1.2 }} />
-                        ) : (
-                          <div className="w-1.5 h-1.5 rounded-full bg-white/20" />
-                        )}
-                        <span className={`text-[10px] font-mono uppercase tracking-wider ${isThinking ? 'text-amber-400/60' : 'text-text-muted/40'}`}>
-                          {isThinking ? 'thinking…' : 'thought'}
-                        </span>
-                      </div>
-                      <p className={`text-[11px] leading-relaxed font-mono whitespace-pre-wrap max-h-32 overflow-y-auto ${isThinking ? 'text-amber-200/50' : 'text-text-muted/40'}`}>
-                        {thinkingChunks}
-                        {isThinking && <span className="inline-block w-1 h-3 bg-amber-400/40 animate-pulse rounded-sm ml-0.5 align-middle" />}
-                      </p>
-                    </div>
-                  </div>
-                )}
-                {liveText && (
-                  <div className="px-3 pb-2">
-                    <p className="text-[11px] text-text-muted/70 leading-relaxed whitespace-pre-wrap font-mono">
-                      {liveText}
-                      {agentRunning && !isThinking && (
-                        <span className="inline-block w-1 h-3 bg-text-muted/40 animate-pulse rounded-sm ml-0.5 align-middle" />
-                      )}
-                    </p>
-                  </div>
-                )}
-                {milestones.length > 0 && (
-                  <div className="px-3 pt-1 pb-2 space-y-0.5">
-                    {milestones.map((step, i) => (
-                      <div key={i} className="flex items-center gap-2 py-0.5">
-                        <AgentStepIcon step={step} />
-                        <span className="text-[11px] font-mono text-text-muted/60 truncate">
-                          {step.type === 'agent_tool_start' && `→ ${step.tool ?? ''}${step.args && Object.keys(step.args).length ? ` (${Object.values(step.args)[0]?.toString().slice(0, 40)})` : ''}`}
-                          {step.type === 'agent_tool_done' && `✓ ${step.tool ?? ''}${step.result_preview ? ` — ${step.result_preview.slice(0, 50)}` : ''}`}
-                          {step.type === 'agent_done' && `completed (${step.status ?? 'success'})${step.summary ? ` — ${step.summary.slice(0, 60)}` : ''}`}
-                          {step.type === 'agent_error' && `error — ${step.error?.slice(0, 80) ?? 'unknown'}`}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+            {isInvokeAgent && agentSteps.length > 0 ? (
+              <AgentLivePanel
+                thinkingChunks={thinkingChunks}
+                isThinking={isThinking}
+                liveText={liveText}
+                milestones={milestones}
+                agentRunning={agentRunning}
+              />
+            ) : (
+              <pre className="px-3 pb-3 pt-2 text-xs text-text-muted/60 leading-relaxed whitespace-pre-wrap border-t border-white/5 font-mono max-h-64 overflow-y-auto">
+                {streaming && !argsDisplay.trim() ? (
+                  <span className="text-text-muted/40 italic">Executing…</span>
+                ) : argsDisplay}
+                {streaming && <span className="inline-block w-1 h-3 bg-text-muted/40 animate-pulse rounded-sm ml-0.5 align-middle" />}
+              </pre>
             )}
-            <pre className="px-3 pb-3 pt-2 text-xs text-text-muted/60 leading-relaxed whitespace-pre-wrap border-t border-white/5 font-mono max-h-64 overflow-y-auto">
-              {streaming && !argsDisplay.trim() ? (
-                <span className="text-text-muted/40 italic">Executing…</span>
-              ) : argsDisplay}
-              {streaming && <span className="inline-block w-1 h-3 bg-text-muted/40 animate-pulse rounded-sm ml-0.5 align-middle" />}
-            </pre>
           </motion.div>
         )}
       </AnimatePresence>
@@ -151,34 +121,121 @@ export function ToolCallBlock({ content, streaming, agentSteps = [] }: {
   )
 }
 
-function AgentStepIcon({ step }: { step: AgentStep }): React.ReactElement {
-  if (step.type === 'agent_tool_start') {
-    return (
-      <motion.svg className="w-3 h-3 flex-shrink-0 text-text-muted/50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-        animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}>
-        <path d="M21 12a9 9 0 1 1-6.22-8.56"/>
-      </motion.svg>
-    )
-  }
-  if (step.type === 'agent_tool_done') {
-    return (
-      <svg className="w-3 h-3 flex-shrink-0 text-green-500/70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="20 6 9 17 4 12"/>
-      </svg>
-    )
-  }
-  if (step.type === 'agent_done') {
-    return (
-      <svg className="w-3 h-3 flex-shrink-0 text-accent/70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
-      </svg>
-    )
-  }
+
+
+// ── AgentLivePanel ────────────────────────────────────────────────────────────
+
+interface AgentLivePanelProps {
+  thinkingChunks: string
+  isThinking: boolean
+  liveText: string
+  milestones: AgentStep[]
+  agentRunning: boolean
+}
+
+function AgentLivePanel({ thinkingChunks, isThinking, liveText, milestones, agentRunning }: AgentLivePanelProps): React.ReactElement {
+  // Merge start+done pairs into single rows: done supersedes start for same tool+call
+  const toolRows = buildToolRows(milestones)
+  const finalStep = milestones.find(s => s.type === 'agent_done' || s.type === 'agent_error')
+
   return (
-    <svg className="w-3 h-3 flex-shrink-0 text-red-400/70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-    </svg>
+    <div className="border-t border-white/5">
+      {/* Thinking block — only show if substantial content */}
+      {thinkingChunks && thinkingChunks.length > 30 && (
+        <div className="px-3 pt-2 pb-1">
+          <div className={`rounded px-2.5 py-1.5 ${isThinking ? 'bg-amber-500/5 border border-amber-500/10' : 'bg-white/[0.02] border border-white/5'}`}>
+            <div className="flex items-center gap-1.5 mb-0.5">
+              {isThinking
+                ? <motion.div className="w-1.5 h-1.5 rounded-full bg-amber-400/60" animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 1.2 }} />
+                : <div className="w-1.5 h-1.5 rounded-full bg-white/15" />}
+              <span className={`text-[10px] uppercase tracking-wider font-mono ${isThinking ? 'text-amber-400/50' : 'text-text-muted/30'}`}>
+                {isThinking ? 'thinking…' : 'thought'}
+              </span>
+            </div>
+            <p className={`text-[11px] font-mono leading-relaxed whitespace-pre-wrap max-h-24 overflow-y-auto ${isThinking ? 'text-amber-200/40' : 'text-text-muted/30'}`}>
+              {thinkingChunks}
+              {isThinking && <span className="inline-block w-1 h-3 bg-amber-400/40 animate-pulse rounded-sm ml-0.5 align-middle" />}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Tool call rows */}
+      {toolRows.length > 0 && (
+        <div className="px-3 pt-2 pb-1.5 space-y-1.5">
+          {toolRows.map((row, i) => (
+            <div key={i} className="flex items-center gap-2 min-w-0">
+              <div className="flex-shrink-0">
+                {row.done
+                  ? <svg className="w-3 h-3 text-green-500/50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  : <motion.svg className="w-3 h-3 text-text-muted/35" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: 'linear' }}><path d="M21 12a9 9 0 1 1-6.22-8.56"/></motion.svg>
+                }
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-1.5 min-w-0">
+                  <span className="text-[11px] font-mono text-text-muted/65 flex-shrink-0">{row.tool}</span>
+                  {row.query && <span className="text-[11px] font-mono text-text-muted/35 truncate">{row.query}</span>}
+                </div>
+                {row.done && row.preview && (
+                  <span className="text-[10px] text-text-muted/30 block truncate leading-tight mt-0.5">{row.preview}</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Live synthesis text — only shown when there's meaningful content beyond tool calls */}
+      {liveText && agentRunning && (
+        <div className="px-3 pb-2 pt-0.5 border-t border-white/[0.04]">
+          <p className="text-[11px] text-text-muted/45 leading-relaxed whitespace-pre-wrap font-mono max-h-20 overflow-hidden">
+            {liveText}
+            <span className="inline-block w-1 h-3 bg-text-muted/30 animate-pulse rounded-sm ml-0.5 align-middle" />
+          </p>
+        </div>
+      )}
+
+      {/* Final status */}
+      {finalStep && (
+        <div className="px-3 pb-2.5 flex items-center gap-2">
+          {finalStep.type === 'agent_done'
+            ? <svg className="w-3 h-3 text-accent/60 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            : <svg className="w-3 h-3 text-red-400/60 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          }
+          <span className="text-[11px] text-text-muted/50 font-mono">
+            {finalStep.type === 'agent_done' ? `done · ${finalStep.status ?? 'success'}` : `failed · ${finalStep.error?.slice(0, 60) ?? ''}`}
+            {finalStep.summary && ` — ${finalStep.summary.slice(0, 80)}`}
+          </span>
+        </div>
+      )}
+    </div>
   )
+}
+
+interface ToolRow { tool: string; query: string; done: boolean; preview: string }
+
+function buildToolRows(milestones: AgentStep[]): ToolRow[] {
+  const rows: ToolRow[] = []
+  const idx: Record<string, number> = {}
+
+  for (const step of milestones) {
+    if (step.type === 'agent_tool_start') {
+      const firstArgVal = step.args ? Object.values(step.args)[0]?.toString().slice(0, 60) ?? '' : ''
+      const key = `${step.tool}:${rows.length}`
+      idx[key] = rows.length
+      rows.push({ tool: step.tool ?? '', query: firstArgVal, done: false, preview: '' })
+    } else if (step.type === 'agent_tool_done') {
+      // Find last undone row for this tool
+      for (let i = rows.length - 1; i >= 0; i--) {
+        if (rows[i].tool === step.tool && !rows[i].done) {
+          rows[i].done = true
+          rows[i].preview = step.result_preview ?? ''
+          break
+        }
+      }
+    }
+  }
+  return rows
 }
 
 // ── ToolResultBlock ───────────────────────────────────────────────────────────

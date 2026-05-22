@@ -763,6 +763,7 @@ async def generate_with_tools(
         accumulated_tool_calls: list = []
 
         _generation_lock.acquire()
+        _lock_released = False
         try:
             logger.debug(f"[llama] generate_with_tools — {len(tools)} tools: {[t['function']['name'] for t in tools]}")
             try:
@@ -785,7 +786,12 @@ async def generate_with_tools(
 
             for chunk in chunks:
                 if _eject_requested or _stop.is_set():
-                    break
+                    # Release the lock immediately so sub-agent chat_completion_sync
+                    # can acquire it without waiting for timings/response emit below.
+                    _lock_released = True
+                    _generation_lock.release()
+                    asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+                    return
                 choice = chunk.get("choices", [{}])[0]
                 delta = choice.get("delta", {})
 
@@ -863,7 +869,8 @@ async def generate_with_tools(
                 asyncio.run_coroutine_threadsafe(queue.put({"type": "error", "error": str(e)}), loop)
         finally:
             asyncio.run_coroutine_threadsafe(queue.put(None), loop)
-            _generation_lock.release()
+            if not _lock_released:
+                _generation_lock.release()
 
     threading.Thread(target=_stream_sync, daemon=True).start()
 
