@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useScrollToBottom } from '@/hooks/useAutoScroll'
 
 interface Props {
   content: string
@@ -8,6 +9,7 @@ interface Props {
 
 export function ThinkingBlock({ content, streaming }: Props) {
   const [open, setOpen] = useState(false)
+  const scrollRef = useScrollToBottom([content], streaming) as React.RefObject<HTMLDivElement>
 
   return (
     <div className="mb-3 rounded-xl border border-violet-500/20 bg-violet-500/5 overflow-hidden">
@@ -36,7 +38,10 @@ export function ThinkingBlock({ content, streaming }: Props) {
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
           >
-            <div className="px-3 pb-3 text-xs text-violet-200/70 leading-relaxed whitespace-pre-wrap border-t border-violet-500/10 pt-2 font-mono max-h-64 overflow-y-auto">
+            <div
+              ref={scrollRef as React.RefObject<HTMLDivElement>}
+              className="px-3 pb-3 text-xs text-violet-200/70 leading-relaxed whitespace-pre-wrap border-t border-violet-500/10 pt-2 font-mono max-h-64 overflow-y-auto"
+            >
               {content}
             </div>
           </motion.div>

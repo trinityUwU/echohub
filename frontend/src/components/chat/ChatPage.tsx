@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { AutoScrollContext } from '@/hooks/useAutoScroll'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useChat } from '@/hooks/useChat'
 import { useToolChat } from '@/hooks/useToolChat'
@@ -521,7 +522,11 @@ function ChatContent({
     )
   }
 
-  return <div className="flex flex-col flex-1 overflow-hidden">{inner}</div>
+  return (
+    <AutoScrollContext.Provider value={autoScroll}>
+      <div className="flex flex-col flex-1 overflow-hidden">{inner}</div>
+    </AutoScrollContext.Provider>
+  )
 }
 
 interface PanelWrapperProps {
