@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, memo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import type { ChatMessage, GenerationStats, LoadConfig } from '@/types'
+import type { AgentStep, ChatMessage, GenerationStats, LoadConfig } from '@/types'
 import { MarkdownContent } from './MarkdownContent'
 import { MessageContent } from '@/components/MessageContent'
 import { PairEditor } from '@/components/finetune/PairEditor'
@@ -11,6 +11,7 @@ interface MessageRowProps {
   genStats?: GenerationStats | null
   modelName?: string | null
   streaming?: boolean
+  agentStepsMap?: Record<string, AgentStep[]>
   onRegenerate?: () => void
   onEditUser?: (text: string) => void
   promptForPair?: string
@@ -61,7 +62,7 @@ function CompactRow({ message }: { message: ChatMessage }): React.ReactElement {
   )
 }
 
-function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRegenerate, onEditUser, promptForPair, sourceConvId, sourceMsgId, loadedModelId, onReload }: MessageRowProps): React.ReactElement {
+function MessageRowInner({ message, isLast, genStats, modelName, streaming, agentStepsMap, onRegenerate, onEditUser, promptForPair, sourceConvId, sourceMsgId, loadedModelId, onReload }: MessageRowProps): React.ReactElement {
   const isUser = message.role === 'user'
 
   // Compact markers — render dedicated UI
@@ -195,7 +196,7 @@ function MessageRowInner({ message, isLast, genStats, modelName, streaming, onRe
         ) : (
           <div className="rounded-md px-3.5 py-2.5 text-md leading-relaxed border bg-elevated border-border text-text-primary">
             {text
-              ? <MessageContent content={text} streaming={streaming && isLast} />
+              ? <MessageContent content={text} streaming={streaming && isLast} agentStepsMap={agentStepsMap} />
               : streaming && isLast
                 ? <span className="inline-block w-1.5 h-4 bg-text-muted/60 animate-pulse rounded-sm" />
                 : <span className="text-text-muted animate-pulse">…</span>
@@ -324,6 +325,7 @@ export const MessageRow = memo(MessageRowInner, (prev, next) => {
   if (prev.message.loadConfig !== next.message.loadConfig) return false
   if (prev.genStats !== next.genStats) return false
   if (prev.loadedModelId !== next.loadedModelId) return false
+  if (prev.agentStepsMap !== next.agentStepsMap) return false
   return true
 })
 
