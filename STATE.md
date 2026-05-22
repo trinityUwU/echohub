@@ -1,136 +1,104 @@
 # STATE — EchoHub
-*Dernière mise à jour : 2026-05-21 (session 23)*
+*Dernière mise à jour : 2026-05-22 (session 24)*
 
 ## Résumé de l'état actuel
 
-Application Tauri v2 native stable. Session 23 = grosse session performance et GPU : load profiles (Performance/Balanced/Gaming/Minimal), multi-GPU llama.cpp (tensor_split) + vLLM (tensor_parallel_size), speculative decoding (ngram/MTP/draft), optimisations CPU-heavy, fix notifications persistantes. 9 commits pushés sur master. Prêt à tester sur hardware réel.
+Application Tauri v2 stable. Session 24 = deux grands blocs : (1) **v1.1 mémoire sémantique + agents natifs** — ConversationManager JSON, embedding nomic-embed CPU, ChromaDB memory layer, tools search/store/invoke_agent, harness universel, Settings > Memory UI, system prompts conditionnels. (2) **Bugfixes vLLM + chat** — GPTQ/AWQ "No model loaded" (import stale), tool-use 400 (flags manquants), réponse vide vLLM, N-gram segfault, system prompts, footers, ctx adaptatif auto-reload. 35+ commits sur master.
 
-## Ce qui a été fait — session 23 (2026-05-21)
+## Ce qui a été fait — session 24 (2026-05-22)
 
-### Load modal — paramètres avancés (commits 2a252cb, 1d4ed5a, 0ac8f6a)
+### v1.1 — ConversationManager JSON (Step 1)
+- `backend/services/conversation_manager.py` : CRUD chat + project convs sur JSON
+- `~/.local/share/echohub/conversations/{id}.json` + `_index.json`
+- Migration one-shot SQLite→JSON au boot, `to_context(max_tokens)` sliding window
+- Routers `conversations.py` + `projects.py` branchés, `db.py` hors loop pour convs
 
-**Nouveaux paramètres :**
-- `offload_kqv` — KV cache → RAM système. Preview VRAM bar avec colonne verte "KV cache (RAM)"
-- `n_batch` selector — 64/128/256/512 avec pour/contre. 128 par défaut sur MoE
-- Smart cap context — remplace "adaptive" cassé. Calcule ctx max depuis VRAM disponible après weights. Avec offload_kqv, monte jusqu'à 32K
+### v1.1 — Embedding + ChromaDB + Tools (Steps 2–4)
+- `embedding_service.py` : nomic-embed-text-v1.5 GGUF CPU-only, auto-download HF, 768 dims ~100ms
+- `llama_lock.py` : mutex global partagé — résout "Memory is not initialized" (état C global llama.cpp)
+- `memory_service.py` : ChromaDB cosine, scope conv_id/project_id, routes `/memory/*`
+- `search_memory`, `store_memory`, `invoke_agent` dans TOOLS[] + `execute_tool()`
+- `invoke_agent` : boucle tool-use isolée sur le modèle chargé, 3 harness profiles
 
-**4 profils de chargement (llama.cpp uniquement) :**
+### v1.1 — Harness + UI + System prompts (Steps 5–7)
+- `harness_service.py` : language detection + syntax (ast/tsc) + lint (ruff) + result normalizer
+- `MemoryTab.tsx` + toggle Memory dans ChatTopBar + `toggleMemory()` dans useConversations
+- System prompts dynamiques : Dev→dev prompt, Docs→analyse, Research→web, Chat→helpful assistant
+- `project_mode` dans `ToolChatRequest`, inject memories si `memory_enabled` sur la conv
 
-| Profil | VRAM cible | GPU layers | KV quant | offload_kqv | n_batch | Context |
-|--------|-----------|-----------|---------|------------|---------|---------|
-| ⚡ Performance | ~92% total | Full (-1) | Q8_0 | off | 512 | Fixed |
-| ⚖ Balanced | ~50% total | Partiel auto | Q8_0 | off | 256 | Fixed |
-| 🎮 Gaming | ~3 GB | Partiel auto | Q4_0 | on | 128 | Smart cap |
-| 🪶 Minimal | ~1.5 GB | Partiel auto | Q4_0 | on | 64→512* | Smart cap |
+### Refactoring modules (normes < 500L)
+- `vllm_service.py` splitté : `vllm_generate` + `vllm_loader` + `vllm_process` + `vllm_vram`
+- `tool_service.py` splitté : `tool_agent` + `tool_memory` + `tool_definitions`
+- `/lint` command + `scripts/lint_standards.py` + copie globale `~/.claude/lint_standards.py`
 
-*n_batch=512 forcé si CPU-heavy (pas de VRAM pressure sur CPU)
+### Bugfixes vLLM critiques
+- **GPTQ/AWQ "No model loaded"** : `vllm_generate._current_model` stale (import = copy). Fix : `_model()` via `sys.modules`
+- **Tool-use 400** : flags `--enable-auto-tool-choice --tool-call-parser` ajoutés au launch. `_detect_tool_parser()` auto selon famille
+- **Réponse vide tool-chat vLLM** : `generate_with_tools` yieldait strings SSE brutes vs dicts attendus. Fix : `_stream_and_parse()` dans vllm_generate
+- **Circular import** : `parse_load_error` dans vllm_loader ne dépend plus de vllm_service
 
-Calcul layers : `estimateLayers(paramsBillion) × gpuLayersPct / 100`. Profils appliqués via `applyProfile()`, tweaks manuels après = badge "active" effacé.
-
-### Bugs critiques corrigés (commit 0ac8f6a)
-- `resolvedNGpuLayers` retournait `null` pour 0–100% → backend interprétait comme -1 → **full GPU malgré profil Gaming/Minimal**. Fix : conversion via `estimateLayers()`
-- "Adaptive" context passait `null` → llama.cpp crashait "tokens exceed 4096". Fix : Smart cap calcule un ctx réel
-
-### Multi-GPU llama.cpp — tensor_split (commit 35c38db)
-- Nouveau module `backend/services/multi_gpu.py` : `detect_all_gpus()`, `compute_tensor_split()`, `get_multi_gpu_config()`
-- Split proportionnel à la VRAM par GPU (égal si VRAM inconnue / AMD)
-- `GET /inference/multi-gpu-config`
-- Frontend : banner vert auto si gpu_count > 1, VRAM bar utilise total combiné
-
-### Multi-GPU vLLM — tensor_parallel_size (commit 41eebe2)
-- `--tensor-parallel-size N` + `--pipeline-parallel-size N` dans vllm_service.py
-- Selector ×1 → ×N dans modal vLLM si multi-GPU détecté
-
-### Speculative decoding (commit 77db260)
-- **N-gram** (défaut sur tous profils) : `LlamaPromptLookupDecoding(num_pred_tokens=10)`. ~1.3x sur outputs répétitifs. Zero VRAM
-- **MTP self-speculative** : `LlamaDraftModel` + têtes MTP intégrées. ~1.5x sur coding. Auto-détection GGUF via scan 64KB metadata (`b'mtp'` / `b'num_nextn_predict'`). Option grisée si GGUF incompatible
-- **Draft model externe** : path input + slider n_pred_tokens 2–16. ~2x sur coding
-- `GET /inference/llama/mtp-support?model_id=`
-- `checkMtpSupport()` dans api/client.ts
-
-### Perf CPU-heavy — n_threads adaptatif (commit 47a2471)
-- `_detect_n_threads(gpu_layers, total_layers)` — si < 20% layers sur GPU : tous les threads logiques (6→12 sur machine Chris)
-- `n_batch=512` pour CPU-heavy (remplace 64 qui ralentissait inutilement le prefill)
-- `estimateLayers_backend()` + `_model_params_from_path()` ajoutés
-- Impact Minimal attendu : TTFT ~11s → ~4-6s, tok/s ~4.8 → ~7-9
-
-### Notifications persistantes (commit f17c48b)
-- `_history` en localStorage (`echohub:notifications`, max 200)
-- `_loadHistory()` au module init, `_saveHistory()` à chaque `addToast`/`clearHistory`
-
-### Docs v0.9 (commit d7dbc78)
-- `docs/v0.9-perf-gpu-speculative.md` créé
-- README.md mis à jour : bullets, under the hood, releases table
+### Bugfixes llama.cpp + chat UI
+- **N-gram segfault** : défaut `'off'` dans useModels/App.tsx/LoadModelModal (était `'ngram'`)
+- **Footer stats disparaissent** : memo React ne comparait pas `message.stats` ni `message.loadConfig`
+- **Stats persistées** : `useToolChat done` attach stats au message state + DB via `onSaveMessage`
+- **Bouton reload** : `loadConfig` sauvegardé dans messages depuis `useChat`/`useToolChat`
+- **Regenerate/editUser mode skills** : `sendFromHistory()` ajouté dans `useToolChat`
+- **Conv switch** : `stop()` + `setMessages()` forcés au changement de conv même si `streaming=true`
+- **Delete conv archivée** : filtrait seulement `conversations[]`, pas `archivedConversations[]`
+- **ctx adaptatif** : auto-reload sans toast si `ctx_mode='adaptive'`, `ctxMode` dans `activeLoadConfig`
 
 ## Décisions prises
 
 | Décision | Raison | Date |
 |----------|--------|------|
-| Smart cap plutôt que null pour ctx adaptatif | llama.cpp fixe n_ctx au load — null = crash garanti | 2026-05-21 |
-| estimateLayers() dupliqué frontend/backend | Évite un API call synchrone dans le modal — valeurs identiques | 2026-05-21 |
-| n_batch=512 pour CPU-heavy (profil Minimal) | Pas de VRAM pressure sur CPU, prefill plus rapide avec gros batch | 2026-05-21 |
-| Tous threads logiques si < 20% layers GPU | CPU est le vrai bottleneck — HT aide sur compute LLM | 2026-05-21 |
-| Notifications → localStorage, pas SQLite | État UI éphémère, pas données applicatives | 2026-05-21 |
-| N-gram spéculatif par défaut sur tous profils | Zero coût, gain gratuit sur tous les modèles | 2026-05-21 |
+| ConversationManager JSON | SQLite non searchable sémantiquement, sliding window natif | 2026-05-22 |
+| nomic-embed CPU-only | Zéro impact VRAM modèle principal | 2026-05-22 |
+| Mutex llama.cpp global (llama_lock.py) | État C global — deux instances concurrentes = segfault | 2026-05-22 |
+| ChromaDB = layer sémantique uniquement | Messages bruts dans JSON, jamais ChromaDB | 2026-05-22 |
+| invoke_agent = même modèle, contexte isolé | Zéro reload VRAM, contexte parent jamais exposé | 2026-05-22 |
+| N-gram OFF par défaut | Segfault numpy shape sur Qwen3 GGUF et autres | 2026-05-22 |
+| vllm_generate._model() via sys.modules | Import direct = stale copy à None — accès live obligatoire | 2026-05-22 |
+| --enable-auto-tool-choice au launch | vLLM 0.21 nécessite flag explicite, non-défaut | 2026-05-22 |
+| ctx_mode='adaptive' → auto-reload sans modal | UX : user ne gère pas les limites de contexte | 2026-05-22 |
 
 ## Contexte non-évident
 
-- `nvidia-smi` sans args = teste driver kernel, pas GPU physique. `-L` liste devices réels (fix session 22)
-- `CHAT_BUILTINS` est dans `useProfiles.ts`, pas dans `ChatSettingsSidebar.tsx`
-- Clé localStorage profiles : `echohub:profiles` (deux-points, pas underscore)
-- Clé localStorage notifications : `echohub:notifications`
-- `skillChatHook` en mode skill = `useToolChat('__skills__')` — endpoint `/conversations/:id/messages`
-- `install_complete` flag en DB : ne JAMAIS le reset pour forcer setup — utiliser `/installer/recompile-llama`
-- Multi-GPU tensor_split doit sommer à 1.0 exactement — `compute_tensor_split()` normalise le dernier élément
-- Speculative decoding MTP : `LlamaDraftModel` pointe sur une seconde instance Llama du même GGUF — double la VRAM si pas de têtes MTP natives. Vérifier via `/inference/llama/mtp-support` avant
-- `resolvedNGpuLayers` null → backend `-1` était le bug critique qui rendait Gaming/Minimal inutiles
-- `pipeline_parallel_size` câblé backend mais sans UI (usage avancé 3+ GPUs / 70B+)
+- `llama_lock.py` : mutex singleton — TOUT appel llama.cpp (inférence + embedding) passe par ce lock
+- `vllm_generate.py` : lire `_current_model` via `sys.modules['backend.services.vllm_service']._current_model` — import direct = stale
+- `Path(os.getenv("CHROMA_DIR", ""))` est bugué (`Path("")` truthy). Corrigé par `if os.getenv(...) else default`
+- Convs migrées dans `~/.local/share/echohub/conversations/`. Marqueur `.conv_migrated` empêche double migration
+- `ctx_mode` : snake_case dans `types/index.ts LoadConfig`, camelCase dans `useModels.LoadConfig` local — conversions fragiles
+- `MessageRow` memo doit comparer `message.stats` et `message.loadConfig` — sinon re-render bloqué
+- `streaming=true` bloquait `setMessages(activeMessages)` — `stop()` forcé au changement de conv
+- `chroma.sqlite3` créé à la racine (bug CHROMA_DIR) — fichier parasite à supprimer
 
-## Prochaines étapes (session 24)
+## Prochaines étapes (ordre prioritaire)
 
-1. **Tester logs timings** dans LogsPanel — vérifier que `llama_perf_context` émet correctement (commit 5ce2699)
-2. **Types de projets Dev/Docs/Research** — layouts fonctionnels (P0 depuis session 22)
-   - Dev : arborescence fichiers réelle + IDE-like (file tree, tabs)
-   - Docs : injection contexte fichiers drag & drop
-   - Research : gestion sources URL/documents
-3. **RAG natif dans les projets** — ChromaDB par projet, PDF/DOCX/MD/CSV, retrieval injecté contexte
-4. **Harness + sous-agents orchestrateur** — `invoke_agent` tool, validation pipeline, result normalizer
-5. **Remote Access** — Settings > Remote Access, Cloudflare Tunnel toggle, Telegram Bot API (premier)
-6. Valider résultats perf Minimal après fix n_threads
-7. **Logs MCP** dans la card skill (GET /skills/{id}/mcp/logs?lines=50)
-8. **Scoring qualité benchmarks** — algo sans LLM juge
-
-## Roadmap long terme (voir docs/roadmap.md)
-
-- Parallélisme multi-modèles → Model routing autonome dans les sous-agents
-- Remote Access complet (WhatsApp, Signal après Telegram validé)
-- Multi-node cluster (Ray + vLLM)
+1. **Tester vLLM tool-use** après reload avec `--enable-auto-tool-choice` (modèle actuel chargé sans ces flags)
+2. **Types projets Dev/Docs/Research** — layouts fonctionnels (file tree IDE-like, drag-drop docs, sources URL)
+3. **RAG natif projets** — PDF/DOCX/MD → ChromaDB par projet, retrieval injecté
+4. **Remote Access** — Cloudflare Tunnel toggle, Telegram adapter
+5. **Parallel models** — load plusieurs modèles simultanément
+6. **MCP logs dans card skill** — GET /skills/{id}/mcp/logs?lines=50
+7. Supprimer `chroma.sqlite3` à la racine
 
 ## Points en suspens
 
-- Résultats perf profil Minimal à confirmer (test en cours, fix commit 47a2471)
-- `params` pas mis à jour si profil changé avant reload app → workaround : resélectionner le profil
-- web_search DDG sélecteurs brittle — fallback si DDG change layout
-- OOM kernel SIGKILL non détectable — watchdog process (backlog)
-- ROCm : si rocm-smi absent mais GPU AMD présent → llama compilé CPU, pas de warning clair
-- Speculative draft model externe : pas de browser pour choisir le GGUF dans le modal — path manuel seulement
+- `useToolChat` ne sauvegarde pas message user dans certains cas (conv "ping" = 1 seul message assistant) — à investiguer
+- Stats à zéro dans done event si `_total_text_len=0` (path vLLM tool-chat sans text_chunk comptabilisé)
+- Erreur TS pré-existante App.tsx:344 (type LoadConfig mismatch) — non bloquante
+- Violations lint dans nos propres fichiers (_invoke_agent 106L, _edit_file 48L) — acceptées, cohésion forte
 
 ## Historique
 
+### Session 23 (2026-05-21)
+Load profiles (Performance/Balanced/Gaming/Minimal), offload_kqv, n_batch, smart cap ctx, multi-GPU llama+vLLM, speculative decoding ngram/MTP/draft, n_threads adaptatif, notifications persistantes localStorage.
+
 ### Session 22 (2026-05-21)
-GPU backend mismatch fix : `nvidia-smi -L` obligatoire, AMD ROCm support (`-DGGML_HIPBLAS=on`), mismatch auto-recompile, `/installer/diagnose`, `/installer/recompile-llama`, banner EnginesTab, toast startup.
+Context bar 4 couleurs, toast ctx exceeded, KV quant Q4_0 défaut, throttle render 80ms, smart ctx initial 8K reasoning, fix LOG_PATH parents[2], watchdog backend Tauri.
 
 ### Session 21 (2026-05-20)
-MCP stdio transport (McpStdioClient, buffer 8MB, timeout 120s), venv isolé par skill Python, detect_mcp_server smithery.yaml + StdioServerTransport Node + monorepos, context budget 75%/92%, synthesis on cap, persistance messages MCP, context bar projets, déduplication messages, tool call blocks animés, 5 profils chat avec system prompts + permanent rules.
+Projects workspace (Dev/Docs/Research), tool calling natif, MCP/Skills intelligence, Discover filtres avancés, benchmark leaderboard, streaming token counter.
 
-### Session 20 (2026-05-20)
-Skills/MCP system complet : native skills (Web Search, Code Runner, File System, Calculator), community skills installables depuis GitHub, toggles UI, awareness blocks injectés dans system prompt, MCP HTTP fonctionnel, notifications SSE, modularisation backend.
-
-### Session 19 (2026-05-20)
-Streaming interleaved tool execution, parser MessageContent à état (think/tool_call/tool_result), auto-compact 98%, set_tool_limit tool, fetch_url + web_search via Scrapling, slash commands, auto-focus textarea, Permanent Rules UI, capabilities détectées au load.
-
-### Session 18 (2026-05-20 matin)
-Projects system complet : hub, workspaces, profils scopés, sidebar conversations. Dev mode tool use. generate_with_tools streaming réel. KV cache sélectionnable. MoE VRAM guard.
-
-### Sessions 1-17
-Fondations (dual-engine inference, VRAM management, model discovery), multi-vLLM, benchmark suite, fine-tuning QLoRA complet, MTP support, vision GGUF.
+### Sessions 1–20
+Foundation Tauri → vLLM multi-venv → UX → automation → benchmarks → GPU → vision → fine-tuning → MCP skills.
