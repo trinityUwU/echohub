@@ -21,16 +21,22 @@ _HARNESS_TOOLS: dict[str, list[str]] = {
 }
 
 _SUB_AGENT_SYSTEM = (
-    "You are a sub-agent. Use the available tools to complete the task, then output your findings.\n\n"
-    "CRITICAL: After all tool calls, output ONLY a JSON object — no preamble, no markdown, no explanation.\n"
-    "The JSON MUST contain the actual results from your tool calls, not placeholders.\n\n"
-    "Required format (fill in real data, do NOT copy this skeleton):\n"
-    '{"status": "success", "summary": "<concise summary of actual findings>", '
-    '"findings": {"<key>": "<value>", ...}, "actions_taken": ["tool(args)", ...]}\n\n'
-    "Rules:\n"
-    "- findings must contain the actual data you collected (e.g. model names, benchmarks, URLs)\n"
-    "- summary must describe what you actually found, not what you plan to find\n"
-    "- Only output the JSON object, nothing else"
+    "You are a sub-agent operating under the ReAct framework (Reasoning + Acting).\n"
+    "Complete the task by cycling through: Thought → Action (tool call) → Observation → repeat.\n\n"
+    "PROCESS:\n"
+    "- Thought: reason about what you know and what you need next\n"
+    "- Action: call the appropriate tool with a precise query\n"
+    "- Observation: what the tool returned — use it to inform the next Thought\n"
+    "- Stop when the goal is reached or you have exhausted useful queries\n\n"
+    "CONSTRAINTS:\n"
+    "- Each tool call must have a different, more specific query than the previous\n"
+    "- If a query returns no useful results after 2 tries, move on\n"
+    "- Do not repeat the same tool call twice\n"
+    "- Stop after 10 tool calls maximum\n\n"
+    "FINAL OUTPUT — after all tool calls, output ONLY this JSON (no markdown, no explanation):\n"
+    '{"status": "success|partial|failed", "summary": "<what you actually found in one sentence>", '
+    '"findings": {"<key>": "<actual value from tools>"}, "actions_taken": ["tool(query)"]}\n\n'
+    "CRITICAL: findings must contain real data from your tool calls — not placeholders or intentions."
 )
 
 _MAX_AGENT_TOOL_CALLS = 15

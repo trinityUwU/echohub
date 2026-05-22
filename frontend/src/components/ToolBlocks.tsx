@@ -106,22 +106,17 @@ export function ToolCallBlock({ content, streaming, agentSteps = [] }: {
         {isOpen && (
           <motion.div key="body" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }} style={{ overflow: 'hidden' }}>
-            {isInvokeAgent && agentSteps.length > 0 ? (
-              <AgentLivePanel
+            {isInvokeAgent ? (
+              <InvokeAgentPanel
+                argsDisplay={argsDisplay}
+                streaming={streaming}
+                agentSteps={agentSteps}
                 thinkingChunks={thinkingChunks}
                 isThinking={isThinking}
                 liveText={liveText}
                 milestones={milestones}
                 agentRunning={agentRunning}
               />
-            ) : isInvokeAgent && streaming ? (
-              // invoke_agent brief being written — stream the task content live
-              <div className="px-3 pt-2 pb-2.5 border-t border-white/5">
-                <p className="text-[11px] text-text-muted/50 font-mono leading-relaxed whitespace-pre-wrap max-h-32 overflow-hidden">
-                  {_extractTaskFromArgs(argsDisplay)}
-                  <span className="inline-block w-1 h-3 bg-text-muted/30 animate-pulse rounded-sm ml-0.5 align-middle" />
-                </p>
-              </div>
             ) : (
               <pre className="px-3 pb-3 pt-2 text-xs text-text-muted/60 leading-relaxed whitespace-pre-wrap border-t border-white/5 font-mono max-h-64 overflow-y-auto">
                 {streaming && !argsDisplay.trim() ? (
@@ -138,6 +133,85 @@ export function ToolCallBlock({ content, streaming, agentSteps = [] }: {
 }
 
 
+
+// ── InvokeAgentPanel ─────────────────────────────────────────────────────────
+
+interface InvokeAgentPanelProps {
+  argsDisplay: string
+  streaming: boolean
+  agentSteps: AgentStep[]
+  thinkingChunks: string
+  isThinking: boolean
+  liveText: string
+  milestones: AgentStep[]
+  agentRunning: boolean
+}
+
+function InvokeAgentPanel({
+  argsDisplay, streaming, agentSteps,
+  thinkingChunks, isThinking, liveText, milestones, agentRunning,
+}: InvokeAgentPanelProps): React.ReactElement {
+  const [briefOpen, setBriefOpen] = useState(false)
+  const taskText = _extractTaskFromArgs(argsDisplay)
+  const hasSteps = agentSteps.length > 0
+
+  return (
+    <div className="border-t border-white/5">
+      {/* Brief section — collapsible, live during streaming */}
+      <div>
+        <button
+          onClick={() => setBriefOpen(o => !o)}
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-white/[0.02] transition-colors"
+        >
+          {streaming && !hasSteps ? (
+            <motion.div className="w-1.5 h-1.5 rounded-full bg-accent/60 flex-shrink-0"
+              animate={{ opacity: [0.4, 1, 0.4] }} transition={{ repeat: Infinity, duration: 0.9 }} />
+          ) : (
+            <svg className="w-3 h-3 text-text-muted/30 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+            </svg>
+          )}
+          <span className="text-[10px] font-mono text-text-muted/40 uppercase tracking-wider flex-1">
+            {streaming && !hasSteps ? 'writing brief…' : 'brief'}
+          </span>
+          {taskText.length > 0 && (
+            <span className="text-[10px] text-text-muted/25 font-mono">{taskText.length}c</span>
+          )}
+          <svg className={`w-3 h-3 text-text-muted/25 transition-transform flex-shrink-0 ${(briefOpen || (streaming && !hasSteps)) ? 'rotate-180' : ''}`}
+            fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        <AnimatePresence initial={false}>
+          {(briefOpen || (streaming && !hasSteps)) && (
+            <motion.div key="brief" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }} style={{ overflow: 'hidden' }}>
+              <div className="px-3 pb-2.5">
+                <p className="text-[11px] text-text-muted/45 font-mono leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto">
+                  {taskText || argsDisplay}
+                  {streaming && !hasSteps && (
+                    <span className="inline-block w-1 h-3 bg-text-muted/30 animate-pulse rounded-sm ml-0.5 align-middle" />
+                  )}
+                </p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Live execution panel — shown once agent starts running */}
+      {hasSteps && (
+        <AgentLivePanel
+          thinkingChunks={thinkingChunks}
+          isThinking={isThinking}
+          liveText={liveText}
+          milestones={milestones}
+          agentRunning={agentRunning}
+        />
+      )}
+    </div>
+  )
+}
 
 // ── AgentLivePanel ────────────────────────────────────────────────────────────
 
