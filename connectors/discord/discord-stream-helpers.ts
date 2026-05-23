@@ -120,14 +120,20 @@ function handleSSEResponse(
 ): void {
   if (res.statusCode === 404) { handle404Response(res, onError); return; }
   if (!res.statusCode || res.statusCode >= 400) { onError(new Error(`HTTP ${res.statusCode}`)); return; }
+  let settled = false;
+  const done = (): void => { if (settled) return; settled = true; onDone(); };
+  const error = (err: Error): void => { if (settled) return; settled = true; onError(err); };
   res.on("data", (chunk: Buffer) => {
     const raw = chunk.toString();
-    if (isDone(raw)) { onDone(); return; }
+    if (isDone(raw)) { done(); return; }
     const token = parseSSEChunk(raw, onToolEvent);
     if (token) onToken(token);
   });
-  res.on("end", onDone);
-  res.on("error", onError);
+  res.on("end", done);
+  res.on("error", (err: Error) => {
+    if (settled) { logger.warn({ err }, "socket error after stream settled"); return; }
+    error(err);
+  });
 }
 
 export function streamChatSSE(
