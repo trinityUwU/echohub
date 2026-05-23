@@ -255,7 +255,7 @@ async function showConvList(interaction: ButtonInteraction): Promise<void> {
   try { list = await apiGet<ConversationSummary[]>("/conversations"); }
   catch (err) {
     logger.error({ err }, "Failed to fetch conversations");
-    await interaction.editReply({ content: "⚠️ Failed to load conversations." });
+    try { await interaction.message.edit({ content: "⚠️ Failed to load conversations.", embeds: [], components: [] }); } catch { /* ignore */ }
     return;
   }
   const options = list.slice(0, 10).map((c) => ({
@@ -270,8 +270,8 @@ async function showConvList(interaction: ButtonInteraction): Promise<void> {
   const embed = new EmbedBuilder().setColor(EMBED_COLOR).setTitle("💬 Conversations")
     .setDescription(`${list.length} conversation(s)`);
   try {
-    await interaction.editReply({ embeds: [embed], components: [selectRow, buildBackActionRow()] });
-  } catch (err) { logger.error({ err }, "showConvList editReply failed"); }
+    await interaction.message.edit({ embeds: [embed], components: [selectRow, buildBackActionRow()] });
+  } catch (err) { logger.error({ err }, "showConvList message.edit failed"); }
 }
 
 async function loadConversation(convId: string, channel: Message["channel"]): Promise<void> {
