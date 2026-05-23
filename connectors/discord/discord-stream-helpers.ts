@@ -134,6 +134,17 @@ function handle404Response(
   });
 }
 
+function extractDiscordError(raw: string): string | null {
+  for (const line of raw.split("\n")) {
+    if (!line.startsWith("data: ")) continue;
+    try {
+      const json = JSON.parse(line.slice(6)) as Record<string, unknown>;
+      if (json.type === "discord_error" && typeof json.error === "string") return json.error;
+    } catch { /* ignore malformed SSE lines */ }
+  }
+  return null;
+}
+
 function handleSSEResponse(
   res: http.IncomingMessage,
   onToken: (token: string) => void,
@@ -149,6 +160,8 @@ function handleSSEResponse(
   res.on("data", (chunk: Buffer) => {
     const raw = chunk.toString();
     if (isDone(raw)) { done(); return; }
+    const errMsg = extractDiscordError(raw);
+    if (errMsg) { error(new Error(errMsg)); return; }
     const token = parseSSEChunk(raw, onToolEvent);
     if (token) onToken(token);
   });
@@ -235,7 +248,7 @@ export async function onStreamError(
   state.settled = true;
   if (state.editTimer) { clearTimeout(state.editTimer); state.editTimer = null; }
   cbs.setGenerating(false);
-  logger.error({ err }, "Inference error");
+  logger.error({ message: err.message, stack: err.stack }, "Stream inference error");
   const msg = err.message === "NO_MODEL_LOADED"
     ? "⚠️ No model loaded in EchoHub. Please load a model first."
     : `⚠️ ${err.message}`;
@@ -252,8 +265,13 @@ export async function finishStream(
   state.settled = true;
   if (state.editTimer) { clearTimeout(state.editTimer); state.editTimer = null; }
   cbs.setGenerating(false);
+  logger.info({ accumulatedLength: state.accumulated.length }, "finishStream: accumulated length");
   const final = stripGenerationArtifacts(state.accumulated);
-  if (!final) { await cbs.editEmbed(placeholder, "*(no response)*", true); return; }
+  if (!final) {
+    logger.warn("finishStream: empty accumulated — model may have returned nothing");
+    await cbs.editEmbed(placeholder, "⚠️ No response from model. Check that a model is loaded in EchoHub.", true);
+    return;
+  }
   cbs.onAssistantContent(final);
   const row = cbs.buildResponseActionRow();
   if (final.length <= MAX_EMBED_LENGTH) {
