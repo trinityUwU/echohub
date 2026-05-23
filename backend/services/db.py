@@ -399,6 +399,20 @@ def init_db() -> None:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sources_proj ON project_sources(project_id)")
             conn.commit()
 
+        # connectors — external integrations config and runtime status (Discord etc.)
+        existing_tables6 = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "connectors" not in existing_tables6:
+            conn.execute("""
+                CREATE TABLE connectors (
+                    id TEXT PRIMARY KEY,
+                    config TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'stopped',
+                    error TEXT,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            conn.commit()
+
     logger.info("DB initialized at {}", get_db_path())
 
 
@@ -1050,6 +1064,76 @@ def delete_project_messages(conv_id: str) -> None:
         conn = _get_conn()
         conn.execute("DELETE FROM project_messages WHERE conversation_id = ?", (conv_id,))
         conn.commit()
+
+
+# ── Connectors (Discord etc.) ─────────────────────────────────────────────────
+
+def get_connector_config(connector_id: str) -> dict | None:
+    """Return parsed config dict for a connector, or None if not registered."""
+    with _lock:
+        conn = _get_conn()
+        try:
+            row = conn.execute(
+                "SELECT config FROM connectors WHERE id=?", (connector_id,)
+            ).fetchone()
+        except Exception:
+            logger.exception("get_connector_config failed for connector_id={}", connector_id)
+            return None
+    if not row:
+        return None
+    try:
+        return json.loads(row["config"])
+    except (json.JSONDecodeError, TypeError):
+        logger.error("get_connector_config: invalid JSON for connector_id={}", connector_id)
+        return None
+
+
+def save_connector_config(connector_id: str, config: dict) -> None:
+    """Upsert connector config. Never logs config content (contains sensitive tokens)."""
+    now = _now()
+    with _lock:
+        conn = _get_conn()
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO connectors (id, config, status, updated_at) VALUES (?, ?, 'stopped', ?)",
+                (connector_id, json.dumps(config), now),
+            )
+            conn.commit()
+        except Exception:
+            logger.exception("save_connector_config failed for connector_id={}", connector_id)
+            raise
+    logger.info("save_connector_config: connector_id={} saved", connector_id)
+
+
+def update_connector_status(connector_id: str, status: str, error: str | None = None) -> None:
+    """Update connector runtime status and optional error message."""
+    now = _now()
+    with _lock:
+        conn = _get_conn()
+        try:
+            conn.execute(
+                "UPDATE connectors SET status=?, error=?, updated_at=? WHERE id=?",
+                (status, error, now, connector_id),
+            )
+            conn.commit()
+        except Exception:
+            logger.exception(
+                "update_connector_status failed for connector_id={} status={}", connector_id, status
+            )
+            raise
+    logger.info("update_connector_status: connector_id={} status={}", connector_id, status)
+
+
+def get_all_connectors() -> list[dict]:
+    """Return all connector rows as dicts (config is raw JSON string, not parsed)."""
+    with _lock:
+        conn = _get_conn()
+        try:
+            rows = conn.execute("SELECT * FROM connectors ORDER BY id ASC").fetchall()
+        except Exception:
+            logger.exception("get_all_connectors failed")
+            return []
+    return [_row_to_dict(r) for r in rows]
 
 
 _BUILTIN_PROFILES = [
