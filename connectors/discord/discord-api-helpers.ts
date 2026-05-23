@@ -159,11 +159,11 @@ const BUTTON_DEFS: Record<string, ButtonDef> = {
   "echohub_menu":     { label: "Menu",          style: ButtonStyle.Secondary, emoji: "📋" },
   "echohub_history":  { label: "History",        style: ButtonStyle.Secondary, emoji: "📝" },
   "echohub_tools":    { label: "Tools",          style: ButtonStyle.Secondary, emoji: "⚡" },
-  "echohub_profile":  { label: "Profile",        style: ButtonStyle.Secondary, emoji: "⚙️" },
+  "echohub_profile":  { label: "Profile",        style: ButtonStyle.Secondary, emoji: "⚙" },
   "echohub_convlist": { label: "Conversations",  style: ButtonStyle.Primary,   emoji: "💬" },
   "echohub_new_chat": { label: "New Chat",       style: ButtonStyle.Success,   emoji: "➕" },
-  "echohub_clear":    { label: "Clear",          style: ButtonStyle.Danger,    emoji: "🗑️" },
-  "echohub_back":     { label: "Back to Menu",   style: ButtonStyle.Secondary, emoji: "←" },
+  "echohub_clear":    { label: "Clear",          style: ButtonStyle.Danger,    emoji: "🗑" },
+  "echohub_back":     { label: "Back to Menu",   style: ButtonStyle.Secondary, emoji: "↩️" },
 };
 
 export function buildActionRow(...buttonIds: string[]): ActionRowBuilder<ButtonBuilder> {
