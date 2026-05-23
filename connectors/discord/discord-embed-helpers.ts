@@ -84,7 +84,7 @@ export async function showProfileSelector(
     .setTitle("⚙️ Chat Profile")
     .setDescription(`**Active:** ${profile.name} (temp: ${profile.temperature})`);
   try {
-    await interaction.followUp({
+    await interaction.reply({
       embeds: [embed],
       components: [buildProfileSelectRow(session.activeProfileId), buildActionRow("echohub_back")],
     });

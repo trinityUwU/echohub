@@ -259,7 +259,7 @@ async function showConvList(interaction: ButtonInteraction): Promise<void> {
   const embed = new EmbedBuilder().setColor(EMBED_COLOR).setTitle("💬 Conversations")
     .setDescription(`${list.length} conversation(s) found.`);
   try {
-    await interaction.followUp({ embeds: [embed], components: [selectRow, buildBackActionRow()] });
+    await interaction.reply({ embeds: [embed], components: [selectRow, buildBackActionRow()] });
   } catch (err) { logger.error({ err }, "showConvList failed"); }
 }
 
@@ -364,33 +364,35 @@ async function handleButtonInteraction(interaction: ButtonInteraction, client: C
     return;
   }
   const channel = interaction.channel ?? interaction.message.channel;
+  const id = interaction.customId;
+
+  // convlist and profile use interaction.reply() directly — no defer needed
+  if (id === "echohub_convlist") { await showConvList(interaction); return; }
+  if (id === "echohub_profile") { await showProfileSelector(interaction, session); return; }
+
+  // All other buttons: deferUpdate first, then act via channel.send
   try { await interaction.deferUpdate(); } catch { /* already deferred */ }
-  if (interaction.customId === "echohub_clear") {
+
+  if (id === "echohub_clear") {
     try { await executeClear(channel, client.user?.id); } catch (err) { logger.error({ err }, "button clear failed"); }
-  } else if (interaction.customId === "echohub_menu") {
+  } else if (id === "echohub_menu") {
     await showMenu(channel);
-  } else if (interaction.customId === "echohub_convlist") {
-    await showConvList(interaction);
-  } else if (interaction.customId === "echohub_new_chat") {
+  } else if (id === "echohub_new_chat") {
     await handleNewChat(channel);
-  } else if (interaction.customId === "echohub_history") {
+  } else if (id === "echohub_history") {
     try {
       await (channel as unknown as SendableChannel).send({
         embeds: [buildHistoryEmbed(session.conversationHistory)],
         components: [buildActionRow("echohub_menu", "echohub_tools")],
       });
-    }
-    catch (err) { logger.error({ err }, "button history failed"); }
-  } else if (interaction.customId === "echohub_tools") {
+    } catch (err) { logger.error({ err }, "button history failed"); }
+  } else if (id === "echohub_tools") {
     try {
       await (channel as unknown as SendableChannel).send({
         embeds: [buildToolsEmbed(session.toolCallsLog)],
         components: [buildActionRow("echohub_menu", "echohub_history")],
       });
-    }
-    catch (err) { logger.error({ err }, "button tools failed"); }
-  } else if (interaction.customId === "echohub_profile") {
-    await showProfileSelector(interaction, session);
+    } catch (err) { logger.error({ err }, "button tools failed"); }
   }
 }
 
