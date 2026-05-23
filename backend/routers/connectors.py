@@ -126,8 +126,10 @@ def get_discord_status() -> ConnectorStatusResponse:
 @router.post("/discord/config")
 def save_discord_config(body: ConnectorConfigBody) -> dict[str, bool]:
     """Persist Discord connector configuration (bot_token stored securely in DB)."""
+    # bot_token="" is a sentinel meaning "keep existing token" — never overwrite with empty
+    existing = _db.get_connector_config("discord") or {}
     config_dict = {
-        "bot_token": body.bot_token,
+        "bot_token": body.bot_token if body.bot_token else existing.get("bot_token", ""),
         "client_id": body.client_id,
         "authorized_user_id": body.authorized_user_id,
     }
