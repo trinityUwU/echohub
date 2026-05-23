@@ -172,8 +172,18 @@ async function streamInference(
     onError(err instanceof Error ? err : new Error(String(err)));
     return;
   }
-  if (response.status === 503) { onError(new Error("NO_MODEL_LOADED")); return; }
-  if (!response.ok) { onError(new Error(`HTTP ${response.status}: ${response.statusText}`)); return; }
+  if (!response.ok) {
+    // 404 with "No model loaded" detail = no model loaded in EchoHub
+    if (response.status === 404) {
+      try {
+        const body = await response.json() as { detail?: string };
+        if (body?.detail?.toLowerCase().includes("no model")) {
+          onError(new Error("NO_MODEL_LOADED")); return;
+        }
+      } catch { /* ignore parse error */ }
+    }
+    onError(new Error(`HTTP ${response.status}: ${response.statusText}`)); return;
+  }
   if (!response.body) { onError(new Error("No response body")); return; }
   await consumeSSEStream(response.body, onToken, onDone, onError);
 }
@@ -223,9 +233,10 @@ function buildTokenHandler(state: StreamState): (token: string) => void {
   };
 }
 
-function buildErrorHandler(state: StreamState): (err: Error) => Promise<void> {
+function buildErrorHandler(state: StreamState, onHandled: () => void): (err: Error) => Promise<void> {
   return async (err: Error): Promise<void> => {
     isGenerating = false;
+    onHandled();
     if (err.message === "NO_MODEL_LOADED") {
       await editMessage(state.currentMsg, "⚠️ No model loaded in EchoHub. Please load a model first.");
     } else {
@@ -264,13 +275,14 @@ async function handleDmMessage(message: Message): Promise<void> {
     return;
   }
 
+  let hadError = false;
   const state: StreamState = { accumulated: "", lastEdit: Date.now(), editScheduled: false, currentMsg };
   const onToken = buildTokenHandler(state);
   const onDone = (): void => { isGenerating = false; };
-  const onError = buildErrorHandler(state);
+  const onError = buildErrorHandler(state, () => { hadError = true; });
 
   await streamInference(message.content, onToken, onDone, onError);
-  await flushAccumulated(state, message.channel);
+  if (!hadError) await flushAccumulated(state, message.channel);
   isGenerating = false;
 }
 
