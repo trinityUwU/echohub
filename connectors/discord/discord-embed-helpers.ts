@@ -78,16 +78,15 @@ export async function showProfileSelector(
   interaction: ButtonInteraction,
   session: BotSession,
 ): Promise<void> {
-  try { await interaction.deferReply(); } catch (err) { logger.error({ err }, "deferReply failed"); return; }
   const profile = getActiveProfile(session);
   const embed = new EmbedBuilder()
     .setColor(EMBED_COLOR)
     .setTitle("⚙️ Chat Profile")
     .setDescription(`**Active:** ${profile.name} (temp: ${profile.temperature})`);
   try {
-    await interaction.editReply({
+    await interaction.update({
       embeds: [embed],
       components: [buildProfileSelectRow(session.activeProfileId), buildActionRow("echohub_back")],
     });
-  } catch (err) { logger.error({ err }, "showProfileSelector editReply failed"); }
+  } catch (err) { logger.error({ err }, "showProfileSelector update failed"); }
 }
