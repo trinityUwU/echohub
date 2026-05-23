@@ -243,10 +243,16 @@ async function showMenu(channel: Message["channel"]): Promise<void> {
 }
 
 async function showConvList(interaction: ButtonInteraction): Promise<void> {
+  // deferReply immediately — Discord timeout is 3s, API call can take longer
+  try { await interaction.deferReply(); } catch (err) { logger.error({ err }, "deferReply failed"); return; }
   session.state = "conv_list";
   let list: ConversationSummary[];
   try { list = await apiGet<ConversationSummary[]>("/conversations"); }
-  catch (err) { logger.error({ err }, "Failed to fetch conversations"); return; }
+  catch (err) {
+    logger.error({ err }, "Failed to fetch conversations");
+    await interaction.editReply({ content: "⚠️ Failed to load conversations." });
+    return;
+  }
   const options = list.slice(0, 10).map((c) => ({
     label: c.title.slice(0, 100),
     value: c.id,
@@ -259,8 +265,8 @@ async function showConvList(interaction: ButtonInteraction): Promise<void> {
   const embed = new EmbedBuilder().setColor(EMBED_COLOR).setTitle("💬 Conversations")
     .setDescription(`${list.length} conversation(s) found.`);
   try {
-    await interaction.reply({ embeds: [embed], components: [selectRow, buildBackActionRow()] });
-  } catch (err) { logger.error({ err }, "showConvList failed"); }
+    await interaction.editReply({ embeds: [embed], components: [selectRow, buildBackActionRow()] });
+  } catch (err) { logger.error({ err }, "showConvList editReply failed"); }
 }
 
 async function loadConversation(convId: string, channel: Message["channel"]): Promise<void> {
