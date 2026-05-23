@@ -23,6 +23,7 @@ import {
   ToolCallEntry,
   ConversationSummary,
   ConversationDbMessage,
+  getActiveProfile,
 } from "./discord-api-helpers";
 import {
   streamChatSSE,
@@ -34,6 +35,11 @@ import {
   SSEToolEvent,
   CURSOR,
 } from "./discord-stream-helpers";
+import {
+  buildHistoryEmbed,
+  buildToolsEmbed,
+  showProfileSelector,
+} from "./discord-embed-helpers";
 
 // --- Config ---
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN ?? "";
@@ -42,8 +48,6 @@ const DISCORD_AUTHORIZED_USER_ID = process.env.DISCORD_AUTHORIZED_USER_ID ?? "";
 
 const EMBED_COLOR = 0x5865f2;
 const HISTORY_LIMIT = 40;
-const RESUME_LIMIT = 20;
-const RESUME_TRUNCATE = 300;
 
 // ---------------------------------------------------------------------------
 // Session state
@@ -55,6 +59,7 @@ const session: BotSession = {
   activeConvTitle: "New Chat",
   conversationHistory: [],
   toolCallsLog: [],
+  activeProfileId: "default",
 };
 
 let isGenerating = false;
@@ -98,11 +103,11 @@ async function sendEmbedPlaceholder(channel: Message["channel"]): Promise<Messag
 // ---------------------------------------------------------------------------
 
 function buildResponseActionRow(): ActionRowBuilder<ButtonBuilder> {
-  return buildActionRow("echohub_menu", "echohub_history", "echohub_tools");
+  return buildActionRow("echohub_menu", "echohub_history", "echohub_tools", "echohub_profile");
 }
 
 function buildMenuActionRow(): ActionRowBuilder<ButtonBuilder> {
-  return buildActionRow("echohub_convlist", "echohub_new_chat", "echohub_clear");
+  return buildActionRow("echohub_convlist", "echohub_new_chat", "echohub_profile", "echohub_clear");
 }
 
 function buildBackActionRow(): ActionRowBuilder<ButtonBuilder> {
@@ -207,9 +212,16 @@ async function handleChat(message: Message): Promise<void> {
     setGenerating,
     onToolEvent: (ev) => recordToolEvent(ev, pending),
   };
+  const activeProfile = getActiveProfile(session);
   streamChatSSE(
-    { conv_id: session.activeConvId, messages: session.conversationHistory,
-      user_message_id: crypto.randomUUID(), temperature: 0.7, max_tokens: 2048 },
+    {
+      conv_id: session.activeConvId,
+      messages: session.conversationHistory,
+      user_message_id: crypto.randomUUID(),
+      temperature: activeProfile.temperature,
+      max_tokens: 2048,
+      system_prompt: activeProfile.systemPrompt,
+    },
     (token) => { state.accumulated += token; scheduleEmbedEdit(state, placeholder, editEmbed); },
     () => { void finishStream(state, placeholder, message.channel, cbs); },
     (err) => { void onStreamError(state, err, placeholder, cbs); },
@@ -308,39 +320,6 @@ async function executeClear(channel: Message["channel"], clientUserId: string | 
 }
 
 // ---------------------------------------------------------------------------
-// History embed
-// ---------------------------------------------------------------------------
-
-function truncateMessage(text: string): string {
-  return text.length > RESUME_TRUNCATE ? text.slice(0, RESUME_TRUNCATE) + "…" : text;
-}
-
-function buildHistoryEmbed(): EmbedBuilder {
-  const slice = session.conversationHistory.slice(-RESUME_LIMIT);
-  const description = slice.length > 0
-    ? slice.map((m) => `${m.role === "user" ? "**You:**" : "**Echo:**"} ${truncateMessage(m.content)}`).join("\n\n")
-    : "No conversation history yet.";
-  return new EmbedBuilder().setColor(EMBED_COLOR).setTitle("📝 Conversation History").setDescription(description);
-}
-
-// ---------------------------------------------------------------------------
-// Tool calls embed
-// ---------------------------------------------------------------------------
-
-function formatToolEntry(entry: ToolCallEntry): string {
-  const ts = entry.timestamp.slice(11, 19);
-  return `**[${ts}] ${entry.tool}**\n→ Input: \`${entry.input}\`\n→ Output: \`${entry.output}\``;
-}
-
-function buildToolsEmbed(): EmbedBuilder {
-  const entries = session.toolCallsLog.slice(-5);
-  const description = entries.length > 0
-    ? entries.map(formatToolEntry).join("\n\n")
-    : "No tool calls in this session yet.";
-  return new EmbedBuilder().setColor(EMBED_COLOR).setTitle("⚡ Tool Calls").setDescription(description);
-}
-
-// ---------------------------------------------------------------------------
 // Command handlers
 // ---------------------------------------------------------------------------
 
@@ -366,7 +345,7 @@ async function handleCommand(message: Message, client: Client): Promise<void> {
   if (cmd === "!resume") {
     try {
       await (message.channel as unknown as SendableChannel).send({
-        embeds: [buildHistoryEmbed()],
+        embeds: [buildHistoryEmbed(session.conversationHistory)],
         components: [buildActionRow("echohub_menu", "echohub_tools")],
       });
     }
@@ -399,7 +378,7 @@ async function handleButtonInteraction(interaction: ButtonInteraction, client: C
   } else if (interaction.customId === "echohub_history") {
     try {
       await (channel as unknown as SendableChannel).send({
-        embeds: [buildHistoryEmbed()],
+        embeds: [buildHistoryEmbed(session.conversationHistory)],
         components: [buildActionRow("echohub_menu", "echohub_tools")],
       });
     }
@@ -407,18 +386,40 @@ async function handleButtonInteraction(interaction: ButtonInteraction, client: C
   } else if (interaction.customId === "echohub_tools") {
     try {
       await (channel as unknown as SendableChannel).send({
-        embeds: [buildToolsEmbed()],
+        embeds: [buildToolsEmbed(session.toolCallsLog)],
         components: [buildActionRow("echohub_menu", "echohub_history")],
       });
     }
     catch (err) { logger.error({ err }, "button tools failed"); }
+  } else if (interaction.customId === "echohub_profile") {
+    await showProfileSelector(channel, session);
   }
+}
+
+async function handleProfileSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  const profileId = interaction.values[0];
+  if (!profileId) return;
+  session.activeProfileId = profileId;
+  const profile = getActiveProfile(session);
+  try {
+    await interaction.update({
+      embeds: [new EmbedBuilder()
+        .setColor(EMBED_COLOR)
+        .setTitle("⚙️ Profile changed")
+        .setDescription(`**${profile.name}** — temp: ${profile.temperature}`)],
+      components: [buildActionRow("echohub_menu", "echohub_history")],
+    });
+  } catch (err) { logger.error({ err }, "handleProfileSelect update failed"); }
 }
 
 async function handleSelectInteraction(interaction: StringSelectMenuInteraction): Promise<void> {
   if (interaction.user.id !== DISCORD_AUTHORIZED_USER_ID) {
     try { await interaction.reply({ content: "Unauthorized.", ephemeral: true }); }
     catch (err) { logger.warn({ err }, "unauthorized select reply failed"); }
+    return;
+  }
+  if (interaction.customId === "echohub_profile_select") {
+    await handleProfileSelect(interaction);
     return;
   }
   if (interaction.customId !== "echohub_conv_select") return;

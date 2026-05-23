@@ -1,4 +1,4 @@
-// Helpers API EchoHub pour le bot Discord — types session, apiGet, apiPost, buildActionRow
+// Helpers API EchoHub pour le bot Discord — types session, apiGet, apiPost, buildActionRow, profils chat
 import http from "http";
 import https from "https";
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
@@ -44,6 +44,55 @@ export interface BotSession {
   activeConvTitle: string;
   conversationHistory: ConversationMessage[];
   toolCallsLog: ToolCallEntry[];
+  activeProfileId: string;
+}
+
+// ---------------------------------------------------------------------------
+// Chat profiles
+// ---------------------------------------------------------------------------
+
+export interface ChatProfile {
+  id: string;
+  name: string;
+  systemPrompt: string;
+  temperature: number;
+}
+
+export const CHAT_PROFILES: ChatProfile[] = [
+  {
+    id: "default",
+    name: "Default",
+    temperature: 0.6,
+    systemPrompt: "You are a direct, competent assistant. Answer accurately and concisely. No filler, no flattery, no unnecessary caveats. Always reply in the exact language the user writes in — switch instantly if they switch.",
+  },
+  {
+    id: "precise",
+    name: "Precise",
+    temperature: 0.2,
+    systemPrompt: "You are a precision-focused assistant. Prioritize correctness over completeness. When uncertain, state your confidence level explicitly. Never fill gaps with plausible-sounding approximations. Always reply in the exact language the user writes in — switch instantly if they switch.",
+  },
+  {
+    id: "creative",
+    name: "Creative",
+    temperature: 1.0,
+    systemPrompt: "You are an expansive, associative thinker. Generate original ideas, unexpected angles, and divergent perspectives. Push past the obvious answer. Always reply in the exact language the user writes in — switch instantly if they switch.",
+  },
+  {
+    id: "balanced",
+    name: "Balanced",
+    temperature: 0.7,
+    systemPrompt: "You are a clear-headed analyst. Balance depth with concision. Structure your reasoning before outputting conclusions. Suited for tradeoffs, multi-part problems, and technical decisions. Always reply in the exact language the user writes in — switch instantly if they switch.",
+  },
+  {
+    id: "coder",
+    name: "Coder",
+    temperature: 0.3,
+    systemPrompt: "You are a senior software engineer. Write working code. Think in systems. Spot edge cases before they are asked. Default stack: Python, TypeScript, React, FastAPI, Bun, SQLite, Tailwind. Always reply in the exact language the user writes in — switch instantly if they switch.",
+  },
+];
+
+export function getActiveProfile(session: BotSession): ChatProfile {
+  return CHAT_PROFILES.find((p) => p.id === session.activeProfileId) ?? CHAT_PROFILES[0];
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +159,7 @@ const BUTTON_DEFS: Record<string, ButtonDef> = {
   "echohub_menu":     { label: "Menu",          style: ButtonStyle.Secondary, emoji: "📋" },
   "echohub_history":  { label: "History",        style: ButtonStyle.Secondary, emoji: "📝" },
   "echohub_tools":    { label: "Tools",          style: ButtonStyle.Secondary, emoji: "⚡" },
+  "echohub_profile":  { label: "Profile",        style: ButtonStyle.Secondary, emoji: "⚙️" },
   "echohub_convlist": { label: "Conversations",  style: ButtonStyle.Primary,   emoji: "💬" },
   "echohub_new_chat": { label: "New Chat",       style: ButtonStyle.Success,   emoji: "➕" },
   "echohub_clear":    { label: "Clear",          style: ButtonStyle.Danger,    emoji: "🗑️" },

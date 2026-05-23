@@ -6,8 +6,10 @@
     "start": "bun run discord-dm-bot.ts"
   },
   "dependencies": {
+    "@types/ws": "^8.18.1",
     "discord.js": "^14.16.3",
     "pino": "^9.0.0",
-    "pino-pretty": "^13.0.0"
+    "pino-pretty": "^13.0.0",
+    "ws": "^8.21.0"
   }
 }
