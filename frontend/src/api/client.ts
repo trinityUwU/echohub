@@ -913,3 +913,30 @@ export const listMemories = (params?: { conv_id?: string; project_id?: string; t
 
 export const deleteMemory = (id: string): Promise<void> =>
   apiRequest(`/memory/${id}`, { method: 'DELETE' })
+
+// ── Connectors ─────────────────────────────────────────────────────────────
+
+export interface ConnectorConfig {
+  bot_token: string
+  client_id: string
+  authorized_user_id: string
+}
+
+export interface ConnectorStatus {
+  id: string
+  status: 'stopped' | 'running' | 'error'
+  error: string | null
+  config: ConnectorConfig | null
+}
+
+export const getDiscordConnectorStatus = (): Promise<ConnectorStatus> =>
+  apiRequest('/connectors/discord')
+
+export const saveDiscordConnectorConfig = (config: ConnectorConfig): Promise<void> =>
+  apiRequest('/connectors/discord/config', { method: 'POST', body: JSON.stringify(config) })
+
+export const startDiscordConnector = (): Promise<void> =>
+  apiRequest('/connectors/discord/start', { method: 'POST' })
+
+export const stopDiscordConnector = (): Promise<void> =>
+  apiRequest('/connectors/discord/stop', { method: 'POST' })
