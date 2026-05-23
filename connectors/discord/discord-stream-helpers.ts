@@ -19,10 +19,22 @@ const logger = pino({
 // SSE parsing
 // ---------------------------------------------------------------------------
 
-export function stripThinkingBlocks(text: string): string {
-  let out = text.replace(/<think>[\s\S]*?<\/think>/g, "\n\n---\n\n");
+export function stripGenerationArtifacts(text: string): string {
+  let out = text;
+  // Strip thinking blocks
+  out = out.replace(/<think>[\s\S]*?<\/think>/g, "\n\n---\n\n");
   out = out.replace(/<think>[\s\S]*/g, "");
   out = out.replace(/<\/think>/g, "\n\n---\n\n");
+  // Strip tool calls with indicator
+  out = out.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "\n🔧 *Tool call*\n");
+  out = out.replace(/<tool_response>[\s\S]*?<\/tool_response>/g, "\n📥 *Tool result*\n");
+  // Strip orphaned tags
+  out = out.replace(/<tool_call>[\s\S]*/g, "");
+  out = out.replace(/<\/tool_call>/g, "");
+  out = out.replace(/<tool_response>[\s\S]*/g, "");
+  out = out.replace(/<\/tool_response>/g, "");
+  // Deduplicate consecutive separators
+  out = out.replace(/(\n\n---\n\n){2,}/g, "\n\n---\n\n");
   return out.trim();
 }
 
@@ -179,7 +191,7 @@ export function scheduleEmbedEdit(
   state.editTimer = setTimeout(async () => {
     state.editTimer = null;
     state.lastEdit = Date.now();
-    const visible = stripThinkingBlocks(state.accumulated);
+    const visible = stripGenerationArtifacts(state.accumulated);
     await editEmbed(placeholder, (visible || CURSOR) + CURSOR, false);
   }, delay);
 }
@@ -211,7 +223,7 @@ export async function finishStream(
   state.settled = true;
   if (state.editTimer) { clearTimeout(state.editTimer); state.editTimer = null; }
   cbs.setGenerating(false);
-  const final = stripThinkingBlocks(state.accumulated);
+  const final = stripGenerationArtifacts(state.accumulated);
   if (!final) { await cbs.editEmbed(placeholder, "*(no response)*", true); return; }
   cbs.onAssistantContent(final);
   const row = cbs.buildResponseActionRow();
