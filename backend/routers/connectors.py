@@ -58,10 +58,19 @@ def _is_discord_running() -> bool:
         return False
     if _discord_process.poll() is None:
         return True
-    # Process has exited — mark as error in DB
-    logger.warning("Discord sidecar exited unexpectedly (returncode={})", _discord_process.returncode)
+    # Process has exited — capture stderr for diagnosis
+    stderr_out = ""
     try:
-        _db.update_connector_status("discord", "error", error="Process exited unexpectedly")
+        if _discord_process.stderr:
+            raw = _discord_process.stderr.read()
+            if raw:
+                stderr_out = raw.decode("utf-8", errors="replace").strip()[-300:]
+    except Exception:
+        pass
+    error_msg = stderr_out or f"Process exited (code {_discord_process.returncode})"
+    logger.warning("Discord sidecar exited (rc={}) — {}", _discord_process.returncode, error_msg)
+    try:
+        _db.update_connector_status("discord", "error", error=error_msg)
     except Exception:
         logger.exception("Failed to update connector status after unexpected exit")
     _discord_process = None
