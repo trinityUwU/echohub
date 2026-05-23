@@ -7,6 +7,10 @@ import {
   Message,
   EmbedBuilder,
   Events,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ButtonInteraction,
 } from "discord.js";
 import http from "http";
 import https from "https";
@@ -135,6 +139,21 @@ async function sendNewEmbed(channel: Message["channel"], description: string): P
   } catch (err) { logger.warn({ err }, "embed send failed"); }
 }
 
+function buildResponseActionRow(): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId("echohub_clear")
+      .setLabel("Clear")
+      .setStyle(ButtonStyle.Danger)
+      .setEmoji("🗑️"),
+    new ButtonBuilder()
+      .setCustomId("echohub_history")
+      .setLabel("History")
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji("📝"),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // SSE streaming via http.request (Node-compat, no ReadableStream)
 // ---------------------------------------------------------------------------
@@ -210,19 +229,41 @@ function truncateMessage(text: string): string {
   return text.length > RESUME_TRUNCATE ? text.slice(0, RESUME_TRUNCATE) + "…" : text;
 }
 
-async function handleClearCommand(message: Message, client: Client): Promise<void> {
+async function buildHistoryEmbed(): Promise<EmbedBuilder> {
+  const slice = conversationHistory.slice(-RESUME_LIMIT);
+  let description = "No conversation history yet.";
+  if (slice.length > 0) {
+    description = slice
+      .map((m) => {
+        const prefix = m.role === "user" ? "**You:**" : "**Echo:**";
+        return `${prefix} ${truncateMessage(m.content)}`;
+      })
+      .join("\n\n");
+  }
+  return new EmbedBuilder()
+    .setColor(EMBED_COLOR)
+    .setTitle("📝 Conversation History")
+    .setDescription(description);
+}
+
+type SendableChannel = { send: (text: string) => Promise<Message>; messages: Message["channel"]["messages"] };
+
+async function executeClear(channel: Message["channel"], clientUserId: string | undefined): Promise<void> {
   conversationHistory = [];
+  const fetched = await channel.messages.fetch({ limit: 50 });
+  const botMessages = fetched.filter((msg) => msg.author.id === clientUserId);
+  for (const [, msg] of botMessages) {
+    try {
+      await msg.delete();
+      await new Promise<void>((resolve) => setTimeout(resolve, 300));
+    } catch (err) { logger.warn({ err }, "failed to delete bot message"); }
+  }
+  await (channel as unknown as SendableChannel).send("🗑️ Conversation cleared.");
+}
+
+async function handleClearCommand(message: Message, client: Client): Promise<void> {
   try {
-    const fetched = await message.channel.messages.fetch({ limit: 50 });
-    const botMessages = fetched.filter((msg) => msg.author.id === client.user?.id);
-    for (const [, msg] of botMessages) {
-      try {
-        await msg.delete();
-        await new Promise<void>((resolve) => setTimeout(resolve, 300));
-      } catch (err) { logger.warn({ err }, "failed to delete bot message"); }
-    }
-    await (message.channel as { send: (text: string) => Promise<Message> })
-      .send("🗑️ Conversation cleared.");
+    await executeClear(message.channel, client.user?.id);
   } catch (err) {
     logger.error({ err }, "!clear failed");
   }
@@ -236,30 +277,18 @@ async function handleHelpCommand(message: Message): Promise<void> {
       "**Chat** — Just type your message\n" +
       "**!clear** — Reset conversation history and delete bot messages\n" +
       "**!resume** — Show last 10 exchanges from current history\n" +
-      "**!help** — Show this help"
+      "**!help** — Show this help\n\n" +
+      "You can also use the buttons below any response."
     );
   try {
     await (message.channel as { send: (opts: object) => Promise<Message> })
-      .send({ embeds: [embed] });
+      .send({ embeds: [embed], components: [buildResponseActionRow()] });
   } catch (err) { logger.error({ err }, "!help failed"); }
 }
 
 async function handleResumeCommand(message: Message): Promise<void> {
-  const slice = conversationHistory.slice(-RESUME_LIMIT);
-  let description = "No conversation history yet.";
-  if (slice.length > 0) {
-    description = slice
-      .map((m) => {
-        const prefix = m.role === "user" ? "**You:**" : "**Echo:**";
-        return `${prefix} ${truncateMessage(m.content)}`;
-      })
-      .join("\n\n");
-  }
-  const embed = new EmbedBuilder()
-    .setColor(EMBED_COLOR)
-    .setTitle("📝 Conversation History")
-    .setDescription(description);
   try {
+    const embed = await buildHistoryEmbed();
     await (message.channel as { send: (opts: object) => Promise<Message> })
       .send({ embeds: [embed] });
   } catch (err) { logger.error({ err }, "!resume failed"); }
@@ -277,13 +306,65 @@ async function handleCommand(message: Message, client: Client): Promise<void> {
 // DM handling with streaming embed
 // ---------------------------------------------------------------------------
 
-async function handleDmMessage(message: Message): Promise<void> {
-  if (isGenerating) {
-    await message.reply("⏳ Already generating, please wait...");
+interface StreamState {
+  accumulated: string;
+  lastEdit: number;
+  editTimer: ReturnType<typeof setTimeout> | null;
+  settled: boolean;
+}
+
+async function finishStream(state: StreamState, placeholder: Message, channel: Message["channel"]): Promise<void> {
+  if (state.settled) return;
+  state.settled = true;
+  if (state.editTimer) { clearTimeout(state.editTimer); state.editTimer = null; }
+  isGenerating = false;
+  const final = stripThinkingBlocks(state.accumulated);
+  if (!final) { await editEmbed(placeholder, "*(no response)*", true); return; }
+  pushToHistory({ role: "assistant", content: final });
+  const row = buildResponseActionRow();
+  if (final.length <= MAX_EMBED_LENGTH) {
+    try { await placeholder.edit({ embeds: [buildEmbed(final, true)], components: [row] }); }
+    catch (err) { logger.warn({ err }, "embed edit with buttons failed"); }
     return;
   }
-  isGenerating = true;
+  await editEmbed(placeholder, final.slice(0, MAX_EMBED_LENGTH), true);
+  let remaining = final.slice(MAX_EMBED_LENGTH);
+  while (remaining.length > 0) {
+    const chunk = remaining.slice(0, MAX_EMBED_LENGTH);
+    remaining = remaining.slice(MAX_EMBED_LENGTH);
+    try {
+      await (channel as { send: (opts: object) => Promise<Message> })
+        .send({ embeds: [buildEmbed(chunk, true)], components: remaining.length === 0 ? [row] : [] });
+    } catch (err) { logger.warn({ err }, "embed send chunk failed"); }
+  }
+}
 
+async function onStreamError(state: StreamState, err: Error, placeholder: Message): Promise<void> {
+  if (state.settled) return;
+  state.settled = true;
+  if (state.editTimer) { clearTimeout(state.editTimer); state.editTimer = null; }
+  isGenerating = false;
+  logger.error({ err }, "Inference error");
+  const msg = err.message === "NO_MODEL_LOADED"
+    ? "⚠️ No model loaded in EchoHub. Please load a model first."
+    : `⚠️ ${err.message}`;
+  await editEmbed(placeholder, msg, false);
+}
+
+function scheduleEmbedEdit(state: StreamState, placeholder: Message): void {
+  if (state.editTimer || state.settled) return;
+  const delay = Math.max(0, EDIT_THROTTLE_MS - (Date.now() - state.lastEdit));
+  state.editTimer = setTimeout(async () => {
+    state.editTimer = null;
+    state.lastEdit = Date.now();
+    const visible = stripThinkingBlocks(state.accumulated);
+    await editEmbed(placeholder, (visible || CURSOR) + CURSOR, false);
+  }, delay);
+}
+
+async function handleDmMessage(message: Message): Promise<void> {
+  if (isGenerating) { await message.reply("⏳ Already generating, please wait..."); return; }
+  isGenerating = true;
   let placeholder: Message;
   try {
     placeholder = await sendEmbedPlaceholder(message.channel);
@@ -292,67 +373,41 @@ async function handleDmMessage(message: Message): Promise<void> {
     isGenerating = false;
     return;
   }
-
-  let accumulated = "";
-  let lastEdit = Date.now();
-  let editTimer: ReturnType<typeof setTimeout> | null = null;
-  let settled = false;
-
-  const scheduleEdit = (): void => {
-    if (editTimer || settled) return;
-    const delay = Math.max(0, EDIT_THROTTLE_MS - (Date.now() - lastEdit));
-    editTimer = setTimeout(async () => {
-      editTimer = null;
-      lastEdit = Date.now();
-      const visible = stripThinkingBlocks(accumulated);
-      await editEmbed(placeholder, (visible || CURSOR) + CURSOR, false);
-    }, delay);
-  };
-
-  const finish = async (): Promise<void> => {
-    if (settled) return;
-    settled = true;
-    if (editTimer) { clearTimeout(editTimer); editTimer = null; }
-    isGenerating = false;
-
-    const final = stripThinkingBlocks(accumulated);
-    if (!final) { await editEmbed(placeholder, "*(no response)*", true); return; }
-    pushToHistory({ role: "assistant", content: final });
-
-    // Split if > MAX_EMBED_LENGTH
-    if (final.length <= MAX_EMBED_LENGTH) {
-      await editEmbed(placeholder, final, true);
-    } else {
-      await editEmbed(placeholder, final.slice(0, MAX_EMBED_LENGTH), true);
-      let remaining = final.slice(MAX_EMBED_LENGTH);
-      while (remaining.length > 0) {
-        await sendNewEmbed(message.channel, remaining.slice(0, MAX_EMBED_LENGTH));
-        remaining = remaining.slice(MAX_EMBED_LENGTH);
-      }
-    }
-  };
-
-  const onToken = (token: string): void => {
-    accumulated += token;
-    scheduleEdit();
-  };
-
-  const onDone = (): void => { void finish(); };
-
-  const onError = async (err: Error): Promise<void> => {
-    if (settled) return;
-    settled = true;
-    if (editTimer) { clearTimeout(editTimer); editTimer = null; }
-    isGenerating = false;
-    logger.error({ err }, "Inference error");
-    const msg = err.message === "NO_MODEL_LOADED"
-      ? "⚠️ No model loaded in EchoHub. Please load a model first."
-      : `⚠️ ${err.message}`;
-    await editEmbed(placeholder, msg, false);
-  };
-
+  const state: StreamState = { accumulated: "", lastEdit: Date.now(), editTimer: null, settled: false };
+  const onToken = (token: string): void => { state.accumulated += token; scheduleEmbedEdit(state, placeholder); };
+  const onDone = (): void => { void finishStream(state, placeholder, message.channel); };
+  const onError = (err: Error): void => { void onStreamError(state, err, placeholder); };
   pushToHistory({ role: "user", content: message.content });
-  streamChatSSE(conversationHistory, onToken, onDone, (err) => { void onError(err); });
+  streamChatSSE(conversationHistory, onToken, onDone, onError);
+}
+
+// ---------------------------------------------------------------------------
+// Button interaction handler
+// ---------------------------------------------------------------------------
+
+async function handleButtonInteraction(interaction: ButtonInteraction, client: Client): Promise<void> {
+  if (interaction.user.id !== DISCORD_AUTHORIZED_USER_ID) {
+    try {
+      await interaction.reply({ content: "Unauthorized.", ephemeral: true });
+    } catch (err) { logger.warn({ err }, "unauthorized interaction reply failed"); }
+    return;
+  }
+
+  if (interaction.customId === "echohub_clear") {
+    try {
+      await interaction.deferUpdate();
+      await executeClear(interaction.channel ?? interaction.message.channel, client.user?.id);
+    } catch (err) { logger.error({ err }, "button clear failed"); }
+    return;
+  }
+
+  if (interaction.customId === "echohub_history") {
+    try {
+      const embed = await buildHistoryEmbed();
+      await interaction.reply({ embeds: [embed] });
+    } catch (err) { logger.error({ err }, "button history failed"); }
+    return;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -381,6 +436,11 @@ function registerClientEvents(client: Client): void {
       return;
     }
     await handleDmMessage(message);
+  });
+
+  client.on(Events.InteractionCreate, async (interaction) => {
+    if (!interaction.isButton()) return;
+    await handleButtonInteraction(interaction, client);
   });
 
   client.on(Events.Error, (err: Error) => {
