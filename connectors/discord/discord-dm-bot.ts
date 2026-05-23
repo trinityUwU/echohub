@@ -445,7 +445,7 @@ async function handleSelectInteraction(interaction: StringSelectMenuInteraction)
 // ---------------------------------------------------------------------------
 
 function createClient(): Client {
-  return new Client({ intents: [GatewayIntentBits.DirectMessages], partials: [Partials.Channel] });
+  return new Client({ intents: [GatewayIntentBits.DirectMessages], partials: [Partials.Channel, Partials.Message, Partials.User] });
 }
 
 function registerClientEvents(client: Client): void {
