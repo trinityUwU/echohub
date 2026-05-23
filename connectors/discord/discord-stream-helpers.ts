@@ -92,6 +92,7 @@ export interface ChatSSEBody {
   user_message_id: string;
   temperature: number;
   max_tokens: number;
+  system_prompt?: string;
 }
 
 function handle404Response(
