@@ -25,6 +25,23 @@ const MAX_EMBED_LENGTH = 3900; // Discord embed description limit is 4096, keep 
 const EDIT_THROTTLE_MS = 800;
 const CURSOR = "▍";
 const EMBED_COLOR = 0x5865f2; // Discord blurple
+const HISTORY_LIMIT = 40; // max messages kept in conversationHistory
+const RESUME_LIMIT = 20; // last N items shown in !resume (= 10 exchanges)
+const RESUME_TRUNCATE = 300; // max chars per message in !resume embed
+
+// ---------------------------------------------------------------------------
+// Conversation history
+// ---------------------------------------------------------------------------
+
+interface ConversationMessage { role: "user" | "assistant"; content: string }
+let conversationHistory: ConversationMessage[] = [];
+
+function pushToHistory(msg: ConversationMessage): void {
+  conversationHistory.push(msg);
+  if (conversationHistory.length > HISTORY_LIMIT) {
+    conversationHistory = conversationHistory.slice(-HISTORY_LIMIT);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Logger
@@ -125,14 +142,14 @@ async function sendNewEmbed(channel: Message["channel"], description: string): P
 let isGenerating = false;
 
 function streamChatSSE(
-  userContent: string,
+  messages: ConversationMessage[],
   onToken: (token: string) => void,
   onDone: () => void,
   onError: (err: Error) => void
 ): void {
   const url = new URL(`${ECHOHUB_API_URL}/inference/chat`);
   const body = JSON.stringify({
-    messages: [{ role: "user", content: userContent }],
+    messages,
     stream: true,
     temperature: 0.7,
     max_tokens: 2048,
@@ -186,6 +203,77 @@ function streamChatSSE(
 }
 
 // ---------------------------------------------------------------------------
+// Command helpers
+// ---------------------------------------------------------------------------
+
+function truncateMessage(text: string): string {
+  return text.length > RESUME_TRUNCATE ? text.slice(0, RESUME_TRUNCATE) + "…" : text;
+}
+
+async function handleClearCommand(message: Message, client: Client): Promise<void> {
+  conversationHistory = [];
+  try {
+    const fetched = await message.channel.messages.fetch({ limit: 50 });
+    const botMessages = fetched.filter((msg) => msg.author.id === client.user?.id);
+    for (const [, msg] of botMessages) {
+      try {
+        await msg.delete();
+        await new Promise<void>((resolve) => setTimeout(resolve, 300));
+      } catch (err) { logger.warn({ err }, "failed to delete bot message"); }
+    }
+    await (message.channel as { send: (text: string) => Promise<Message> })
+      .send("🗑️ Conversation cleared.");
+  } catch (err) {
+    logger.error({ err }, "!clear failed");
+  }
+}
+
+async function handleHelpCommand(message: Message): Promise<void> {
+  const embed = new EmbedBuilder()
+    .setColor(EMBED_COLOR)
+    .setTitle("Echo — Commands")
+    .setDescription(
+      "**Chat** — Just type your message\n" +
+      "**!clear** — Reset conversation history and delete bot messages\n" +
+      "**!resume** — Show last 10 exchanges from current history\n" +
+      "**!help** — Show this help"
+    );
+  try {
+    await (message.channel as { send: (opts: object) => Promise<Message> })
+      .send({ embeds: [embed] });
+  } catch (err) { logger.error({ err }, "!help failed"); }
+}
+
+async function handleResumeCommand(message: Message): Promise<void> {
+  const slice = conversationHistory.slice(-RESUME_LIMIT);
+  let description = "No conversation history yet.";
+  if (slice.length > 0) {
+    description = slice
+      .map((m) => {
+        const prefix = m.role === "user" ? "**You:**" : "**Echo:**";
+        return `${prefix} ${truncateMessage(m.content)}`;
+      })
+      .join("\n\n");
+  }
+  const embed = new EmbedBuilder()
+    .setColor(EMBED_COLOR)
+    .setTitle("📝 Conversation History")
+    .setDescription(description);
+  try {
+    await (message.channel as { send: (opts: object) => Promise<Message> })
+      .send({ embeds: [embed] });
+  } catch (err) { logger.error({ err }, "!resume failed"); }
+}
+
+async function handleCommand(message: Message, client: Client): Promise<void> {
+  const cmd = message.content.trim().toLowerCase();
+  if (cmd === "!clear") { await handleClearCommand(message, client); return; }
+  if (cmd === "!help") { await handleHelpCommand(message); return; }
+  if (cmd === "!resume") { await handleResumeCommand(message); return; }
+  // Unknown command — silently ignore
+}
+
+// ---------------------------------------------------------------------------
 // DM handling with streaming embed
 // ---------------------------------------------------------------------------
 
@@ -229,6 +317,7 @@ async function handleDmMessage(message: Message): Promise<void> {
 
     const final = stripThinkingBlocks(accumulated);
     if (!final) { await editEmbed(placeholder, "*(no response)*", true); return; }
+    pushToHistory({ role: "assistant", content: final });
 
     // Split if > MAX_EMBED_LENGTH
     if (final.length <= MAX_EMBED_LENGTH) {
@@ -262,7 +351,8 @@ async function handleDmMessage(message: Message): Promise<void> {
     await editEmbed(placeholder, msg, false);
   };
 
-  streamChatSSE(message.content, onToken, onDone, (err) => { void onError(err); });
+  pushToHistory({ role: "user", content: message.content });
+  streamChatSSE(conversationHistory, onToken, onDone, (err) => { void onError(err); });
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +376,10 @@ function registerClientEvents(client: Client): void {
     if (message.channel.type !== ChannelType.DM) return;
     if (message.author.id !== DISCORD_AUTHORIZED_USER_ID) return;
     logger.info({ content: message.content.slice(0, 80) }, "DM received");
+    if (message.content.startsWith("!")) {
+      await handleCommand(message, client);
+      return;
+    }
     await handleDmMessage(message);
   });
 
