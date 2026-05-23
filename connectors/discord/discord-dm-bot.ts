@@ -18,7 +18,6 @@ const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID ?? "";
 const DISCORD_AUTHORIZED_USER_ID = process.env.DISCORD_AUTHORIZED_USER_ID ?? "";
 const ECHOHUB_API_URL = process.env.ECHOHUB_API_URL ?? "http://localhost:37821";
 
-const EDIT_THROTTLE_MS = 500;
 const MAX_MESSAGE_LENGTH = 1900;
 
 // ---------------------------------------------------------------------------
@@ -43,22 +42,10 @@ interface ChatRequestBody {
   stream: boolean;
 }
 
-// EchoHub streams OpenAI-compatible SSE: {"choices": [{"delta": {"content": "..."}, "finish_reason": null|"stop"}]}
-interface SSEOpenAIChunk {
-  choices: Array<{ delta: { content?: string }; finish_reason: string | null }>;
+// EchoHub non-stream response: OpenAI-compatible choices object
+interface ChatResponse {
+  choices: Array<{ message: { content: string }; finish_reason: string }>;
 }
-
-interface SSEEchoHubStats {
-  type: "echohub_stats" | "usage" | "timings";
-  [key: string]: unknown;
-}
-
-interface SSEErrorEvent {
-  error: string;
-  error_type: string;
-}
-
-type SSEEvent = SSEOpenAIChunk | SSEEchoHubStats | SSEErrorEvent;
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -76,116 +63,36 @@ function validateEnv(): void {
 }
 
 // ---------------------------------------------------------------------------
-// SSE parsing
-// ---------------------------------------------------------------------------
-
-function parseSSELine(line: string): SSEEvent | null {
-  if (!line.startsWith("data: ")) return null;
-  const raw = line.slice("data: ".length).trim();
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as SSEEvent;
-  } catch {
-    return null;
-  }
-}
-
-function extractTokenFromChunk(event: SSEEvent): string | null {
-  if ("choices" in event && Array.isArray(event.choices)) {
-    return event.choices[0]?.delta?.content ?? null;
-  }
-  return null;
-}
-
-function isFinished(event: SSEEvent): boolean {
-  if ("choices" in event && Array.isArray(event.choices)) {
-    return event.choices[0]?.finish_reason === "stop";
-  }
-  return false;
-}
-
-function isErrorEvent(event: SSEEvent): event is SSEErrorEvent {
-  return "error" in event;
-}
-
-// ---------------------------------------------------------------------------
-// Inference streaming
+// Inference (non-stream — Bun ReadableStream SSE has socket issues)
 // ---------------------------------------------------------------------------
 
 let isGenerating = false;
 
-async function fetchChatStream(userContent: string): Promise<Response> {
+async function fetchChatResponse(userContent: string): Promise<string> {
   const body: ChatRequestBody = {
     messages: [{ role: "user", content: userContent }],
-    stream: true,
+    stream: false,
   };
-  return await fetch(`${ECHOHUB_API_URL}/inference/chat`, {
+  const response = await fetch(`${ECHOHUB_API_URL}/inference/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-}
-
-async function consumeSSEStream(
-  body: ReadableStream<Uint8Array>,
-  onToken: (token: string) => void,
-  onDone: () => void,
-  onError: (err: Error) => void
-): Promise<void> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const event = parseSSELine(line);
-        if (!event) continue;
-        if (isErrorEvent(event)) { onError(new Error(event.error)); return; }
-        const token = extractTokenFromChunk(event);
-        if (token) onToken(token);
-        if (isFinished(event)) { onDone(); return; }
-      }
-    }
-    onDone();
-  } catch (err) {
-    onError(err instanceof Error ? err : new Error(String(err)));
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-async function streamInference(
-  userContent: string,
-  onToken: (token: string) => void,
-  onDone: () => void,
-  onError: (err: Error) => void
-): Promise<void> {
-  let response: Response;
-  try {
-    response = await fetchChatStream(userContent);
-  } catch (err) {
-    onError(err instanceof Error ? err : new Error(String(err)));
-    return;
-  }
   if (!response.ok) {
-    // 404 with "No model loaded" detail = no model loaded in EchoHub
     if (response.status === 404) {
       try {
-        const body = await response.json() as { detail?: string };
-        if (body?.detail?.toLowerCase().includes("no model")) {
-          onError(new Error("NO_MODEL_LOADED")); return;
-        }
-      } catch { /* ignore parse error */ }
+        const err = await response.json() as { detail?: string };
+        if (err?.detail?.toLowerCase().includes("no model")) throw new Error("NO_MODEL_LOADED");
+      } catch (e) {
+        if (e instanceof Error && e.message === "NO_MODEL_LOADED") throw e;
+      }
     }
-    onError(new Error(`HTTP ${response.status}: ${response.statusText}`)); return;
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
   }
-  if (!response.body) { onError(new Error("No response body")); return; }
-  await consumeSSEStream(response.body, onToken, onDone, onError);
+  const data = await response.json() as ChatResponse;
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) throw new Error("Empty response from model");
+  return content;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,53 +119,6 @@ async function sendNewMessage(channel: Message["channel"], content: string): Pro
 // DM handling
 // ---------------------------------------------------------------------------
 
-interface StreamState {
-  accumulated: string;
-  lastEdit: number;
-  editScheduled: boolean;
-  currentMsg: Message;
-}
-
-function buildTokenHandler(state: StreamState): (token: string) => void {
-  return (token: string): void => {
-    state.accumulated += token;
-    if (Date.now() - state.lastEdit >= EDIT_THROTTLE_MS && !state.editScheduled) {
-      state.editScheduled = true;
-      setTimeout(async () => {
-        state.editScheduled = false;
-        if (state.accumulated) await editMessage(state.currentMsg, state.accumulated);
-        state.lastEdit = Date.now();
-      }, EDIT_THROTTLE_MS);
-    }
-  };
-}
-
-function buildErrorHandler(state: StreamState, onHandled: () => void): (err: Error) => Promise<void> {
-  return async (err: Error): Promise<void> => {
-    isGenerating = false;
-    onHandled();
-    if (err.message === "NO_MODEL_LOADED") {
-      await editMessage(state.currentMsg, "⚠️ No model loaded in EchoHub. Please load a model first.");
-    } else {
-      logger.error({ err }, "Inference error");
-      await editMessage(state.currentMsg, `⚠️ Error: ${err.message}`);
-    }
-  };
-}
-
-async function flushAccumulated(state: StreamState, channel: Message["channel"]): Promise<void> {
-  if (!state.accumulated) return;
-  const chunks = splitIntoChunks(state.accumulated);
-  await editMessage(state.currentMsg, chunks[0]);
-  for (let i = 1; i < chunks.length; i++) {
-    try {
-      state.currentMsg = await sendNewMessage(channel, chunks[i]);
-    } catch (err) {
-      logger.warn({ err }, "Failed to send continuation message");
-    }
-  }
-}
-
 async function handleDmMessage(message: Message): Promise<void> {
   if (isGenerating) {
     await message.reply("⏳ Already generating, please wait...");
@@ -266,24 +126,33 @@ async function handleDmMessage(message: Message): Promise<void> {
   }
   isGenerating = true;
 
-  let currentMsg: Message;
+  let placeholder: Message;
   try {
-    currentMsg = await sendInitialMessage(message.channel);
+    placeholder = await sendInitialMessage(message.channel);
   } catch (err) {
-    logger.error({ err }, "Failed to send initial message");
+    logger.error({ err }, "Failed to send placeholder message");
     isGenerating = false;
     return;
   }
 
-  let hadError = false;
-  const state: StreamState = { accumulated: "", lastEdit: Date.now(), editScheduled: false, currentMsg };
-  const onToken = buildTokenHandler(state);
-  const onDone = (): void => { isGenerating = false; };
-  const onError = buildErrorHandler(state, () => { hadError = true; });
-
-  await streamInference(message.content, onToken, onDone, onError);
-  if (!hadError) await flushAccumulated(state, message.channel);
-  isGenerating = false;
+  try {
+    const reply = await fetchChatResponse(message.content);
+    const chunks = splitIntoChunks(reply);
+    await editMessage(placeholder, chunks[0]);
+    for (let i = 1; i < chunks.length; i++) {
+      await sendNewMessage(message.channel, chunks[i]);
+    }
+  } catch (err) {
+    const e = err instanceof Error ? err : new Error(String(err));
+    logger.error({ err }, "Inference error");
+    if (e.message === "NO_MODEL_LOADED") {
+      await editMessage(placeholder, "⚠️ No model loaded in EchoHub. Please load a model first.");
+    } else {
+      await editMessage(placeholder, `⚠️ Error: ${e.message}`);
+    }
+  } finally {
+    isGenerating = false;
+  }
 }
 
 // ---------------------------------------------------------------------------
