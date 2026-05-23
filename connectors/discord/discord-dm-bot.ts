@@ -48,9 +48,12 @@ function validateEnv(): void {
 // ---------------------------------------------------------------------------
 
 function stripThinkingBlocks(text: string): string {
-  let out = text.replace(/<think>[\s\S]*?<\/think>/g, "");
+  // Replace complete thinking blocks with separator
+  let out = text.replace(/<think>[\s\S]*?<\/think>/g, "\n\n---\n\n");
+  // Remove orphaned opening <think> (generation in progress)
   out = out.replace(/<think>[\s\S]*/g, "");
-  out = out.replace(/<\/think>/g, "");
+  // Replace orphaned closing </think> with separator
+  out = out.replace(/<\/think>/g, "\n\n---\n\n");
   return out.trim();
 }
 
