@@ -1,10 +1,10 @@
 # TODO — EchoHub
-*Dernière mise à jour : 2026-05-22 (session 26)*
+*Dernière mise à jour : 2026-05-23 (session 27)*
 
 ## En cours
 
-- [ ] **Réinstaller vLLM 0.21.0 en Python 3.11** — `pip install` en background, vérifier avec `/home/trinity/.local/share/echohub/vllm-envs/0.21.0/bin/pip show vllm` puis Settings → Engines → confirm
 - [ ] **Construction karma Reddit** (r/LocalLLaMA) — objectif 200 avant ~28 juin 2026, 1-2 commentaires/jour
+- [ ] **Test Discord web_search** — envoyer une question qui nécessite info fraîche, valider que le modèle utilise le tool
 
 ## À faire (priorité)
 
@@ -28,7 +28,7 @@
   - Chat normal = pas de RAG. Exclure ZIP/TAR.GZ
 - [ ] **Remote Access — Settings > Remote Access**
   - Cloudflare Tunnel toggle avec status badge
-  - Telegram Bot API — premier adaptateur messaging
+  - Telegram Bot API — deuxième connecteur (après Discord validé)
   - Session routing → modèle chargé + dernière conv < 5 min
 - [ ] **Parallel models** — charger plusieurs modèles simultanément, VRAM bar combinée
 - [ ] **Dynamic KV cache + auto-compact** — smart initial ctx, compaction à 75%, reload-on-resize
@@ -37,7 +37,7 @@
 ### P2 — Backlog actif
 
 - [ ] Logs MCP dans card skill — endpoint `GET /skills/{id}/mcp/logs?lines=50`
-- [ ] Supprimer `chroma.sqlite3` à la racine (fichier parasite)
+- [ ] Supprimer `chroma_data/` et `chroma.sqlite3` à la racine (fichiers parasites)
 - [ ] Fix TS pré-existant App.tsx:354 (type LoadConfig `kvQuant null` mismatch)
 - [ ] Fix indicateur `~` après fin de stream (race condition liveTokens/streaming)
 - [ ] web_search DDG sélecteurs brittle — fallback si DDG change layout
@@ -45,6 +45,7 @@
 - [ ] run_command timeout configurable (tsc sur gros projets > 10s)
 - [ ] Fix stats à zéro dans done event vLLM (path tool-chat sans text_chunk)
 - [ ] Re-télécharger DeepSeek R1 AWQ 7B (poids manquants, seules métadonnées présentes)
+- [ ] Vérifier vLLM venv 0.21.0 — `/home/trinity/.local/share/echohub/vllm-envs/0.21.0/bin/pip show vllm`
 
 ### P2 — Performance GPU
 
@@ -67,6 +68,28 @@
 - [ ] Remote Access : WhatsApp Business API, Signal via signal-cli (après Telegram validé)
 - [ ] MCP server EchoHub → Claude Code pilote modèles locaux
 
+## Terminé — session 27
+
+- [x] **Discord connector — Settings > Connectors > Discord** — config bot_token/client_id/authorized_user_id
+- [x] **Bot discord.js (Bun)** — sidecar géré par FastAPI, start/stop depuis Settings
+- [x] **Streaming SSE via http.request** — stable (Bun fetch+ReadableStream crash socket)
+- [x] **Embeds Discord** — streaming live curseur ▍, throttle 800ms, couleur blurple at done
+- [x] **Strip `<think>` → séparateur ---** — plus affiché dans les embeds
+- [x] **Strip `<tool_call>`/`<tool_response>`** → indicateurs 🔧/📥
+- [x] **Conversations EchoHub partagées** — même SQLite, même API REST
+- [x] **State machine bot** : idle/chatting/menu/conv_list
+- [x] **Select menu conversations** — liste des convs EchoHub, rebuild historique depuis DB
+- [x] **Profils de chat** : Default/Precise/Creative/Balanced/Coder — select menu ⚙️
+- [x] **Boutons contextuels** sur chaque embed (règle zéro embed sans boutons)
+- [x] **Tool calls log** — bouton ⚡, 5 derniers appels avec timestamp/input/output
+- [x] **web_search activé par défaut** dans discord/chat via generate_with_tools
+- [x] **Fix token sentinel** — bot_token="" ne réécrit plus le token en DB
+- [x] **Fix Partials.Message+User** — interactions bouton DM reçues
+- [x] **Fix interaction.update()+message.edit()** — séquence correcte après debug timeout
+- [x] **Fix double socket error** — flag settled dans handleSSEResponse
+- [x] **Fix emoji ← invalide** → ↩️
+- [x] **ConnectorsTab UI** — inputs bg-elevated border-transparent, cohérent dark theme
+
 ## Terminé — session 26
 
 - [x] invoke_agent streaming end-to-end — tokens sous-agent en temps réel via agent_runner.py async generator
@@ -84,5 +107,3 @@
 - [x] lib.rs : find_python() dynamique (venv→python3.11→python3) + clear pycache au spawn
 - [x] App.tsx : détection restart backend via started_at polling 5s + toast + refresh
 - [x] vllm_manager.py : force python3.11 pour nouveaux venvs vLLM
-- [x] Fix hooks React Rules dans ToolCallBody (Fewer hooks than expected)
-- [x] useToolChat throttle 50ms hors boucle for-await (fix persistance timer)
