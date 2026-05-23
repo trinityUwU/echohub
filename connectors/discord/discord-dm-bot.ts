@@ -43,21 +43,22 @@ interface ChatRequestBody {
   stream: boolean;
 }
 
-interface SSETokenEvent {
-  token: string;
+// EchoHub streams OpenAI-compatible SSE: {"choices": [{"delta": {"content": "..."}, "finish_reason": null|"stop"}]}
+interface SSEOpenAIChunk {
+  choices: Array<{ delta: { content?: string }; finish_reason: string | null }>;
 }
 
-interface SSEDoneEvent {
-  done: true;
-  stats?: Record<string, unknown>;
-}
-
-interface SSEThinkingEvent {
-  type: "thinking_chunk";
+interface SSEEchoHubStats {
+  type: "echohub_stats" | "usage" | "timings";
   [key: string]: unknown;
 }
 
-type SSEEvent = SSETokenEvent | SSEDoneEvent | SSEThinkingEvent;
+interface SSEErrorEvent {
+  error: string;
+  error_type: string;
+}
+
+type SSEEvent = SSEOpenAIChunk | SSEEchoHubStats | SSEErrorEvent;
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -89,16 +90,22 @@ function parseSSELine(line: string): SSEEvent | null {
   }
 }
 
-function isTokenEvent(event: SSEEvent): event is SSETokenEvent {
-  return "token" in event && typeof (event as SSETokenEvent).token === "string";
+function extractTokenFromChunk(event: SSEEvent): string | null {
+  if ("choices" in event && Array.isArray(event.choices)) {
+    return event.choices[0]?.delta?.content ?? null;
+  }
+  return null;
 }
 
-function isDoneEvent(event: SSEEvent): event is SSEDoneEvent {
-  return "done" in event && (event as SSEDoneEvent).done === true;
+function isFinished(event: SSEEvent): boolean {
+  if ("choices" in event && Array.isArray(event.choices)) {
+    return event.choices[0]?.finish_reason === "stop";
+  }
+  return false;
 }
 
-function isThinkingEvent(event: SSEEvent): event is SSEThinkingEvent {
-  return "type" in event && (event as SSEThinkingEvent).type === "thinking_chunk";
+function isErrorEvent(event: SSEEvent): event is SSEErrorEvent {
+  return "error" in event;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,9 +145,10 @@ async function consumeSSEStream(
       for (const line of lines) {
         const event = parseSSELine(line);
         if (!event) continue;
-        if (isThinkingEvent(event)) continue;
-        if (isTokenEvent(event)) onToken(event.token);
-        if (isDoneEvent(event)) { onDone(); return; }
+        if (isErrorEvent(event)) { onError(new Error(event.error)); return; }
+        const token = extractTokenFromChunk(event);
+        if (token) onToken(token);
+        if (isFinished(event)) { onDone(); return; }
       }
     }
     onDone();
