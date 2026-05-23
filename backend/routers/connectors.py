@@ -1,18 +1,23 @@
 # Gestion des connecteurs externes — CRUD config + start/stop/status du sidecar Discord Bun
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import signal
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 
+from backend.services import conversation_manager as cm
 from backend.services import db as _db
+from backend.services import engine_router
 
 # ---------------------------------------------------------------------------
 # Router
@@ -44,6 +49,14 @@ class ConnectorStatusResponse(BaseModel):
     status: str
     error: str | None
     config: dict[str, Any] | None
+
+
+class DiscordChatRequest(BaseModel):
+    conv_id: str
+    messages: list[dict]
+    user_message_id: str
+    temperature: float = 0.7
+    max_tokens: int = 2048
 
 
 # ---------------------------------------------------------------------------
@@ -247,3 +260,110 @@ def stop_discord() -> dict[str, bool]:
         logger.exception("stop_discord: failed to update DB status")
 
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Discord Chat — streaming inference with automatic persistence
+# ---------------------------------------------------------------------------
+
+
+async def _persist_assistant_reply(
+    conv_id: str,
+    content: str,
+    stats: dict[str, Any] | None,
+    load_config: dict[str, Any] | None,
+) -> None:
+    """Persist the assistant reply to the conversation DB (background task)."""
+    msg_id = str(uuid.uuid4())
+    try:
+        cm.add_message(
+            conv_id=conv_id,
+            id=msg_id,
+            role="assistant",
+            content=content,
+            stats=stats,
+            load_config=load_config,
+        )
+    except Exception:
+        logger.exception("discord_chat: failed to persist assistant reply (conv_id={})", conv_id)
+
+
+@router.post("/discord/chat")
+async def discord_chat(req: DiscordChatRequest) -> StreamingResponse:
+    """Stream an LLM response and persist user + assistant messages in SQLite."""
+    model_info = engine_router.get_status()
+    if model_info is None:
+        raise HTTPException(status_code=404, detail="No model loaded")
+
+    try:
+        conversation = cm.get_conversation(req.conv_id)
+    except Exception:
+        logger.exception("discord_chat: DB read failed (conv_id={})", req.conv_id)
+        raise HTTPException(status_code=500, detail="Failed to read conversation")
+
+    if conversation is None:
+        raise HTTPException(status_code=404, detail=f"Conversation '{req.conv_id}' not found")
+
+    # Persist the last user message before streaming
+    user_content = ""
+    for msg in reversed(req.messages):
+        if msg.get("role") == "user":
+            user_content = msg.get("content", "")
+            break
+
+    try:
+        cm.add_message(
+            conv_id=req.conv_id,
+            id=req.user_message_id,
+            role="user",
+            content=user_content,
+            stats=None,
+            load_config=None,
+        )
+    except Exception:
+        logger.exception("discord_chat: failed to persist user message (conv_id={})", req.conv_id)
+        raise HTTPException(status_code=500, detail="Failed to persist user message")
+
+    async def _stream_and_collect() -> Any:
+        accumulated: list[str] = []
+        echohub_stats: dict[str, Any] | None = None
+        load_cfg: dict[str, Any] | None = None
+
+        try:
+            async for chunk in engine_router.generate(
+                messages=req.messages,
+                stream=True,
+                temperature=req.temperature,
+                max_tokens=req.max_tokens,
+            ):
+                # Collect assistant text from content delta chunks
+                try:
+                    import json as _json
+                    parsed = _json.loads(chunk.removeprefix("data: ").strip())
+                    if parsed.get("type") == "echohub_stats":
+                        echohub_stats = parsed
+                        load_cfg = parsed.get("load_config")
+                    else:
+                        delta = parsed.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        if delta:
+                            accumulated.append(delta)
+                except Exception:
+                    pass
+                yield chunk
+        except Exception:
+            logger.exception("discord_chat: error during generation (conv_id={})", req.conv_id)
+            return
+
+        # Persist assistant reply in background — does not block the SSE response
+        full_reply = "".join(accumulated)
+        asyncio.create_task(
+            _persist_assistant_reply(req.conv_id, full_reply, echohub_stats, load_cfg)
+        )
+
+        yield f'data: {{"type": "discord_done", "conv_id": "{req.conv_id}"}}\n\n'
+
+    return StreamingResponse(
+        _stream_and_collect(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
