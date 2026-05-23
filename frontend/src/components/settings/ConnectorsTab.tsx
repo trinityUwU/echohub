@@ -142,12 +142,14 @@ export function ConnectorsTab(): React.ReactElement {
       setLoadError(null)
       if (s.config) {
         const hydrated: FieldState = {
+          // backend returns "***" if token is set, "" if lost — keep as-is
           bot_token: s.config.bot_token,
           client_id: s.config.client_id,
           authorized_user_id: s.config.authorized_user_id,
         }
         setFields(hydrated)
-        setSavedFields(hydrated)
+        // If token is empty (lost), don't mark as saved so Save button stays active
+        setSavedFields(s.config.bot_token ? hydrated : { ...hydrated, bot_token: '__missing__' })
       }
     } catch (err) {
       setLoadError(String(err))
@@ -257,6 +259,9 @@ export function ConnectorsTab(): React.ReactElement {
 
         {/* Form */}
         <div className="px-5 py-4 flex flex-col gap-4">
+          {status?.config && !status.config.bot_token && (
+            <p className="text-xs text-yellow-400">Bot token missing — please re-enter it and save.</p>
+          )}
           <FieldInput
             label="Bot Token"
             value={fields.bot_token}
