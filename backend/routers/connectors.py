@@ -325,14 +325,20 @@ async def discord_chat(req: DiscordChatRequest) -> StreamingResponse:
         logger.exception("discord_chat: failed to persist user message (conv_id={})", req.conv_id)
         raise HTTPException(status_code=500, detail="Failed to persist user message")
 
+    # Build messages — inject system_prompt if provided
+    messages_to_send: list[dict] = list(req.messages)
+    if req.system_prompt and req.system_prompt.strip():
+        messages_to_send = [{"role": "system", "content": req.system_prompt}] + messages_to_send
+
     async def _stream_and_collect() -> Any:
         accumulated: list[str] = []
         echohub_stats: dict[str, Any] | None = None
         load_cfg: dict[str, Any] | None = None
 
+        logger.info("discord_chat: starting generation (conv_id={}, msgs={})", req.conv_id, len(messages_to_send))
         try:
             async for chunk in engine_router.generate(
-                messages=req.messages,
+                messages=messages_to_send,
                 stream=True,
                 temperature=req.temperature,
                 max_tokens=req.max_tokens,

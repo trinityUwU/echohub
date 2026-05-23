@@ -102,7 +102,7 @@ export function getActiveProfile(session: BotSession): ChatProfile {
 function buildRequestOptions(url: URL, method: string, bodyStr?: string): http.RequestOptions {
   return {
     hostname: url.hostname,
-    port: url.port || (url.protocol === "https:" ? 443 : 80),
+    port: parseInt(url.port) || (url.protocol === "https:" ? 443 : 80),
     path: url.pathname,
     method,
     headers: {
