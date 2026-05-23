@@ -172,7 +172,7 @@ export function streamChatSSE(
   const req = transport.request(
     {
       hostname: url.hostname,
-      port: url.port || (url.protocol === "https:" ? 443 : 80),
+      port: parseInt(url.port) || (url.protocol === "https:" ? 443 : 80),
       path: url.pathname,
       method: "POST",
       headers: {
