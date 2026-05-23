@@ -89,9 +89,9 @@ function FieldInput({
           placeholder={placeholder}
           onChange={e => onChange(e.target.value)}
           className={[
-            'w-full bg-elevated border border-border rounded-sm px-3 py-2 text-sm text-text-primary',
-            'placeholder:text-text-secondary/40 focus:outline-none focus:border-accent',
-            'transition-colors',
+            'w-full bg-elevated rounded-sm px-3 py-2 text-sm text-text-primary',
+            'placeholder:text-text-secondary/40 outline-none appearance-none',
+            'border border-transparent focus:border-accent transition-colors',
             showToggle ? 'pr-10' : '',
           ].join(' ')}
         />
