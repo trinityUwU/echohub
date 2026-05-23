@@ -357,8 +357,9 @@ async def discord_chat(req: DiscordChatRequest) -> StreamingResponse:
                 except Exception:
                     pass
                 yield chunk
-        except Exception:
-            logger.exception("discord_chat: error during generation (conv_id={})", req.conv_id)
+        except Exception as _gen_err:
+            logger.exception("discord_chat: generation error (conv_id={})", req.conv_id)
+            yield f'data: {{"type": "discord_error", "error": "{str(_gen_err)[:200]}"}}\n\n'
             return
 
         # Persist assistant reply in background — does not block the SSE response
