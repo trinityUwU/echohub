@@ -1,12 +1,15 @@
-// Discord DM bot — streaming WebSocket vers EchoHub, style Discord markdown, strip thinking
+// Discord DM bot — streaming SSE via http.request (Node compat), embed Discord, strip thinking
 import {
   Client,
   GatewayIntentBits,
   Partials,
   ChannelType,
   Message,
+  EmbedBuilder,
   Events,
 } from "discord.js";
+import http from "http";
+import https from "https";
 import pino from "pino";
 
 // ---------------------------------------------------------------------------
@@ -18,10 +21,10 @@ const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID ?? "";
 const DISCORD_AUTHORIZED_USER_ID = process.env.DISCORD_AUTHORIZED_USER_ID ?? "";
 const ECHOHUB_API_URL = process.env.ECHOHUB_API_URL ?? "http://localhost:37821";
 
-const WS_URL = ECHOHUB_API_URL.replace(/^http/, "ws") + "/inference/chat_ws";
-const MAX_MESSAGE_LENGTH = 1900;
+const MAX_EMBED_LENGTH = 3900; // Discord embed description limit is 4096, keep margin
 const EDIT_THROTTLE_MS = 800;
 const CURSOR = "▍";
+const EMBED_COLOR = 0x5865f2; // Discord blurple
 
 // ---------------------------------------------------------------------------
 // Logger
@@ -30,24 +33,6 @@ const CURSOR = "▍";
 const logger = pino({
   transport: { target: "pino-pretty", options: { colorize: true } },
 });
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface ChatRequestBody {
-  messages: Array<{ role: string; content: string }>;
-  stream: boolean;
-  temperature: number;
-  max_tokens: number;
-}
-
-interface WsChunk {
-  choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
-  done?: boolean;
-  error?: string;
-  type?: string;
-}
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -63,145 +48,142 @@ function validateEnv(): void {
 // ---------------------------------------------------------------------------
 
 function stripThinkingBlocks(text: string): string {
-  // Remove complete <think>...</think> blocks
   let out = text.replace(/<think>[\s\S]*?<\/think>/g, "");
-  // Remove orphan opening <think> and everything after (still generating)
   out = out.replace(/<think>[\s\S]*/g, "");
-  // Remove orphan closing </think>
   out = out.replace(/<\/think>/g, "");
   return out.trim();
 }
 
-function splitIntoChunks(text: string): string[] {
-  const chunks: string[] = [];
-  let remaining = text;
-  while (remaining.length > MAX_MESSAGE_LENGTH) {
-    chunks.push(remaining.slice(0, MAX_MESSAGE_LENGTH));
-    remaining = remaining.slice(MAX_MESSAGE_LENGTH);
+function parseSSEChunk(raw: string): string {
+  // raw = "data: {...}\n\ndata: {...}\n\n..."
+  let token = "";
+  for (const line of raw.split("\n")) {
+    if (!line.startsWith("data: ")) continue;
+    try {
+      const json = JSON.parse(line.slice(6)) as {
+        choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>;
+        done?: boolean;
+        type?: string;
+      };
+      // echohub_stats / timings — skip
+      if (json.type) continue;
+      token += json.choices?.[0]?.delta?.content ?? "";
+    } catch { /* partial chunk */ }
   }
-  if (remaining) chunks.push(remaining);
-  return chunks;
+  return token;
 }
 
-function parseWsChunk(raw: string): WsChunk | null {
-  // Backend sends SSE-format strings over WS: "data: {...}"
-  const line = raw.startsWith("data: ") ? raw.slice(6) : raw;
-  try { return JSON.parse(line) as WsChunk; } catch { return null; }
-}
-
-function extractToken(chunk: WsChunk): string {
-  return chunk.choices?.[0]?.delta?.content ?? "";
-}
-
-// ---------------------------------------------------------------------------
-// Discord helpers
-// ---------------------------------------------------------------------------
-
-async function sendPlaceholder(channel: Message["channel"]): Promise<Message> {
-  return (channel as { send: (c: string) => Promise<Message> }).send(CURSOR);
-}
-
-async function editSafe(msg: Message, content: string): Promise<void> {
-  try { await msg.edit(content); } catch (err) { logger.warn({ err }, "edit failed"); }
-}
-
-async function sendNewMessage(channel: Message["channel"], content: string): Promise<Message> {
-  return (channel as { send: (c: string) => Promise<Message> }).send(content);
+function isDone(raw: string): boolean {
+  for (const line of raw.split("\n")) {
+    if (!line.startsWith("data: ")) continue;
+    try {
+      const json = JSON.parse(line.slice(6)) as { done?: boolean };
+      if (json.done === true) return true;
+    } catch { /* partial */ }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
-// WebSocket inference with live edits
+// Discord embed helpers
+// ---------------------------------------------------------------------------
+
+function buildEmbed(description: string, done: boolean): EmbedBuilder {
+  return new EmbedBuilder()
+    .setColor(done ? EMBED_COLOR : 0x36393f)
+    .setDescription(description || CURSOR);
+}
+
+async function sendEmbedPlaceholder(channel: Message["channel"]): Promise<Message> {
+  const embed = buildEmbed(CURSOR, false);
+  return (channel as { send: (opts: object) => Promise<Message> })
+    .send({ embeds: [embed] });
+}
+
+async function editEmbed(msg: Message, description: string, done: boolean): Promise<void> {
+  try {
+    const embed = buildEmbed(description, done);
+    await msg.edit({ embeds: [embed] });
+  } catch (err) { logger.warn({ err }, "embed edit failed"); }
+}
+
+async function sendNewEmbed(channel: Message["channel"], description: string): Promise<void> {
+  try {
+    const embed = buildEmbed(description, true);
+    await (channel as { send: (opts: object) => Promise<Message> })
+      .send({ embeds: [embed] });
+  } catch (err) { logger.warn({ err }, "embed send failed"); }
+}
+
+// ---------------------------------------------------------------------------
+// SSE streaming via http.request (Node-compat, no ReadableStream)
 // ---------------------------------------------------------------------------
 
 let isGenerating = false;
 
-async function streamViaWebSocket(
+function streamChatSSE(
   userContent: string,
-  placeholder: Message,
-  channel: Message["channel"]
-): Promise<void> {
-  return new Promise<void>((resolve) => {
-    const ws = new WebSocket(WS_URL);
-    let accumulated = "";
-    let lastEdit = Date.now();
-    let editTimer: ReturnType<typeof setTimeout> | null = null;
-    let settled = false;
-
-    const finish = async (finalText: string): Promise<void> => {
-      if (settled) return;
-      settled = true;
-      if (editTimer) { clearTimeout(editTimer); editTimer = null; }
-
-      if (!finalText) {
-        await editSafe(placeholder, "*(no response)*");
-        resolve(); return;
-      }
-      const chunks = splitIntoChunks(finalText);
-      await editSafe(placeholder, chunks[0]);
-      for (let i = 1; i < chunks.length; i++) {
-        await sendNewMessage(channel, chunks[i]);
-      }
-      resolve();
-    };
-
-    const scheduleEdit = (): void => {
-      if (editTimer) return;
-      const delay = Math.max(0, EDIT_THROTTLE_MS - (Date.now() - lastEdit));
-      editTimer = setTimeout(async () => {
-        editTimer = null;
-        lastEdit = Date.now();
-        const visible = stripThinkingBlocks(accumulated);
-        if (visible) await editSafe(placeholder, visible + CURSOR);
-      }, delay);
-    };
-
-    ws.onopen = (): void => {
-      const body: ChatRequestBody = {
-        messages: [{ role: "user", content: userContent }],
-        stream: true,
-        temperature: 0.7,
-        max_tokens: 2048,
-      };
-      ws.send(JSON.stringify(body));
-    };
-
-    ws.onmessage = (event: MessageEvent): void => {
-      const chunk = parseWsChunk(String(event.data));
-      if (!chunk) return;
-
-      if (chunk.error) {
-        const msg = chunk.error.toLowerCase().includes("no model")
-          ? "⚠️ No model loaded in EchoHub. Please load a model first."
-          : `⚠️ Error: ${chunk.error}`;
-        void editSafe(placeholder, msg).then(() => { settled = true; resolve(); });
-        ws.close(); return;
-      }
-
-      if (chunk.done) {
-        void finish(stripThinkingBlocks(accumulated));
-        ws.close(); return;
-      }
-
-      const token = extractToken(chunk);
-      if (token) {
-        accumulated += token;
-        scheduleEdit();
-      }
-    };
-
-    ws.onerror = (event: Event): void => {
-      logger.error({ event }, "WebSocket error");
-      void finish(stripThinkingBlocks(accumulated) || "⚠️ Connection error");
-    };
-
-    ws.onclose = (): void => {
-      if (!settled) void finish(stripThinkingBlocks(accumulated));
-    };
+  onToken: (token: string) => void,
+  onDone: () => void,
+  onError: (err: Error) => void
+): void {
+  const url = new URL(`${ECHOHUB_API_URL}/inference/chat`);
+  const body = JSON.stringify({
+    messages: [{ role: "user", content: userContent }],
+    stream: true,
+    temperature: 0.7,
+    max_tokens: 2048,
   });
+
+  const transport = url.protocol === "https:" ? https : http;
+  const req = transport.request(
+    {
+      hostname: url.hostname,
+      port: url.port || (url.protocol === "https:" ? 443 : 80),
+      path: url.pathname,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+        Accept: "text/event-stream",
+      },
+    },
+    (res) => {
+      if (res.statusCode === 404) {
+        let raw = "";
+        res.on("data", (c: Buffer) => { raw += c.toString(); });
+        res.on("end", () => {
+          try {
+            const detail = (JSON.parse(raw) as { detail?: string }).detail ?? "";
+            if (detail.toLowerCase().includes("no model")) {
+              onError(new Error("NO_MODEL_LOADED")); return;
+            }
+          } catch { /* ignore */ }
+          onError(new Error(`HTTP 404: Not Found`));
+        });
+        return;
+      }
+      if (!res.statusCode || res.statusCode >= 400) {
+        onError(new Error(`HTTP ${res.statusCode}`)); return;
+      }
+
+      res.on("data", (chunk: Buffer) => {
+        const raw = chunk.toString();
+        if (isDone(raw)) { onDone(); return; }
+        const token = parseSSEChunk(raw);
+        if (token) onToken(token);
+      });
+      res.on("end", onDone);
+      res.on("error", onError);
+    }
+  );
+  req.on("error", onError);
+  req.write(body);
+  req.end();
 }
 
 // ---------------------------------------------------------------------------
-// DM handling
+// DM handling with streaming embed
 // ---------------------------------------------------------------------------
 
 async function handleDmMessage(message: Message): Promise<void> {
@@ -213,21 +195,71 @@ async function handleDmMessage(message: Message): Promise<void> {
 
   let placeholder: Message;
   try {
-    placeholder = await sendPlaceholder(message.channel);
+    placeholder = await sendEmbedPlaceholder(message.channel);
   } catch (err) {
-    logger.error({ err }, "Failed to send placeholder");
+    logger.error({ err }, "Failed to send embed placeholder");
     isGenerating = false;
     return;
   }
 
-  try {
-    await streamViaWebSocket(message.content, placeholder, message.channel);
-  } catch (err) {
-    logger.error({ err }, "Streaming failed");
-    await editSafe(placeholder, `⚠️ Error: ${err instanceof Error ? err.message : String(err)}`);
-  } finally {
+  let accumulated = "";
+  let lastEdit = Date.now();
+  let editTimer: ReturnType<typeof setTimeout> | null = null;
+  let settled = false;
+
+  const scheduleEdit = (): void => {
+    if (editTimer || settled) return;
+    const delay = Math.max(0, EDIT_THROTTLE_MS - (Date.now() - lastEdit));
+    editTimer = setTimeout(async () => {
+      editTimer = null;
+      lastEdit = Date.now();
+      const visible = stripThinkingBlocks(accumulated);
+      await editEmbed(placeholder, (visible || CURSOR) + CURSOR, false);
+    }, delay);
+  };
+
+  const finish = async (): Promise<void> => {
+    if (settled) return;
+    settled = true;
+    if (editTimer) { clearTimeout(editTimer); editTimer = null; }
     isGenerating = false;
-  }
+
+    const final = stripThinkingBlocks(accumulated);
+    if (!final) { await editEmbed(placeholder, "*(no response)*", true); return; }
+
+    // Split if > MAX_EMBED_LENGTH
+    if (final.length <= MAX_EMBED_LENGTH) {
+      await editEmbed(placeholder, final, true);
+    } else {
+      await editEmbed(placeholder, final.slice(0, MAX_EMBED_LENGTH), true);
+      let remaining = final.slice(MAX_EMBED_LENGTH);
+      while (remaining.length > 0) {
+        await sendNewEmbed(message.channel, remaining.slice(0, MAX_EMBED_LENGTH));
+        remaining = remaining.slice(MAX_EMBED_LENGTH);
+      }
+    }
+  };
+
+  const onToken = (token: string): void => {
+    accumulated += token;
+    scheduleEdit();
+  };
+
+  const onDone = (): void => { void finish(); };
+
+  const onError = async (err: Error): Promise<void> => {
+    if (settled) return;
+    settled = true;
+    if (editTimer) { clearTimeout(editTimer); editTimer = null; }
+    isGenerating = false;
+    logger.error({ err }, "Inference error");
+    const msg = err.message === "NO_MODEL_LOADED"
+      ? "⚠️ No model loaded in EchoHub. Please load a model first."
+      : `⚠️ ${err.message}`;
+    await editEmbed(placeholder, msg, false);
+  };
+
+  streamChatSSE(message.content, onToken, onDone, (err) => { void onError(err); });
 }
 
 // ---------------------------------------------------------------------------
@@ -250,13 +282,13 @@ function registerClientEvents(client: Client): void {
     if (message.author.bot) return;
     if (message.channel.type !== ChannelType.DM) return;
     if (message.author.id !== DISCORD_AUTHORIZED_USER_ID) return;
-    logger.info({ userId: message.author.id, content: message.content.slice(0, 80) }, "DM received");
+    logger.info({ content: message.content.slice(0, 80) }, "DM received");
     await handleDmMessage(message);
   });
 
   client.on(Events.Error, (err: Error) => {
     logger.error({ err }, "Discord client error");
-    if (err.message.toLowerCase().includes("token")) { logger.error("Invalid token — shutting down"); process.exit(1); }
+    if (err.message.toLowerCase().includes("token")) { process.exit(1); }
   });
 }
 
