@@ -39,6 +39,7 @@ import {
   buildHistoryEmbed,
   buildToolsEmbed,
   showProfileSelector,
+  showMenuViaUpdate,
 } from "./discord-embed-helpers";
 
 // --- Config ---
@@ -368,6 +369,7 @@ async function handleCommand(message: Message, client: Client): Promise<void> {
 // Interaction handlers
 // ---------------------------------------------------------------------------
 
+
 async function handleButtonInteraction(interaction: ButtonInteraction, client: Client): Promise<void> {
   if (interaction.user.id !== DISCORD_AUTHORIZED_USER_ID) {
     try { await interaction.reply({ content: "Unauthorized.", ephemeral: true }); }
@@ -377,17 +379,16 @@ async function handleButtonInteraction(interaction: ButtonInteraction, client: C
   const channel = interaction.channel ?? interaction.message.channel;
   const id = interaction.customId;
 
-  // convlist and profile use interaction.reply() directly — no defer needed
+  // convlist, profile and menu use interaction.update()/reply() directly — no defer needed
   if (id === "echohub_convlist") { await showConvList(interaction); return; }
   if (id === "echohub_profile") { await showProfileSelector(interaction, session); return; }
+  if (id === "echohub_menu") { await showMenuViaUpdate(interaction, session.activeConvTitle, buildMenuActionRow); return; }
 
   // All other buttons: deferUpdate first, then act via channel.send
   try { await interaction.deferUpdate(); } catch { /* already deferred */ }
 
   if (id === "echohub_clear") {
     try { await executeClear(channel, client.user?.id); } catch (err) { logger.error({ err }, "button clear failed"); }
-  } else if (id === "echohub_menu") {
-    await showMenu(channel);
   } else if (id === "echohub_new_chat") {
     await handleNewChat(channel);
   } else if (id === "echohub_history") {

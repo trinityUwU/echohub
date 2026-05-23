@@ -40,6 +40,18 @@ export function stripGenerationArtifacts(text: string): string {
 
 export interface SSEToolEvent { type: "tool_call" | "tool_result"; name?: string; tool?: string; data: string }
 
+type SSEJson = {
+  type?: string;
+  content?: string;
+  choices?: Array<{ delta?: { content?: string } }>;
+  name?: string;
+  tool?: string;
+  args?: unknown;
+  arguments?: string;
+  result?: unknown;
+  output?: string;
+};
+
 export function parseSSEChunk(
   raw: string,
   onToolEvent?: (event: SSEToolEvent) => void,
@@ -48,23 +60,33 @@ export function parseSSEChunk(
   for (const line of raw.split("\n")) {
     if (!line.startsWith("data: ")) continue;
     try {
-      const json = JSON.parse(line.slice(6)) as {
-        choices?: Array<{ delta?: { content?: string } }>;
-        type?: string;
-        name?: string;
-        tool?: string;
-        arguments?: string;
-        output?: string;
-      };
+      const json = JSON.parse(line.slice(6)) as SSEJson;
+      if (!json || typeof json !== "object") continue;
+
+      // Format generate_with_tools: {"type": "text_chunk", "content": "..."}
+      if (json.type === "text_chunk" && typeof json.content === "string") {
+        token += json.content; continue;
+      }
       if (json.type === "tool_call") {
-        onToolEvent?.({ type: "tool_call", name: json.name, data: json.arguments ?? "" });
+        onToolEvent?.({
+          type: "tool_call",
+          name: json.name ?? (json.tool as string | undefined),
+          data: json.arguments ?? JSON.stringify(json.args ?? ""),
+        });
         continue;
       }
       if (json.type === "tool_result") {
-        onToolEvent?.({ type: "tool_result", tool: json.tool, data: json.output ?? "" });
+        onToolEvent?.({
+          type: "tool_result",
+          tool: json.tool,
+          data: json.output ?? String(json.result ?? ""),
+        });
         continue;
       }
-      if (json.type === "discord_done" || json.type) continue;
+      // Skip any remaining typed events (discord_done, etc.)
+      if (json.type) continue;
+
+      // Format OpenAI standard (generate normal): {"choices": [...]}
       token += json.choices?.[0]?.delta?.content ?? "";
     } catch { /* partial chunk */ }
   }

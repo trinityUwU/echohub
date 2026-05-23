@@ -4,6 +4,7 @@ import {
   ActionRowBuilder,
   StringSelectMenuBuilder,
   ButtonInteraction,
+  ButtonBuilder,
 } from "discord.js";
 import pino from "pino";
 import {
@@ -89,4 +90,16 @@ export async function showProfileSelector(
       components: [buildProfileSelectRow(session.activeProfileId), buildActionRow("echohub_back")],
     });
   } catch (err) { logger.error({ err }, "showProfileSelector update failed"); }
+}
+
+export async function showMenuViaUpdate(
+  interaction: ButtonInteraction,
+  activeConvTitle: string,
+  buildMenuActionRow: () => ActionRowBuilder<ButtonBuilder>,
+): Promise<void> {
+  const embed = new EmbedBuilder().setColor(EMBED_COLOR).setTitle("☰ EchoHub")
+    .setDescription(`**Active:** ${activeConvTitle}\n\nChoose an action:`);
+  try {
+    await interaction.update({ embeds: [embed], components: [buildMenuActionRow()] });
+  } catch (err) { logger.error({ err }, "showMenuViaUpdate failed"); }
 }
