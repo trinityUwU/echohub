@@ -57,6 +57,8 @@ class DiscordChatRequest(BaseModel):
     user_message_id: str
     temperature: float = 0.7
     max_tokens: int = 2048
+    system_prompt: str | None = None
+    enabled_tools: list[str] = ["web_search"]
 
 
 # ---------------------------------------------------------------------------
@@ -330,11 +332,13 @@ async def discord_chat(req: DiscordChatRequest) -> StreamingResponse:
         load_cfg: dict[str, Any] | None = None
 
         try:
-            async for chunk in engine_router.generate(
+            async for chunk in engine_router.generate_with_tools(
                 messages=req.messages,
                 stream=True,
                 temperature=req.temperature,
                 max_tokens=req.max_tokens,
+                enabled_tools=req.enabled_tools,
+                system_prompt=req.system_prompt,
             ):
                 # Collect assistant text from content delta chunks
                 try:
