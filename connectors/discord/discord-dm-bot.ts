@@ -243,8 +243,13 @@ async function showMenu(channel: Message["channel"]): Promise<void> {
 }
 
 async function showConvList(interaction: ButtonInteraction): Promise<void> {
-  // deferReply immediately — Discord timeout is 3s, API call can take longer
-  try { await interaction.deferReply(); } catch (err) { logger.error({ err }, "deferReply failed"); return; }
+  // update() immediately acknowledges the interaction — no timeout risk
+  try {
+    await interaction.update({
+      embeds: [new EmbedBuilder().setColor(EMBED_COLOR).setTitle("💬 Conversations").setDescription("Loading…")],
+      components: [],
+    });
+  } catch (err) { logger.error({ err }, "showConvList update failed"); return; }
   session.state = "conv_list";
   let list: ConversationSummary[];
   try { list = await apiGet<ConversationSummary[]>("/conversations"); }
@@ -256,14 +261,14 @@ async function showConvList(interaction: ButtonInteraction): Promise<void> {
   const options = list.slice(0, 10).map((c) => ({
     label: c.title.slice(0, 100),
     value: c.id,
-    description: `${c.message_count} messages · ${new Date(c.updated_at).toLocaleDateString()}`,
+    description: `${c.message_count} msgs · ${new Date(c.updated_at).toLocaleDateString()}`,
   }));
   const select = new StringSelectMenuBuilder().setCustomId("echohub_conv_select")
     .setPlaceholder("Select a conversation…")
     .addOptions(options.length > 0 ? options : [{ label: "No conversations", value: "none" }]);
   const selectRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(select);
   const embed = new EmbedBuilder().setColor(EMBED_COLOR).setTitle("💬 Conversations")
-    .setDescription(`${list.length} conversation(s) found.`);
+    .setDescription(`${list.length} conversation(s)`);
   try {
     await interaction.editReply({ embeds: [embed], components: [selectRow, buildBackActionRow()] });
   } catch (err) { logger.error({ err }, "showConvList editReply failed"); }
