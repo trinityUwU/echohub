@@ -383,6 +383,7 @@ async function handleButtonInteraction(interaction: ButtonInteraction, client: C
   if (id === "echohub_convlist") { await showConvList(interaction); return; }
   if (id === "echohub_profile") { await showProfileSelector(interaction, session); return; }
   if (id === "echohub_menu") { await showMenuViaUpdate(interaction, session.activeConvTitle, buildMenuActionRow); return; }
+  if (id === "echohub_back") { await showMenuViaUpdate(interaction, session.activeConvTitle, buildMenuActionRow); return; }
 
   // All other buttons: deferUpdate first, then act via channel.send
   try { await interaction.deferUpdate(); } catch { /* already deferred */ }
