@@ -3,7 +3,7 @@ import {
   EmbedBuilder,
   ActionRowBuilder,
   StringSelectMenuBuilder,
-  Message,
+  ButtonInteraction,
 } from "discord.js";
 import pino from "pino";
 import {
@@ -22,8 +22,6 @@ const RESUME_TRUNCATE = 300;
 const logger = pino({
   transport: { target: "pino-pretty", options: { colorize: true } },
 });
-
-type SendableChannel = { send: (opts: object) => Promise<Message> };
 
 // ---------------------------------------------------------------------------
 // History embed
@@ -77,7 +75,7 @@ function buildProfileSelectRow(activeId: string): ActionRowBuilder<StringSelectM
 }
 
 export async function showProfileSelector(
-  channel: Message["channel"],
+  interaction: ButtonInteraction,
   session: BotSession,
 ): Promise<void> {
   const profile = getActiveProfile(session);
@@ -86,7 +84,7 @@ export async function showProfileSelector(
     .setTitle("⚙️ Chat Profile")
     .setDescription(`**Active:** ${profile.name} (temp: ${profile.temperature})`);
   try {
-    await (channel as unknown as SendableChannel).send({
+    await interaction.followUp({
       embeds: [embed],
       components: [buildProfileSelectRow(session.activeProfileId), buildActionRow("echohub_back")],
     });

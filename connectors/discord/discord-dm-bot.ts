@@ -107,7 +107,7 @@ function buildResponseActionRow(): ActionRowBuilder<ButtonBuilder> {
 }
 
 function buildMenuActionRow(): ActionRowBuilder<ButtonBuilder> {
-  return buildActionRow("echohub_convlist", "echohub_new_chat", "echohub_profile", "echohub_clear");
+  return buildActionRow("echohub_convlist", "echohub_new_chat", "echohub_profile");
 }
 
 function buildBackActionRow(): ActionRowBuilder<ButtonBuilder> {
@@ -242,7 +242,7 @@ async function showMenu(channel: Message["channel"]): Promise<void> {
   } catch (err) { logger.error({ err }, "showMenu failed"); }
 }
 
-async function showConvList(channel: Message["channel"]): Promise<void> {
+async function showConvList(interaction: ButtonInteraction): Promise<void> {
   session.state = "conv_list";
   let list: ConversationSummary[];
   try { list = await apiGet<ConversationSummary[]>("/conversations"); }
@@ -259,9 +259,7 @@ async function showConvList(channel: Message["channel"]): Promise<void> {
   const embed = new EmbedBuilder().setColor(EMBED_COLOR).setTitle("💬 Conversations")
     .setDescription(`${list.length} conversation(s) found.`);
   try {
-    await (channel as unknown as SendableChannel).send({
-      embeds: [embed], components: [selectRow, buildBackActionRow()],
-    });
+    await interaction.followUp({ embeds: [embed], components: [selectRow, buildBackActionRow()] });
   } catch (err) { logger.error({ err }, "showConvList failed"); }
 }
 
@@ -372,7 +370,7 @@ async function handleButtonInteraction(interaction: ButtonInteraction, client: C
   } else if (interaction.customId === "echohub_menu") {
     await showMenu(channel);
   } else if (interaction.customId === "echohub_convlist") {
-    await showConvList(channel);
+    await showConvList(interaction);
   } else if (interaction.customId === "echohub_new_chat") {
     await handleNewChat(channel);
   } else if (interaction.customId === "echohub_history") {
@@ -392,7 +390,7 @@ async function handleButtonInteraction(interaction: ButtonInteraction, client: C
     }
     catch (err) { logger.error({ err }, "button tools failed"); }
   } else if (interaction.customId === "echohub_profile") {
-    await showProfileSelector(channel, session);
+    await showProfileSelector(interaction, session);
   }
 }
 
