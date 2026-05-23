@@ -48,7 +48,7 @@ function StatusBadge({ status }: StatusBadgeProps): React.ReactElement {
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.9 }}
         transition={{ duration: 0.15 }}
-        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/5 border border-white/10"
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-elevated border border-border"
       >
         <span className="relative flex h-2 w-2">
           {config.pulse && (
@@ -89,8 +89,8 @@ function FieldInput({
           placeholder={placeholder}
           onChange={e => onChange(e.target.value)}
           className={[
-            'w-full bg-bg border border-border rounded-md px-3 py-2 text-sm text-text',
-            'placeholder:text-text-secondary/50 focus:outline-none focus:border-accent',
+            'w-full bg-elevated border border-border rounded-sm px-3 py-2 text-sm text-text-primary',
+            'placeholder:text-text-secondary/40 focus:outline-none focus:border-accent',
             'transition-colors',
             showToggle ? 'pr-10' : '',
           ].join(' ')}
@@ -310,7 +310,7 @@ export function ConnectorsTab(): React.ReactElement {
               'px-4 py-2 rounded-md text-sm font-medium transition-colors',
               hasChanges && !saving
                 ? 'bg-accent text-white hover:bg-accent/90 cursor-pointer'
-                : 'bg-white/5 text-text-secondary cursor-not-allowed opacity-50',
+                : 'bg-elevated text-text-secondary cursor-not-allowed opacity-40',
             ].join(' ')}
           >
             {saving ? 'Saving…' : 'Save'}
@@ -328,7 +328,7 @@ export function ConnectorsTab(): React.ReactElement {
                 ? isRunning
                   ? 'bg-red-500/15 text-red-400 hover:bg-red-500/25 border border-red-500/30 cursor-pointer'
                   : 'bg-green-500/15 text-green-400 hover:bg-green-500/25 border border-green-500/30 cursor-pointer'
-                : 'bg-white/5 text-text-secondary cursor-not-allowed opacity-50',
+                : 'bg-elevated text-text-secondary cursor-not-allowed opacity-40',
             ].join(' ')}
           >
             {toggling
