@@ -26,6 +26,7 @@ from backend.routers import (
     installer,
     memory,
     models,
+    openai_compat,
     projects,
     settings,
     skills,
@@ -74,6 +75,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 app.include_router(installer.router)
 app.include_router(models.router)
 app.include_router(inference.router)
+app.include_router(openai_compat.router)
 app.include_router(system.router)
 app.include_router(settings.router)
 app.include_router(conversations.router)
