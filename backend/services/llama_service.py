@@ -764,6 +764,7 @@ async def generate_with_tools(
 
         _generation_lock.acquire()
         _lock_released = False
+        _sentinel_sent = False
         try:
             logger.debug(f"[llama] generate_with_tools — {len(tools)} tools: {[t['function']['name'] for t in tools]}")
             try:
@@ -792,6 +793,7 @@ async def generate_with_tools(
                     queue.put({"type": "response", "choices": [{"message": final_message}]}), loop
                 )
                 asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+                _sentinel_sent = True
                 return
             except Exception as tools_err:
                 logger.warning(f"[llama] tools non-streaming failed ({tools_err}), falling back to plain stream")
@@ -886,7 +888,8 @@ async def generate_with_tools(
             else:
                 asyncio.run_coroutine_threadsafe(queue.put({"type": "error", "error": str(e)}), loop)
         finally:
-            asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+            if not _sentinel_sent:
+                asyncio.run_coroutine_threadsafe(queue.put(None), loop)
             if not _lock_released:
                 _generation_lock.release()
 
