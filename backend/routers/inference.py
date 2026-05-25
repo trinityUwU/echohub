@@ -1000,6 +1000,55 @@ async def tool_chat(req: ToolChatRequest):
                                 yield f"data: {chunk_evt}\n\n"
                             in_tool_call = True
                             tool_call_buf = accumulated_buf[open_pos + len(_TC_OPEN):]
+                            # Immediate close-tag check — stream=False delivers full response
+                            # in one chunk, so <tool_call>...</tool_call> may already be complete
+                            _imm_close = tool_call_buf.find(_TC_CLOSE)
+                            if _imm_close != -1:
+                                raw_tc_content = tool_call_buf[:_imm_close]
+                                tool_call_buf = ""
+                                in_tool_call = False
+                                tc_json_match = _TC_JSON_RE.search(raw_tc_content)
+                                if tc_json_match:
+                                    try:
+                                        raw_json_str = tc_json_match.group()
+                                        tc_data = _parse_tool_call_json(raw_json_str)
+                                        tool_name = tc_data.get("name", "")
+                                        raw_args = tc_data.get("arguments", tc_data.get("args", {}))
+                                        tool_args = _json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                                        total_tool_calls += 1
+                                        _maybe_inject_cap_warning()
+                                        if total_tool_calls >= MAX_TOOL_CALLS:
+                                            stop_event.set()
+                                            messages.append({"role": "user", "content": _SYNTHESIS_PROMPT})
+                                            tool_executed_this_pass = True
+                                            break
+                                        stop_event.set()
+                                        yield f"data: {_json.dumps({'type': 'tool_call', 'tool': tool_name, 'args': tool_args})}\n\n"
+                                        tool_result = None
+                                        async for _item in _execute_tool_with_intercept(tool_name, tool_args):
+                                            if isinstance(_item, tuple) and _item[0] == "RESULT":
+                                                tool_result = _item[1]
+                                            else:
+                                                yield _item
+                                        yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
+                                        tc_id = f"tc_{iteration}_{total_tool_calls}"
+                                        messages.append({
+                                            "role": "assistant",
+                                            "content": pass_text or None,
+                                            "tool_calls": [{
+                                                "id": tc_id,
+                                                "type": "function",
+                                                "function": {
+                                                    "name": tool_name,
+                                                    "arguments": _json.dumps(tool_args),
+                                                },
+                                            }],
+                                        })
+                                        messages.append({"role": "tool", "tool_call_id": tc_id, "content": str(tool_result) if tool_result is not None else ""})
+                                        tool_executed_this_pass = True
+                                        pass_text = ""
+                                    except (_json.JSONDecodeError, Exception) as parse_err:
+                                        logger.warning(f"[tool-chat] immediate xml tool_call parse failed: {parse_err} — content[:200]: {raw_tc_content[:200]!r}")
                     else:
                         # Inside a tool_call — stream JSON content live to client
                         tool_call_buf += content
