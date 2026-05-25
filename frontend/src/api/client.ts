@@ -173,6 +173,95 @@ export async function chatStream(
     stop: stopList,
   }
 
+  const startTime = Date.now()
+  let firstTokenTime: number | null = null
+  let completionTokens = 0, promptTokens = 0
+  let backendTtftMs: number | null = null
+  let backendEngine: string | null = null
+  let backendModelName: string | null = null
+
+  const processChunk = (raw: string): 'error' | 'done' | null => {
+    if (raw === '[DONE]') return null
+    try {
+      const json = JSON.parse(raw)
+      if (json?.type === 'echohub_stats') {
+        backendTtftMs = json.ttft_ms ?? null
+        backendEngine = json.engine ?? null
+        backendModelName = json.model_name ?? null
+        return null
+      }
+      if (json?.error) {
+        if (json.error_type === 'ctx_exceeded') {
+          onCtxExceeded?.(json.current_ctx ?? 4096, json.next_ctx ?? 8192)
+        } else if (json.error_type === 'oom') {
+          onOom?.()
+          onDone({ tokensGenerated: completionTokens, tokensPerSecond: 0, timeMs: Date.now() - startTime, promptTokens, ttftMs: backendTtftMs, engine: backendEngine, modelName: backendModelName, oom: true })
+        } else {
+          onError(new Error(json.error))
+        }
+        return 'error'
+      }
+      if (json?.timings) emitTimings(json.timings)
+      if (json?.usage) {
+        completionTokens = json.usage.completion_tokens ?? completionTokens
+        if (json.usage.prompt_tokens) promptTokens = json.usage.prompt_tokens
+        onTokensUpdate?.(promptTokens, completionTokens)
+      }
+      // WebSocket done signal
+      if (json?.done === true) return 'done'
+      const delta = json?.choices?.[0]?.delta?.content
+      if (delta) {
+        if (firstTokenTime === null) firstTokenTime = Date.now()
+        onChunk(delta)
+      }
+    } catch { /* skip malformed */ }
+    return null
+  }
+
+  const finalize = (): void => {
+    const endTime = Date.now()
+    const timeMs = endTime - startTime
+    const generationMs = firstTokenTime !== null ? endTime - firstTokenTime : timeMs
+    const ttftMs = backendTtftMs ?? (firstTokenTime !== null ? firstTokenTime - startTime : null)
+    onDone({
+      tokensGenerated: completionTokens,
+      tokensPerSecond: completionTokens > 0 && generationMs > 0 ? (completionTokens / generationMs) * 1000 : 0,
+      timeMs, promptTokens, ttftMs, engine: backendEngine, modelName: backendModelName,
+    })
+  }
+
+  // WebKit2GTK (Tauri Linux) bufferise les ReadableStream fetch — utiliser WebSocket
+  const isTauri = !!window.__TAURI_INTERNALS__
+  if (isTauri) {
+    try {
+      const httpUrl = await apiUrl('/inference/chat/ws')
+      const wsUrl = httpUrl.replace(/^http/, 'ws')
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(wsUrl)
+        ws.onopen = () => ws.send(JSON.stringify(body))
+        ws.onmessage = (e) => {
+          if (signal?.aborted) { ws.close(); resolve(); return }
+          let raw: string = typeof e.data === 'string' ? e.data : ''
+          // strip SSE prefix if backend sends it
+          if (raw.startsWith('data: ')) raw = raw.slice(6).trim()
+          const r = processChunk(raw)
+          if (r === 'done' || r === 'error') { ws.close(); resolve() }
+        }
+        ws.onerror = () => reject(new Error('WebSocket error'))
+        ws.onclose = () => { finalize(); resolve() }
+        signal?.addEventListener('abort', () => { ws.close(); resolve() })
+      })
+    } catch (e) {
+      if (e instanceof Error && e.name === 'AbortError') {
+        onDone({ tokensGenerated: 0, tokensPerSecond: 0, timeMs: 0, promptTokens: 0 })
+        return
+      }
+      onError(e instanceof Error ? e : new Error(String(e)))
+    }
+    return
+  }
+
+  // Navigateur standard — fetch SSE
   try {
     const url = await apiUrl('/inference/chat')
     const res = await fetch(url, {
@@ -189,93 +278,27 @@ export async function chatStream(
 
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
-    let buf = '', firstTokenTime: number | null = null
-    const startTime = Date.now()
-    let completionTokens = 0, promptTokens = 0
-    let backendTtftMs: number | null = null
-    let backendEngine: string | null = null
-    let backendModelName: string | null = null
+    let buf = ''
 
-    const processBlocks = (blocks: string[]): void => {
+    const processBlocks = (blocks: string[]): boolean => {
       for (const block of blocks) {
         if (!block.startsWith('data: ')) continue
-        const raw = block.slice(6).trim()
-        if (raw === '[DONE]') continue
-        try {
-          const json = JSON.parse(raw)
-          // Backend stats event
-          if (json?.type === 'echohub_stats') {
-            backendTtftMs = json.ttft_ms ?? null
-            backendEngine = json.engine ?? null
-            backendModelName = json.model_name ?? null
-            continue
-          }
-          if (json?.error) {
-            if (json.error_type === 'ctx_exceeded') {
-              onCtxExceeded?.(json.current_ctx ?? 4096, json.next_ctx ?? 8192)
-              return
-            }
-            if (json.error_type === 'oom') {
-              onOom?.()
-              // Flush any remaining chunks then call onDone with oom flag
-              onDone({
-                tokensGenerated: completionTokens,
-                tokensPerSecond: 0,
-                timeMs: Date.now() - startTime,
-                promptTokens,
-                ttftMs: backendTtftMs,
-                engine: backendEngine,
-                modelName: backendModelName,
-                oom: true,
-              })
-            } else {
-              onError(new Error(json.error))
-            }
-            return
-          }
-          if (json?.timings) {
-            emitTimings(json.timings)
-          }
-          if (json?.usage) {
-            completionTokens = json.usage.completion_tokens ?? completionTokens
-            if (json.usage.prompt_tokens) promptTokens = json.usage.prompt_tokens
-            onTokensUpdate?.(promptTokens, completionTokens)
-          }
-          const delta = json?.choices?.[0]?.delta?.content
-          if (delta) {
-            if (firstTokenTime === null) firstTokenTime = Date.now()
-            onChunk(delta)
-          }
-        } catch { /* skip malformed */ }
+        const r = processChunk(block.slice(6).trim())
+        if (r === 'error' || r === 'done') return true
       }
+      return false
     }
 
     while (true) {
       const { done, value } = await reader.read()
-      if (done) {
-        // Flush remaining buffer — last chunks (usage, [DONE]) may still be in buf
-        processBlocks(buf.split('\n\n'))
-        break
-      }
+      if (done) { processBlocks(buf.split('\n\n')); break }
       buf += decoder.decode(value, { stream: true })
       const lines = buf.split('\n\n')
       buf = lines.pop() ?? ''
-      processBlocks(lines)
+      if (processBlocks(lines)) break
     }
 
-    const endTime = Date.now()
-    const timeMs = endTime - startTime
-    const generationMs = firstTokenTime !== null ? endTime - firstTokenTime : timeMs
-    const ttftMs = backendTtftMs ?? (firstTokenTime !== null ? firstTokenTime - startTime : null)
-    onDone({
-      tokensGenerated: completionTokens,
-      tokensPerSecond: completionTokens > 0 && generationMs > 0 ? (completionTokens / generationMs) * 1000 : 0,
-      timeMs,
-      promptTokens,
-      ttftMs,
-      engine: backendEngine,
-      modelName: backendModelName,
-    })
+    finalize()
   } catch (e) {
     if (e instanceof Error && e.name === 'AbortError') {
       onDone({ tokensGenerated: 0, tokensPerSecond: 0, timeMs: 0, promptTokens: 0 })
@@ -287,8 +310,67 @@ export async function chatStream(
 
 // ── Tool chat (Dev mode) ───────────────────────────────────────────────────
 
+// XHR streaming pour WebKit2GTK (Tauri Linux) — fetch ReadableStream est bufférisé.
+// XMLHttpRequest progress events livrent les chunks au fur et à mesure.
+function* _parseSSEBlocks(text: string, offset: number): Generator<[unknown, number]> {
+  let pos = offset
+  while (true) {
+    const end = text.indexOf('\n\n', pos)
+    if (end === -1) break
+    const block = text.slice(pos, end)
+    pos = end + 2
+    if (!block.startsWith('data: ')) continue
+    const raw = block.slice(6).trim()
+    if (raw === '[DONE]') continue
+    try { yield [JSON.parse(raw), pos] } catch { yield [null, pos] }
+  }
+  return pos
+}
+
 export async function* toolChat(req: ToolChatRequest): AsyncGenerator<unknown> {
   const url = await apiUrl('/inference/tool-chat')
+  const isTauri = !!window.__TAURI_INTERNALS__
+
+  if (isTauri) {
+    // XHR streaming — onprogress pousse dans une queue, le generator consomme en temps réel
+    type QueueItem = { ev: unknown } | { done: true } | { error: Error }
+    const queue: QueueItem[] = []
+    let notify: (() => void) | null = null
+    let offset = 0
+
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', url, true)
+    xhr.setRequestHeader('Content-Type', 'application/json')
+    xhr.responseType = 'text'
+
+    const push = (item: QueueItem) => { queue.push(item); notify?.(); notify = null }
+    const flush = () => {
+      const text = xhr.responseText
+      for (const [ev, nextOffset] of _parseSSEBlocks(text, offset)) {
+        offset = nextOffset
+        if (ev !== null) push({ ev })
+      }
+    }
+    xhr.onprogress = flush
+    xhr.onload = () => { flush(); push({ done: true }) }
+    xhr.onerror = () => push({ error: new Error('XHR error on tool-chat') })
+    xhr.onabort = () => push({ done: true })
+    xhr.send(JSON.stringify(req))
+
+    while (true) {
+      if (queue.length === 0) {
+        await new Promise<void>(r => { notify = r })
+      }
+      while (queue.length > 0) {
+        const item = queue.shift()!
+        if ('done' in item) return
+        if ('error' in item) throw item.error
+        yield item.ev
+      }
+    }
+  }
+
+  // Navigateur standard — fetch SSE
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -307,7 +389,6 @@ export async function* toolChat(req: ToolChatRequest): AsyncGenerator<unknown> {
   while (true) {
     const { done, value } = await reader.read()
     if (done) {
-      // flush remaining buffer
       for (const block of buf.split('\n\n')) {
         if (!block.startsWith('data: ')) continue
         const raw = block.slice(6).trim()

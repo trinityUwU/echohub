@@ -75,6 +75,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 app.include_router(installer.router)
 app.include_router(models.router)
 app.include_router(inference.router)
+app.include_router(openai_compat._passthrough_router)
 app.include_router(openai_compat.router)
 app.include_router(system.router)
 app.include_router(settings.router)

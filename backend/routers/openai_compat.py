@@ -17,6 +17,28 @@ from backend.services import engine_router
 
 router = APIRouter(prefix="/v1", tags=["openai-compat"])
 
+# Router sans prefix pour la route echo-passthrough — le SDK Anthropic (EchoCode)
+# pointe sur ANTHROPIC_BASE_URL='http://localhost:37821/echo-passthrough' et appelle
+# {base}/v1/messages. Sans ce router séparé, le prefix /v1 du router principal
+# donnerait /v1/echo-passthrough/v1/messages → 404.
+_passthrough_router = APIRouter(tags=["openai-compat"])
+
+
+@_passthrough_router.post("/echo-passthrough/v1/messages")
+@_passthrough_router.get("/echo-passthrough/v1/messages")
+@_passthrough_router.post("/echo-passthrough/v1/messages/batches")
+@_passthrough_router.get("/echo-passthrough/v1/messages/batches")
+@_passthrough_router.post("/echo-passthrough")
+@_passthrough_router.get("/echo-passthrough")
+async def echo_passthrough_root():
+    """Intercepte tous les appels SDK Anthropic redirigés par EchoCode local.
+    Retourne 503 explicite — les guards isLocalProvider() dans claude.ts ne
+    devraient jamais atteindre ce point, mais c'est un filet de sécurité."""
+    raise HTTPException(
+        status_code=503,
+        detail="EchoCode local mode — use EchoHub /v1/chat/completions instead of Anthropic SDK.",
+    )
+
 
 class OAIMessage(BaseModel):
     role: str
