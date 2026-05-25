@@ -767,16 +767,34 @@ async def generate_with_tools(
         try:
             logger.debug(f"[llama] generate_with_tools — {len(tools)} tools: {[t['function']['name'] for t in tools]}")
             try:
-                chunks = _llm.create_chat_completion(
+                # stream=False pour les tools — stream=True segfaulte sur llama-cpp-python 0.3.x
+                # avec des prompts longs (>20K tokens). On retourne la réponse complète en une fois.
+                response = _llm.create_chat_completion(
                     messages=messages,
                     tools=tools,
                     tool_choice="auto",
                     temperature=temperature,
                     max_tokens=max_tokens,
-                    stream=True,
+                    stream=False,
                 )
+                # Convertir la réponse non-streaming en format attendu par le reste du code
+                resp_msg = response.get("choices", [{}])[0].get("message", {})
+                resp_content = resp_msg.get("content") or ""
+                resp_tools = resp_msg.get("tool_calls")
+                if resp_content:
+                    asyncio.run_coroutine_threadsafe(
+                        queue.put({"type": "text_delta", "content": resp_content}), loop
+                    )
+                final_message: dict = {"role": "assistant", "content": resp_content or None}
+                if resp_tools:
+                    final_message["tool_calls"] = resp_tools
+                asyncio.run_coroutine_threadsafe(
+                    queue.put({"type": "response", "choices": [{"message": final_message}]}), loop
+                )
+                asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+                return
             except Exception as tools_err:
-                logger.warning(f"[llama] tools streaming failed ({tools_err}), falling back to plain stream")
+                logger.warning(f"[llama] tools non-streaming failed ({tools_err}), falling back to plain stream")
                 chunks = _llm.create_chat_completion(
                     messages=messages,
                     temperature=temperature,
