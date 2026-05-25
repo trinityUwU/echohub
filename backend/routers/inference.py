@@ -492,9 +492,39 @@ async def chat_ws(ws: WebSocket):
             stop=req.stop,
         )
 
-        async for chunk in engine_router.generate(messages=messages, **generate_kwargs):
-            await ws.send_text(chunk)
+        import json as _json_ws, time as _time_ws
+        _ws_start = _time_ws.perf_counter()
+        _ws_first_token: float | None = None
+        _ws_tokens = 0
+        _ws_engine = engine_router.get_active_engine()
+        _ws_model = engine_router.get_status()
 
+        async for chunk in engine_router.generate(messages=messages, **generate_kwargs):
+            if isinstance(chunk, dict):
+                # llama-cpp chunk dict → sérialiser en SSE-like JSON pour que le client puisse parser
+                content = (chunk.get("choices") or [{}])[0].get("delta", {}).get("content", "")
+                if content:
+                    if _ws_first_token is None:
+                        _ws_first_token = _time_ws.perf_counter()
+                    _ws_tokens += 1
+                    await ws.send_text(_json_ws.dumps(chunk))
+            elif isinstance(chunk, str) and chunk.startswith("data: "):
+                # déjà formaté SSE — extraire le JSON dedans et renvoyer sans prefix
+                raw = chunk[6:].strip()
+                if raw and raw != "[DONE]":
+                    await ws.send_text(raw)
+            elif isinstance(chunk, str):
+                await ws.send_text(chunk)
+
+        _ws_end = _time_ws.perf_counter()
+        _ws_ttft = round((_ws_first_token - _ws_start) * 1000) if _ws_first_token else None
+        await ws.send_json({
+            "type": "echohub_stats",
+            "ttft_ms": _ws_ttft,
+            "total_ms": round((_ws_end - _ws_start) * 1000),
+            "engine": _ws_engine,
+            "model_name": _ws_model.name if _ws_model else None,
+        })
         await ws.send_json({"done": True})
     except WebSocketDisconnect:
         pass
