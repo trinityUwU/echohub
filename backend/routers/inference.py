@@ -357,7 +357,11 @@ async def chat(req: ChatRequest):
             model_name = model.name if model else None
             yield f"data: {_j.dumps({'type': 'echohub_stats', 'ttft_ms': ttft_ms, 'total_ms': total_ms, 'engine': active_engine, 'model_name': model_name})}\n\n"
 
-        return StreamingResponse(event_stream(), media_type="text/event-stream")
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     result = None
     async for chunk in engine_router.generate(messages=messages, **generate_kwargs):
@@ -925,8 +929,8 @@ async def tool_chat(req: ToolChatRequest):
                                         yield _item
                                 yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
 
-                                messages.append({"role": "assistant", "content": pass_text or "", "tool_calls": [tc]})
-                                messages.append({"role": "tool", "tool_call_id": tc_id, "content": tool_result})
+                                messages.append({"role": "assistant", "content": pass_text or None, "tool_calls": [tc]})
+                                messages.append({"role": "tool", "tool_call_id": tc_id, "content": str(tool_result) if tool_result is not None else ""})
                                 tool_executed_this_pass = True
                         continue
 
@@ -1010,7 +1014,7 @@ async def tool_chat(req: ToolChatRequest):
                                     tc_id = f"tc_{iteration}_{total_tool_calls}"
                                     messages.append({
                                         "role": "assistant",
-                                        "content": pass_text or "",
+                                        "content": pass_text or None,
                                         "tool_calls": [{
                                             "id": tc_id,
                                             "type": "function",
@@ -1020,7 +1024,7 @@ async def tool_chat(req: ToolChatRequest):
                                             },
                                         }],
                                     })
-                                    messages.append({"role": "tool", "tool_call_id": tc_id, "content": tool_result})
+                                    messages.append({"role": "tool", "tool_call_id": tc_id, "content": str(tool_result) if tool_result is not None else ""})
                                     tool_executed_this_pass = True
                                     pass_text = ""  # reset for next pass
                                 except (_json.JSONDecodeError, Exception) as parse_err:
