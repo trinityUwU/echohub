@@ -155,9 +155,9 @@ def _resolve_max_model_len(model_path: str, max_model_len: Optional[int], is_vis
             logger.warning(f"Vision model with max_model_len={max_model_len} — may OOM on 12GB VRAM")
         return max_model_len
     if max_model_len is None:
-        logger.info("max_model_len not specified — defaulting to 4096 (safe for 12GB VRAM)")
-        return 4096
-    if max_model_len > 8192:
+        logger.info("max_model_len not specified — defaulting to 32768 for EchoCode compatibility")
+        return 32768
+    if max_model_len > 32768:
         logger.warning(f"max_model_len={max_model_len} is large — may OOM on 12GB VRAM")
     return max_model_len
 
