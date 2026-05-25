@@ -81,12 +81,14 @@ def _make_chunk(content: str, model: str, finish_reason: str | None = None) -> s
 
 
 def _make_tool_chunk(tool_calls: list, model: str) -> str:
+    # Add index field required by OpenAI streaming protocol
+    indexed = [{**tc, "index": i} for i, tc in enumerate(tool_calls)]
     chunk = {
         "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
         "object": "chat.completion.chunk",
         "created": int(time.time()),
         "model": model,
-        "choices": [{"index": 0, "delta": {"tool_calls": tool_calls}, "finish_reason": None}],
+        "choices": [{"index": 0, "delta": {"tool_calls": indexed}, "finish_reason": None}],
     }
     return f"data: {json.dumps(chunk)}\n\n"
 
@@ -138,8 +140,13 @@ async def chat_completions(req: OAIChatRequest):
     tools = _tools_to_dicts(req.tools)
     model = req.model or (engine_router.get_status().id if engine_router.get_status() else "unknown")
 
-    # --- Tool use (non-streaming) ---
+    # --- Tool use ---
     if tools:
+        if req.stream:
+            return StreamingResponse(
+                _stream_tool_generate(messages, tools, model, req),
+                media_type="text/event-stream",
+            )
         return await _handle_tool_completion(messages, tools, model, req)
 
     # --- Streaming ---
@@ -214,6 +221,69 @@ async def _stream_generate(
         logger.error(f"[openai-compat] stream error: {e}")
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
     yield _make_chunk("", model, finish_reason="stop")
+    yield "data: [DONE]\n\n"
+
+
+async def _stream_tool_generate(
+    messages: list[dict], tools: list[dict], model: str, req: OAIChatRequest
+) -> AsyncGenerator[str, None]:
+    """SSE streaming pour tool completion — émet les tokens au fil de la génération."""
+    try:
+        accumulated_text = ""
+        acc_tool_calls: list = []
+        result: dict | None = None
+
+        async for event in engine_router.generate_with_tools(
+            messages=messages,
+            tools=tools,
+            temperature=req.temperature,
+            max_tokens=req.max_tokens,
+        ):
+            if not isinstance(event, dict):
+                continue
+            etype = event.get("type")
+            if etype == "text_delta":
+                content = event.get("content", "")
+                if content:
+                    accumulated_text += content
+                    yield _make_chunk(content, model)
+            elif etype == "response":
+                result = event
+            elif etype == "error":
+                yield f"data: {json.dumps({'error': event.get('error', 'Engine error')})}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+        # Émettre les tool_calls accumulés si présents
+        if result is not None:
+            choices = result.get("choices", [{}])
+            msg = choices[0].get("message", {}) if choices else {}
+            native_tool_calls = msg.get("tool_calls") or []
+            content = msg.get("content") or accumulated_text or None
+
+            if not native_tool_calls and content:
+                clean_content, xml_tool_calls = _extract_xml_tool_calls(str(content))
+                if xml_tool_calls:
+                    native_tool_calls = xml_tool_calls
+
+            if native_tool_calls:
+                yield _make_tool_chunk(native_tool_calls, model)
+                yield _make_chunk("", model, finish_reason="tool_calls")
+            else:
+                yield _make_chunk("", model, finish_reason="stop")
+        elif accumulated_text:
+            clean_content, xml_tool_calls = _extract_xml_tool_calls(accumulated_text)
+            if xml_tool_calls:
+                yield _make_tool_chunk(xml_tool_calls, model)
+                yield _make_chunk("", model, finish_reason="tool_calls")
+            else:
+                yield _make_chunk("", model, finish_reason="stop")
+        else:
+            yield _make_chunk("", model, finish_reason="stop")
+
+    except Exception as e:
+        logger.error(f"[openai-compat] stream_tool_generate error: {e}")
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
     yield "data: [DONE]\n\n"
 
 

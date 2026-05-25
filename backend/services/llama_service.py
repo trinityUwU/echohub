@@ -768,27 +768,44 @@ async def generate_with_tools(
         try:
             logger.debug(f"[llama] generate_with_tools — {len(tools)} tools: {[t['function']['name'] for t in tools]}")
             try:
-                # stream=False pour les tools — stream=True segfaulte sur llama-cpp-python 0.3.x
-                # avec des prompts longs (>20K tokens). On retourne la réponse complète en une fois.
-                response = _llm.create_chat_completion(
+                # stream=True — confirmed safe on llama-cpp-python 0.3.23+
+                chunks_with_tools = _llm.create_chat_completion(
                     messages=messages,
                     tools=tools,
                     tool_choice="auto",
                     temperature=temperature,
                     max_tokens=max_tokens,
-                    stream=False,
+                    stream=True,
                 )
-                # Convertir la réponse non-streaming en format attendu par le reste du code
-                resp_msg = response.get("choices", [{}])[0].get("message", {})
-                resp_content = resp_msg.get("content") or ""
-                resp_tools = resp_msg.get("tool_calls")
-                if resp_content:
-                    asyncio.run_coroutine_threadsafe(
-                        queue.put({"type": "text_delta", "content": resp_content}), loop
-                    )
-                final_message: dict = {"role": "assistant", "content": resp_content or None}
-                if resp_tools:
-                    final_message["tool_calls"] = resp_tools
+                acc_text = ""
+                acc_tool_calls: list = []
+                for chunk in chunks_with_tools:
+                    if _eject_requested or _stop.is_set():
+                        _lock_released = True
+                        _generation_lock.release()
+                        asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+                        return
+                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    content = delta.get("content") or ""
+                    if content:
+                        acc_text += content
+                        asyncio.run_coroutine_threadsafe(
+                            queue.put({"type": "text_delta", "content": content}), loop
+                        )
+                    for tc_delta in (delta.get("tool_calls") or []):
+                        idx = tc_delta.get("index", 0)
+                        while len(acc_tool_calls) <= idx:
+                            acc_tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                        if tc_delta.get("id"):
+                            acc_tool_calls[idx]["id"] = tc_delta["id"]
+                        func = tc_delta.get("function", {})
+                        if func.get("name"):
+                            acc_tool_calls[idx]["function"]["name"] += func["name"]
+                        if func.get("arguments"):
+                            acc_tool_calls[idx]["function"]["arguments"] += func["arguments"]
+                final_message: dict = {"role": "assistant", "content": acc_text or None}
+                if acc_tool_calls:
+                    final_message["tool_calls"] = acc_tool_calls
                 asyncio.run_coroutine_threadsafe(
                     queue.put({"type": "response", "choices": [{"message": final_message}]}), loop
                 )
@@ -796,7 +813,7 @@ async def generate_with_tools(
                 _sentinel_sent = True
                 return
             except Exception as tools_err:
-                logger.warning(f"[llama] tools non-streaming failed ({tools_err}), falling back to plain stream")
+                logger.warning(f"[llama] tools stream=True failed ({tools_err}), falling back to plain stream")
                 chunks = _llm.create_chat_completion(
                     messages=messages,
                     temperature=temperature,
