@@ -43,7 +43,9 @@ def list_downloaded() -> list[ModelInfo]:
             model_dir = models_dir / model.id.replace("/", "--")
             gguf_files = list(model_dir.glob("*.gguf")) if model_dir.exists() else []
             if gguf_files:
-                model.has_mtp = detect_mtp(str(gguf_files[0])) or model.has_mtp
+                # MTP requires nextn tensors in the GGUF — override the naming
+                # heuristic with ground truth (both ways, never OR).
+                model.has_mtp = detect_mtp(str(gguf_files[0]))
                 # Vision requires a mmproj file — override heuristic with ground truth
                 if model.capabilities.vision:
                     model.capabilities.vision = find_mmproj(str(model_dir)) is not None

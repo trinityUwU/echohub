@@ -24,13 +24,16 @@ backend/
     ├── conversation_manager.py      ← CRUD JSON convs, archive_project_conversation(), filtre archived
     ├── db.py                        ← SQLite legacy (benchmarks, fine-tuning, MCP servers, app_state)
     ├── embedding_service.py         ← nomic-embed-text-v1.5 GGUF CPU-only, lazy init, 768 dims
-    ├── engine_router.py             ← Route llama/vLLM selon format, get_status, generate, generate_with_tools
+    ├── engine_router.py             ← Route llama/llama_server/vLLM selon format, get_status, generate, generate_with_tools
     ├── finetune_service.py          ← Pipeline fine-tuning LoRA/unsloth
     ├── gguf_utils.py                ← Parse metadata GGUF (MTP detection, quant type)
     ├── gpu_service.py               ← Polling nvidia-smi, VRAM samples
     ├── harness_service.py           ← Language detection, syntax/lint/types pipeline, result normalizer
     ├── hf_service.py                ← HuggingFace search, model info, download
     ├── llama_lock.py                ← Mutex global partagé tous appels llama.cpp (embedding + inférence)
+    ├── llama_server_config.py       ← [NOUVEAU] Résolution binaire llama-server (env/config/défaut), check CUDA, config MoE par modèle
+    ├── llama_server_generate.py     ← [NOUVEAU] Proxy HTTP OpenAI-compatible vers llama-server (stream, tools, sync)
+    ├── llama_server_service.py      ← [NOUVEAU] Cycle de vie du process llama-server externe (port 37824), load/unload/health
     ├── llama_service.py             ← Inférence GGUF via llama-cpp-python, load/unload, streaming
     ├── mcp_client.py                ← Client MCP (tool calls vers servers MCP)
     ├── mcp_manager.py               ← Gestion lifecycle servers MCP

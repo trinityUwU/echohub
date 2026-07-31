@@ -132,7 +132,8 @@ async def list_models():
 
 @router.post("/chat/completions")
 async def chat_completions(req: OAIChatRequest):
-    """OpenAI-compatible chat completions — route vers llama.cpp ou vLLM selon l'engine actif."""
+    """OpenAI-compatible chat completions — route vers llama.cpp in-process,
+    llama-server externe ou vLLM selon l'engine actif (engine_router)."""
     if engine_router.get_status() is None:
         raise HTTPException(status_code=503, detail="No model loaded in EchoHub.")
 

@@ -19,6 +19,7 @@ from loguru import logger
 load_dotenv()
 
 from backend.routers import (
+    anthropic_proxy,
     connectors,
     conversations,
     finetune,
@@ -39,6 +40,11 @@ from backend.services import db, engine_router, vllm_service
 async def lifespan(app: FastAPI):
     logger.info("EchoHub backend starting up")
     vllm_service.kill_stale_pid()
+    try:
+        from backend.services import llama_server_service
+        llama_server_service.kill_stale_pid()
+    except Exception as e:
+        logger.warning(f"llama-server stale PID cleanup failed: {e}")
     db.init_db()
     from backend.services.conversation_manager import migrate_from_sqlite
     migrate_from_sqlite()
@@ -72,6 +78,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
         headers["Access-Control-Allow-Credentials"] = "true"
     return JSONResponse(status_code=500, content={"detail": str(exc)}, headers=headers)
 
+app.include_router(anthropic_proxy.router)
 app.include_router(installer.router)
 app.include_router(models.router)
 app.include_router(inference.router)

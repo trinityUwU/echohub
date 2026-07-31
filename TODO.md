@@ -1,5 +1,5 @@
 # TODO — EchoHub
-*Dernière mise à jour : 2026-05-25 (session 28)*
+*Dernière mise à jour : 2026-07-31 (session 29)*
 
 ## En cours
 
@@ -7,6 +7,14 @@
 - [ ] **Valider streaming après relance tauri dev** — envoyer message chat normal + message mode projet Dev pour confirmer que WS/XHR fonctionnent
 
 ## À faire (priorité)
+
+### P0 — Suite du backend `llama_server` (session 29)
+
+- [ ] **Re-télécharger Qwen3.6-35B-A3B-UD-Q4_K_M.gguf sur un disque sain** — le fichier local est corrompu (sha256 `c009b443…` vs `ac0e2c11…` attendu), il génère du bruit sur tous les chemins. Le disque sda perd son lien SATA : ne pas re-télécharger dessus.
+- [ ] **Exposer le choix de moteur dans le frontend** — `POST /inference/load` accepte `engine: "llama_server"` et `n_cpu_moe`/`threads`/`cache_type_k`/`cache_type_v`, mais aucun contrôle UI ne les envoie encore. Aujourd'hui seule la case `is_moe` déclenche l'auto-route.
+- [ ] **`ARCHITECTURE.md` manquant** — exigé par les standards, absent du projet. Non créé dans le mandat session 29 (hors périmètre), à faire.
+- [ ] **Vérifier `models.py:44`** — `gguf_files[0]` peut être un `mmproj` sur un modèle vision ; la détection MTP scannerait alors le mauvais fichier.
+
 
 ### P0 — Validation streaming (next immédiat)
 

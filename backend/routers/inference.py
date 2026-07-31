@@ -52,6 +52,21 @@ def _parse_tool_call_json(raw: str) -> dict:
     return _extract_tool_call_fields(raw)
 
 
+def _clean_assistant_content(text: str) -> str | None:
+    """Strip <think>...</think> blocks from assistant message content before injecting
+    into the tool loop message history. llama.cpp crashes (llama_decode -1) when
+    Qwen3 special tokens <think>/<think> appear inside a historical assistant message
+    during re-tokenization on the 2nd+ tool call."""
+    if not text:
+        return None
+    text = _re_module.sub(r"<think>.*?</think>", "", text, flags=_re_module.DOTALL)
+    if "</think>" in text:
+        text = text[text.rfind("</think>") + len("</think>"):]
+    if "<think>" in text:
+        text = ""
+    return text.strip() or None
+
+
 def _sanitize_json_strings(raw: str) -> str:
     """Replace unescaped control chars inside JSON string values."""
     out = []
@@ -181,6 +196,11 @@ def load_model(req: LoadRequest) -> dict:
             speculative_mode=req.speculative_mode,
             draft_model_path=req.draft_model_path,
             n_pred_tokens=req.n_pred_tokens,
+            engine=req.engine,
+            n_cpu_moe=req.n_cpu_moe,
+            threads=req.threads,
+            cache_type_k=req.cache_type_k,
+            cache_type_v=req.cache_type_v,
         )
         return {"status": "loading", "model_id": req.model_id}
     except FileNotFoundError as e:
@@ -226,9 +246,22 @@ def get_engine() -> dict:
 
 def _get_available_engines() -> list[str]:
     engines = ["llama"]
+    if engine_router.is_llama_server_available():
+        engines.append("llama_server")
     if engine_router.is_vllm_available():
         engines.append("vllm")
     return engines
+
+
+@router.get("/llama-server/status")
+def get_llama_server_status() -> dict:
+    """Diagnostic du binaire llama-server externe : chemin, CUDA, version, erreur."""
+    try:
+        from backend.services.llama_server_config import ENV_BIN, check_binary
+        return {**check_binary(refresh=True), "env_var": ENV_BIN}
+    except Exception as e:
+        logger.error(f"llama-server status failed: {e}")
+        return {"available": False, "cuda": False, "path": None, "error": str(e)}
 
 
 @router.get("/llama/mtp-support")
@@ -422,9 +455,14 @@ def can_load(req: LoadRequest) -> dict:
     vllm_ok = engine_router.is_vllm_available()
 
     if fmt == "gguf":
-        engine = "llama"
         feasible = True
         reason = None
+        try:
+            engine = ("llama_server"
+                      if engine_router._should_use_llama_server(req.engine, req.is_moe)
+                      else "llama")
+        except RuntimeError as e:
+            engine, feasible, reason = "llama_server", False, str(e)
     elif gpu["type"] == "nvidia" and vllm_ok:
         engine = "vllm"
         feasible = True
@@ -898,6 +936,15 @@ async def tool_chat(req: ToolChatRequest):
         turn_assistant_text = ""
 
         for iteration in range(MAX_ITERATIONS):
+            # Reset llama KV context before each non-first iteration to prevent
+            # llama_decode returned -1 when re-encoding messages after a tool call.
+            if iteration > 0 and _active_engine == "llama":
+                try:
+                    from backend.services import llama_service as _ls
+                    _ls.reset_context()
+                except Exception:
+                    pass
+
             stop_event = _threading.Event()
             accumulated_buf = ""       # running buffer for current generation pass
             in_tool_call = False       # currently inside <tool_call>...</tool_call>
@@ -959,7 +1006,7 @@ async def tool_chat(req: ToolChatRequest):
                                         yield _item
                                 yield f"data: {_json.dumps({'type': 'tool_result', 'tool': tool_name, 'result': tool_result})}\n\n"
 
-                                messages.append({"role": "assistant", "content": pass_text or None, "tool_calls": [tc]})
+                                messages.append({"role": "assistant", "content": _clean_assistant_content(pass_text), "tool_calls": [tc]})
                                 messages.append({"role": "tool", "tool_call_id": tc_id, "content": str(tool_result) if tool_result is not None else ""})
                                 tool_executed_this_pass = True
                         continue
@@ -1034,7 +1081,7 @@ async def tool_chat(req: ToolChatRequest):
                                         tc_id = f"tc_{iteration}_{total_tool_calls}"
                                         messages.append({
                                             "role": "assistant",
-                                            "content": pass_text or None,
+                                            "content": _clean_assistant_content(pass_text),
                                             "tool_calls": [{
                                                 "id": tc_id,
                                                 "type": "function",
@@ -1093,7 +1140,7 @@ async def tool_chat(req: ToolChatRequest):
                                     tc_id = f"tc_{iteration}_{total_tool_calls}"
                                     messages.append({
                                         "role": "assistant",
-                                        "content": pass_text or None,
+                                        "content": _clean_assistant_content(pass_text),
                                         "tool_calls": [{
                                             "id": tc_id,
                                             "type": "function",
@@ -1291,6 +1338,16 @@ async def run_benchmark() -> dict:
             }
         except Exception:
             pass
+    elif active_engine == "llama_server":
+        try:
+            from backend.services import llama_server_service
+            cfg = llama_server_service.get_load_config() or {}
+            engine_version = str(cfg.get("version") or "unknown")
+            engine_params = {k: cfg.get(k) for k in
+                             ("max_model_len", "n_cpu_moe", "n_gpu_layers", "threads",
+                              "flash_attn", "cache_type_k", "cache_type_v")}
+        except Exception:
+            pass
 
     gpu_short = (gpu.name.replace("NVIDIA GeForce ", "").replace("AMD Radeon ", "").replace("Apple ", "")) if gpu else "CPU"
 
@@ -1395,6 +1452,15 @@ async def run_benchmark_profiles(body: dict):
                 from backend.services import vllm_service
                 engine_version = vllm_service._vllm_version()
                 engine_params = {"max_model_len": model.max_context_window}
+            except Exception:
+                pass
+        elif active_engine == "llama_server":
+            try:
+                from backend.services import llama_server_service
+                cfg = llama_server_service.get_load_config() or {}
+                engine_version = str(cfg.get("version") or "unknown")
+                engine_params = {"max_model_len": cfg.get("max_model_len"),
+                                 "n_cpu_moe": cfg.get("n_cpu_moe")}
             except Exception:
                 pass
 
