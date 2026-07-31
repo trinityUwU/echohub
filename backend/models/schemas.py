@@ -67,6 +67,11 @@ class LoadRequest(BaseModel):
     pipeline_parallel_size: Optional[int] = None # vLLM only: pipeline parallel for 3+ GPUs on models > 70B
     tensor_split: Optional[list[float]] = None  # llama.cpp: répartition VRAM multi-GPU [0.5, 0.5]
     main_gpu: Optional[int] = None              # llama.cpp: GPU principal pour les layers non-splittés (default 0)
+    engine: Optional[str] = None       # force le moteur: "llama" | "llama_server" | "vllm" (None = auto)
+    n_cpu_moe: Optional[int] = None    # llama-server only: N couches d'experts MoE gardées en RAM CPU
+    threads: Optional[int] = None      # llama-server only: threads CPU (-t)
+    cache_type_k: Optional[str] = None # llama-server only: quant du cache K — "q8_0" | "q4_0" | "f16"
+    cache_type_v: Optional[str] = None # llama-server only: quant du cache V — "q8_0" | "q4_0" | "f16"
 
 
 class ChatMessage(BaseModel):

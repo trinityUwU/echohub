@@ -1,9 +1,54 @@
 # STATE — EchoHub
-*Dernière mise à jour : 2026-05-25 (session 28)*
+*Dernière mise à jour : 2026-07-31 (session 29)*
 
 ## Résumé de l'état actuel
 
-Application Tauri v2. Backend FastAPI port 37821 (systemd) ou port dynamique (tauri dev). Discord connector fonctionnel. **Session 28 : fixes critiques streaming** — la vraie root cause du non-streaming dans Tauri était WebKit2GTK 4.1 qui bufférise `fetch()` ReadableStream. Fix : WebSocket pour chatStream, XHR pour toolChat. **Attente de validation** : tauri dev doit être relancé pour que les changements prennent effet.
+Application Tauri v2. Backend FastAPI port 37821 (systemd) ou port dynamique (tauri dev). Discord connector fonctionnel. **Session 29 : troisième moteur d'inférence `llama_server`** (llama.cpp en process externe, port 37824) — seul chemin capable d'offloader les experts MoE, mesuré à 24,4 tok/s sur Qwen3.6-35B-A3B contre 1,6 in-process. **Session 28 : fixes critiques streaming** — la vraie root cause du non-streaming dans Tauri était WebKit2GTK 4.1 qui bufférise `fetch()` ReadableStream. Fix : WebSocket pour chatStream, XHR pour toolChat. **Attente de validation** : tauri dev doit être relancé pour que les changements prennent effet.
+
+## Ce qui a été fait — session 29 (2026-07-31)
+
+### Troisième moteur d'inférence : `llama_server` (llama.cpp en process externe)
+
+**Pourquoi** : llama-cpp-python n'expose ni `n_cpu_moe` ni `tensor_buft_overrides` →
+offload d'experts MoE impossible in-process. Mesuré sur Qwen3.6-35B-A3B Q4_K_M :
+1,59 tok/s in-process contre 25,54 tok/s via le binaire llama-server.
+
+**Implémentation** (calquée sur le pattern vLLM, process externe + proxy HTTP) :
+- `backend/services/llama_server_config.py` — résolution du binaire
+  (`ECHOHUB_LLAMA_SERVER_BIN` > `config.json:llama_server_bin` > `~/.unsloth/llama.cpp/build-cuda/bin/` > PATH),
+  détection CUDA via `--list-devices` (cachée), paramètres MoE par modèle persistés en `app_state`
+- `backend/services/llama_server_service.py` — cycle de vie du process (port 37824),
+  healthcheck `/health`, PID file, log `logs/llama-server.log`, unload/atexit
+- `backend/services/llama_server_generate.py` — proxy vers l'endpoint OpenAI-compatible
+  (SSE brut en stream, tool calls, appel sync)
+- `engine_router` : `llama_server` enregistré comme 3e moteur. Routing GGUF :
+  `engine` explicite d'abord, sinon auto-route les modèles `is_moe` si le binaire est là.
+- `inference.py` / `openai_compat.py` câblés (tout passe déjà par engine_router) ;
+  nouveau `GET /inference/llama-server/status` pour le diagnostic du binaire.
+
+**Mesuré via EchoHub** : Qwen3.6-35B-A3B → **24,39 tok/s** en génération (TTFT 0,61 s),
+contre 1,59 tok/s sur l'ancien chemin. Streaming SSE + WebSocket OK, tool call natif OK.
+
+**Décision — `llama_lock`** : le nouveau chemin ne prend PAS le mutex. Il protège l'état C
+partagé de llama.cpp *dans* le process Python ; un process externe a son propre espace
+mémoire et sérialise déjà ses slots. Les chemins existants le conservent inchangé.
+
+### ⚠ Le GGUF Qwen3.6-35B-A3B local est CORROMPU
+
+Le modèle génère du bruit (`////////`) — reproduit **en direct sur llama-server sans
+EchoHub**, et aussi en CPU pur sans offload MoE : ce n'est pas le câblage.
+`sha256sum` local = `c009b443…`, attendu HF = `ac0e2c11…` (taille identique, 22 134 528 992).
+Cohérent avec les pertes de lien SATA du disque sda. **À re-télécharger sur un disque sain
+avant toute conclusion sur la qualité de sortie du modèle** — le débit, lui, est validé.
+
+### Correctif `has_mtp`
+
+`backend/routers/models.py:48` — le `or model.has_mtp` empêchait la détection réelle
+d'infirmer l'heuristique de nommage de `hf_service.py` (toute la famille Qwen3 marquée MTP
+à tort). Remplacé par un override symétrique à celui de la vision.
+Vérifié dans les deux sens : Qwen3.6-35B-A3B passe de `has_mtp=true` à `false` via l'API,
+un GGUF forgé avec des tenseurs `blk.N.nextn.*` reste à `true`, et le `or` restauré
+fait bien réapparaître le bug.
 
 ## Ce qui a été fait — session 28 (2026-05-25)
 

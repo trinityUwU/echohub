@@ -2,7 +2,9 @@
 Engine router — détecte le format du modèle et dispatche vers le bon engine.
 
 Logique de routing :
-  GGUF → llama_service (cross-platform, défaut)
+  GGUF → llama_service (llama-cpp-python in-process, cross-platform, défaut)
+  GGUF MoE ou engine="llama_server" → llama_server_service (binaire externe CUDA,
+      seul chemin capable d'offloader les experts MoE — --n-cpu-moe)
   AWQ / GPTQ / FP8 / EXL2 / FP16 → vllm_service (NVIDIA requis)
 
 L'engine actif est unique — un seul modèle chargé à la fois.
@@ -134,11 +136,21 @@ def is_vllm_available() -> bool:
         return False
 
 
+def is_llama_server_available() -> bool:
+    """True si le binaire llama-server externe est utilisable (présent + GPU)."""
+    try:
+        from backend.services import llama_server_service
+        return llama_server_service.is_available()
+    except Exception as e:
+        logger.warning(f"llama-server availability check failed: {e}")
+        return False
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Active engine tracking
 # ──────────────────────────────────────────────────────────────────────────────
 
-_active_engine: Optional[str] = None  # "llama" | "vllm" | None
+_active_engine: Optional[str] = None  # "llama" | "llama_server" | "vllm" | None
 
 
 def get_active_engine() -> Optional[str]:
@@ -161,6 +173,9 @@ def get_status() -> Optional[ModelInfo]:
         info = llama_service.get_status()
     elif _active_engine == "vllm":
         info = vllm_service.get_status()
+    elif _active_engine == "llama_server":
+        from backend.services import llama_server_service
+        info = llama_server_service.get_status()
     if info is not None:
         info.engine = _active_engine
     return info
@@ -169,6 +184,11 @@ def get_status() -> Optional[ModelInfo]:
 def get_load_state() -> dict:
     from backend.services import llama_service, vllm_service
 
+    if _active_engine == "llama_server":
+        from backend.services import llama_server_service
+        state = llama_server_service.get_load_state()
+        state["load_config"] = llama_server_service.get_load_config()
+        return state
     if _active_engine == "llama":
         state = llama_service.get_load_state()
         state["load_config"] = llama_service.get_load_config()
@@ -185,6 +205,43 @@ def get_load_state() -> dict:
     llama_state = llama_service.get_load_state()
     llama_state["load_config"] = llama_service.get_load_config()
     return llama_state
+
+
+def _should_use_llama_server(engine: Optional[str], is_moe: bool) -> bool:
+    """
+    Choix du chemin GGUF. Explicite d'abord ; sinon auto-route les MoE, que le
+    binding in-process ne sait pas offloader (1,6 tok/s mesuré vs 25,5).
+    """
+    if engine == "llama_server":
+        if not is_llama_server_available():
+            from backend.services.llama_server_config import check_binary
+            raise RuntimeError(check_binary()["error"] or "llama-server unavailable")
+        return True
+    if engine == "llama":
+        return False
+    if is_moe and is_llama_server_available():
+        logger.info("MoE model — auto-routing to external llama-server (expert offload)")
+        return True
+    if is_moe:
+        logger.warning("MoE model but llama-server unavailable — falling back to in-process "
+                       "llama-cpp-python (expect very low throughput)")
+    return False
+
+
+def _load_on_llama_server(gguf_path: str, model_id: str, is_moe: bool,
+                          mmproj: Optional[str], n_ctx: Optional[int],
+                          n_gpu_layers: Optional[int], n_cpu_moe: Optional[int],
+                          threads: Optional[int], cache_type_k: Optional[str],
+                          cache_type_v: Optional[str], n_batch: Optional[int]) -> None:
+    """Délègue le chargement au service llama-server externe."""
+    from backend.services import llama_server_service
+    set_active_engine("llama_server")
+    logger.info(f"Routing {model_id} → llama-server externe (GGUF: {Path(gguf_path).name})")
+    llama_server_service.load_model_async(
+        gguf_path=gguf_path, model_id=model_id, is_moe=is_moe, mmproj_path=mmproj,
+        n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, n_cpu_moe=n_cpu_moe, threads=threads,
+        cache_type_k=cache_type_k, cache_type_v=cache_type_v, n_batch=n_batch,
+    )
 
 
 def load_model_async(
@@ -208,13 +265,18 @@ def load_model_async(
     speculative_mode: str = "off",
     draft_model_path: Optional[str] = None,
     n_pred_tokens: int = 10,
+    engine: Optional[str] = None,
+    n_cpu_moe: Optional[int] = None,
+    threads: Optional[int] = None,
+    cache_type_k: Optional[str] = None,
+    cache_type_v: Optional[str] = None,
 ) -> None:
     from backend.services import llama_service, vllm_service
 
     fmt = detect_format(model_id, model_path)
     gpu = detect_gpu()
 
-    # GGUF → toujours llama
+    # GGUF → llama-cpp-python in-process, ou llama-server externe (MoE / explicite)
     if fmt == "gguf":
         gguf_path = find_gguf_file(model_path)
         if not gguf_path:
@@ -222,6 +284,16 @@ def load_model_async(
         from backend.services.gguf_utils import find_mmproj, detect_vision_handler
         mmproj = find_mmproj(model_path)
         vision_handler = detect_vision_handler(model_id) if mmproj else None
+
+        if _should_use_llama_server(engine, is_moe):
+            _load_on_llama_server(
+                gguf_path=gguf_path, model_id=model_id, is_moe=is_moe, mmproj=mmproj,
+                n_ctx=max_model_len, n_gpu_layers=n_gpu_layers, n_cpu_moe=n_cpu_moe,
+                threads=threads, cache_type_k=cache_type_k, cache_type_v=cache_type_v,
+                n_batch=n_batch,
+            )
+            return
+
         set_active_engine("llama")
         logger.info(f"Routing {model_id} → llama-cpp-python (GGUF: {Path(gguf_path).name})"
                     + (f" + mmproj ({vision_handler})" if mmproj else ""))
@@ -290,6 +362,9 @@ def unload_model() -> None:
         llama_service.unload_model()
     elif engine == "vllm":
         vllm_service.unload_model()
+    elif engine == "llama_server":
+        from backend.services import llama_server_service
+        llama_server_service.unload_model()
 
 
 async def generate(messages: list[dict], **kwargs):
@@ -299,6 +374,10 @@ async def generate(messages: list[dict], **kwargs):
             yield chunk
     elif _active_engine == "vllm":
         async for chunk in vllm_service.generate(messages=messages, **kwargs):
+            yield chunk
+    elif _active_engine == "llama_server":
+        from backend.services import llama_server_service
+        async for chunk in llama_server_service.generate(messages=messages, **kwargs):
             yield chunk
     else:
         raise RuntimeError("No model loaded")
@@ -314,6 +393,12 @@ async def generate_with_tools(
     from backend.services import llama_service, vllm_service
     if _active_engine == "llama":
         async for result in llama_service.generate_with_tools(
+            messages=messages, tools=tools, stop_event=stop_event, **kwargs
+        ):
+            yield result
+    elif _active_engine == "llama_server":
+        from backend.services import llama_server_service
+        async for result in llama_server_service.generate_with_tools(
             messages=messages, tools=tools, stop_event=stop_event, **kwargs
         ):
             yield result
@@ -337,6 +422,9 @@ def chat_completion(messages: list[dict], tools: list[dict], **kwargs) -> dict |
     if _active_engine == "llama":
         from backend.services import llama_service
         return llama_service.chat_completion_sync(messages=messages, tools=tools, **kwargs)
+    elif _active_engine == "llama_server":
+        from backend.services import llama_server_service
+        return llama_server_service.chat_completion_sync(messages=messages, tools=tools, **kwargs)
     elif _active_engine == "vllm":
         from backend.services import vllm_service
         if hasattr(vllm_service, "chat_completion_sync"):
@@ -352,6 +440,9 @@ def get_engine_log(n_lines: int = 100) -> str:
     from backend.services import llama_service, vllm_service
     if _active_engine == "llama":
         return llama_service.get_log(n_lines)
+    if _active_engine == "llama_server":
+        from backend.services import llama_server_service
+        return llama_server_service.get_log(n_lines)
     if _active_engine == "vllm":
         log_path = _PROJECT_ROOT / "logs" / "vllm.log"
         if not log_path.exists():
@@ -365,3 +456,8 @@ def cleanup() -> None:
     from backend.services import llama_service, vllm_service
     llama_service.cleanup()
     vllm_service.cleanup()
+    try:
+        from backend.services import llama_server_service
+        llama_server_service.cleanup()
+    except Exception as e:
+        logger.error(f"llama-server cleanup failed: {e}")
