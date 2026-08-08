@@ -409,6 +409,7 @@ export interface ToolChatRequest {
   max_tokens?: number
   enabled_tools?: string[]
   awareness_block?: string
+  enable_thinking?: boolean
 }
 
 export interface SkillsConfig {

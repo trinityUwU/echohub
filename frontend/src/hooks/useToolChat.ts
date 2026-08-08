@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toolChat, summarizeMessages } from '@/api/client'
-import type { AgentStep, ChatMessage, GenerationStats, SkillsConfig, ToolCall, WorkspaceFile } from '@/types'
+import type { AgentStep, ChatMessage, ChatParams, GenerationStats, SkillsConfig, ToolCall, WorkspaceFile } from '@/types'
 import { emitTimings } from '@/api/engineTimings'
 import { addToast } from '@/hooks/useToast'
+
+// Generation settings threaded from the active chat profile — temperature/maxTokens/
+// enableThinking were previously dropped here and the backend always used its own
+// hardcoded defaults regardless of the user's profile.
+export type ToolChatGenParams = Pick<ChatParams, 'temperature' | 'maxTokens' | 'enableThinking'>
 
 // ── SSE event shapes ──────────────────────────────────────────────────────────
 
@@ -67,13 +72,13 @@ export interface UseToolChatReturn {
   streaming: boolean
   genStats: GenerationStats | null
   usedTokens: number
-  send: (text: string, systemPrompt?: string, skills?: SkillsConfig) => Promise<void>
+  send: (text: string, systemPrompt?: string, skills?: SkillsConfig, genParams?: ToolChatGenParams) => Promise<void>
   stop: () => void
   clear: () => void
   compact: () => Promise<void>
   loadHistory: (msgs: Array<{ role: string; content: string }>) => void
-  clearAndResend: (history: ChatMessage[], newText: string, systemPrompt?: string, skills?: SkillsConfig) => void
-  sendFromHistory: (history: ChatMessage[]) => void
+  clearAndResend: (history: ChatMessage[], newText: string, systemPrompt?: string, skills?: SkillsConfig, genParams?: ToolChatGenParams) => void
+  sendFromHistory: (history: ChatMessage[], genParams?: ToolChatGenParams) => void
 }
 
 interface UseToolChatOptions {
@@ -184,7 +189,7 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     }
   }, [])
 
-  const send = useCallback(async (text: string, systemPrompt?: string, skills?: SkillsConfig): Promise<void> => {
+  const send = useCallback(async (text: string, systemPrompt?: string, skills?: SkillsConfig, genParams?: ToolChatGenParams): Promise<void> => {
     // Auto-compact at 98% of context window before sending
     // Use usedTokensRef (synced with the displayed token counter) as the source of truth
     const { maxContextTokens } = optionsRef.current
@@ -254,6 +259,9 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
       system_prompt: systemPrompt,
       enabled_tools: skills?.enabledTools,
       awareness_block: skills?.awarenessBlock,
+      temperature: genParams?.temperature,
+      max_tokens: genParams?.maxTokens,
+      enable_thinking: genParams?.enableThinking,
     }
 
     ;(async (): Promise<void> => {
@@ -440,19 +448,19 @@ export function useToolChat(projectId: string, options: UseToolChatOptions = { c
     })()
   }, [projectId])
 
-  const clearAndResend = useCallback((history: ChatMessage[], newText: string, systemPrompt?: string, skills?: SkillsConfig): void => {
+  const clearAndResend = useCallback((history: ChatMessage[], newText: string, systemPrompt?: string, skills?: SkillsConfig, genParams?: ToolChatGenParams): void => {
     abortRef.current?.abort()
     messagesRef.current = history
     setMessages(history)
     setToolCalls([])
-    send(newText, systemPrompt, skills)
+    send(newText, systemPrompt, skills, genParams)
   }, [send])
 
-  const sendFromHistory = useCallback((history: ChatMessage[]): void => {
+  const sendFromHistory = useCallback((history: ChatMessage[], genParams?: ToolChatGenParams): void => {
     const lastUser = [...history].reverse().find(m => m.role === 'user')
     if (!lastUser) return
     const historyWithoutLast = history.slice(0, history.lastIndexOf(lastUser))
-    clearAndResend(historyWithoutLast, typeof lastUser.content === 'string' ? lastUser.content : '')
+    clearAndResend(historyWithoutLast, typeof lastUser.content === 'string' ? lastUser.content : '', undefined, undefined, genParams)
   }, [clearAndResend])
 
   return { messages, toolCalls, workspaceFiles, streaming, genStats, usedTokens, send, stop, clear, compact, loadHistory, clearAndResend, sendFromHistory }
