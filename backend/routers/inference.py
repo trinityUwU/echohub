@@ -52,19 +52,32 @@ def _parse_tool_call_json(raw: str) -> dict:
     return _extract_tool_call_fields(raw)
 
 
-def _clean_assistant_content(text: str) -> str | None:
+def _clean_assistant_content(text: str) -> str:
     """Strip <think>...</think> blocks from assistant message content before injecting
     into the tool loop message history. llama.cpp crashes (llama_decode -1) when
     Qwen3 special tokens <think>/<think> appear inside a historical assistant message
-    during re-tokenization on the 2nd+ tool call."""
+    during re-tokenization on the 2nd+ tool call.
+
+    Always returns a string, never None: Qwen3's native chat_template.default Jinja
+    (the only chat_format actually active in this project — chat_format is never set
+    explicitly, so llama-cpp-python falls back to the GGUF-embedded template) evaluates
+    `'</think>' in message.content` unconditionally for every historical assistant
+    message. content=None blows up there with `TypeError: argument of type 'NoneType'
+    is not iterable` — reproduced in isolation against the real Qwen3 template
+    (llama_cpp.llama_chat_format.Jinja2ChatFormatter, vocab_only load, no GPU/model
+    weights needed). content="" renders fine on that same template.
+    This differs from the chatml-function-calling built-in handler, which guards with
+    `if message.content and message.content | length > 0` and tolerates None — but
+    that handler is not reachable anywhere in this codebase (chat_format is never set
+    to it), so there is no live path this change could break in that direction."""
     if not text:
-        return None
+        return ""
     text = _re_module.sub(r"<think>.*?</think>", "", text, flags=_re_module.DOTALL)
     if "</think>" in text:
         text = text[text.rfind("</think>") + len("</think>"):]
     if "<think>" in text:
         text = ""
-    return text.strip() or None
+    return text.strip()
 
 
 def _sanitize_json_strings(raw: str) -> str:
@@ -585,6 +598,7 @@ class ToolChatRequest(BaseModel):
     stream: bool = True
     enabled_tools: list[str] | None = None
     awareness_block: str | None = None
+    enable_thinking: bool = True
 
 
 @router.post("/tool-chat")
@@ -599,35 +613,43 @@ async def tool_chat(req: ToolChatRequest):
     if engine_router.get_status() is None:
         raise HTTPException(status_code=404, detail="No model loaded.")
 
-    _enabled = req.enabled_tools
-    if _enabled is not None and "invoke_agent" not in _enabled:
-        _enabled = list(_enabled) + ["invoke_agent"]
-    # web_search and fetch_url are sub-agent only — never exposed to the main model
-    _WEB_TOOLS = {"web_search", "fetch_url"}
-    if _enabled is not None:
-        _enabled = [t for t in _enabled if t not in _WEB_TOOLS]
-    tools = get_tools(_enabled)
-    # Always strip web tools from the final list regardless of how tools were built
-    tools = [t for t in tools if t["function"]["name"] not in _WEB_TOOLS]
+    # Plain chat turn (no project mode, no skill explicitly enabled) needs no tool
+    # definitions at all — injecting all 11 defs (~2100 tokens) forces the model into
+    # a tool-obligation framing even for "salut". Only build/inject tools when the
+    # turn can actually use them (dev/docs/research mode, or explicit skills).
+    _no_tools_needed = not req.project_mode and not req.enabled_tools
     _mcp_awareness_blocks: list[str] = []
-    # Inject tools from running MCP servers + collect their awareness blocks
-    try:
-        from backend.services.mcp_client import get_mcp_tools_definitions
-        from backend.services.db import get_running_mcp_servers
-        from backend.routers.skills import _load_registry
-        mcp_tools = await get_mcp_tools_definitions()
-        if mcp_tools:
-            tools = tools + mcp_tools
-            logger.info(f"[tool-chat] injected {len(mcp_tools)} MCP tool(s) from running servers")
-        # Collect awareness blocks from running MCP server registry entries
-        running_ids = {s["skill_id"] for s in get_running_mcp_servers()}
-        if running_ids:
-            registry = _load_registry()
-            for entry in registry:
-                if entry.get("id") in running_ids and entry.get("awareness", "").strip():
-                    _mcp_awareness_blocks.append(entry["awareness"].strip())
-    except Exception as _mcp_err:
-        logger.debug(f"[tool-chat] MCP tools injection skipped: {_mcp_err}")
+    if _no_tools_needed:
+        tools: list[dict] = []
+    else:
+        _enabled = req.enabled_tools
+        if _enabled is not None and "invoke_agent" not in _enabled:
+            _enabled = list(_enabled) + ["invoke_agent"]
+        # web_search and fetch_url are sub-agent only — never exposed to the main model
+        _WEB_TOOLS = {"web_search", "fetch_url"}
+        if _enabled is not None:
+            _enabled = [t for t in _enabled if t not in _WEB_TOOLS]
+        tools = get_tools(_enabled)
+        # Always strip web tools from the final list regardless of how tools were built
+        tools = [t for t in tools if t["function"]["name"] not in _WEB_TOOLS]
+        # Inject tools from running MCP servers + collect their awareness blocks
+        try:
+            from backend.services.mcp_client import get_mcp_tools_definitions
+            from backend.services.db import get_running_mcp_servers
+            from backend.routers.skills import _load_registry
+            mcp_tools = await get_mcp_tools_definitions()
+            if mcp_tools:
+                tools = tools + mcp_tools
+                logger.info(f"[tool-chat] injected {len(mcp_tools)} MCP tool(s) from running servers")
+            # Collect awareness blocks from running MCP server registry entries
+            running_ids = {s["skill_id"] for s in get_running_mcp_servers()}
+            if running_ids:
+                registry = _load_registry()
+                for entry in registry:
+                    if entry.get("id") in running_ids and entry.get("awareness", "").strip():
+                        _mcp_awareness_blocks.append(entry["awareness"].strip())
+        except Exception as _mcp_err:
+            logger.debug(f"[tool-chat] MCP tools injection skipped: {_mcp_err}")
     MAX_ITERATIONS = 40  # generous — model decides when it's done; we warn at threshold
 
     async def _event_stream():
@@ -708,7 +730,10 @@ async def tool_chat(req: ToolChatRequest):
             _active_tools = set(req.enabled_tools or [t["function"]["name"] for t in tools])
             base_system = _DEV_SYSTEM_PROMPT if (_active_tools & _fs_tools) else "You are a helpful assistant."
 
-        combined_system = base_system
+        # enable_thinking wiring — Qwen3 native /think /no_think directive.
+        # Frontend toggle was never threaded through before this fix; reasoning was
+        # always on regardless of the user's choice.
+        combined_system = ("/think\n" if req.enable_thinking else "/no_think\n") + base_system
         if awareness:
             combined_system += f"\n\n---\nACTIVE SKILLS:\n{awareness}"
         if user_system:
@@ -831,6 +856,13 @@ async def tool_chat(req: ToolChatRequest):
         _CTX_WARN_PCT = 0.75
         _CTX_STOP_PCT = 0.92
         _context_exhausted = False
+
+        # Reasoning budget — an unbounded <think> block can consume the entire context
+        # window (measured: ~1890 words on a "salut" turn with a 4096-token window).
+        # Bounded at 35% of the context window, capped at 2000 tokens absolute, so a
+        # runaway reasoning pass is cut instead of starving the final answer.
+        _REASONING_BUDGET_TOKENS = min(2000, int(_ctx_window * 0.35))
+        _REASONING_BUDGET_CHARS = _REASONING_BUDGET_TOKENS * 4
 
         def _estimate_tokens(msgs: list) -> int:
             return sum(len(str(m.get("content", ""))) for m in msgs) // 4
@@ -1020,6 +1052,29 @@ async def tool_chat(req: ToolChatRequest):
                         _first_token_time = _time.perf_counter()
 
                     accumulated_buf += content
+
+                    # Reasoning budget guard — cut a runaway <think> block before it
+                    # eats the whole context window instead of leaving room for tool
+                    # calls or a final answer.
+                    _t_open = accumulated_buf.find("<think>")
+                    _t_close = accumulated_buf.find("</think>")
+                    if _t_open != -1 and _t_close == -1 and (len(accumulated_buf) - _t_open) > _REASONING_BUDGET_CHARS:
+                        stop_event.set()
+                        logger.warning(
+                            f"[tool-chat] reasoning budget exceeded "
+                            f"({len(accumulated_buf) - _t_open} chars > {_REASONING_BUDGET_CHARS}) — cutting"
+                        )
+                        cutoff_evt = _json.dumps({"type": "text_chunk", "content": "\n</think>\n\n"})
+                        yield f"data: {cutoff_evt}\n\n"
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "[System] Your reasoning exceeded its budget and was cut off. "
+                                "Stop reasoning and answer directly now, briefly."
+                            ),
+                        })
+                        tool_executed_this_pass = True
+                        break
 
                     if not in_tool_call:
                         # Check if accumulated_buf now contains a <tool_call> opening tag

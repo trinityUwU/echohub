@@ -116,8 +116,10 @@ export function ChatPage({
         streaming: skillChatHook.streaming,
         stats: skillChatHook.genStats,
         send: (text: string, _loaded: boolean, _attachments?: Attachment[]) =>
-          skillChatHook.send(text, buildChatSystemPrompt(params), skillsHook),
-        sendFromHistory: (history: ChatMessage[]) => skillChatHook.sendFromHistory(history),
+          skillChatHook.send(text, buildChatSystemPrompt(params), skillsHook,
+            { temperature: params.temperature, maxTokens: params.maxTokens, enableThinking: params.enableThinking }),
+        sendFromHistory: (history: ChatMessage[]) => skillChatHook.sendFromHistory(history,
+          { temperature: params.temperature, maxTokens: params.maxTokens, enableThinking: params.enableThinking }),
         stop: skillChatHook.stop,
         setMessages: (msgs: ChatMessage[]) => { skillChatHook.loadHistory(msgs.map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content : '' }))) },
         usedTokens: skillChatHook.usedTokens,
@@ -705,6 +707,7 @@ function ProjectWorkspace({
         typeof lastUser.content === 'string' ? lastUser.content : '',
         _devSys,
         projectSkillsHook,
+        { temperature: params.temperature, maxTokens: params.maxTokens, enableThinking: params.enableThinking },
       )
     } else {
       chatHook.sendFromHistory(history)
@@ -715,7 +718,10 @@ function ProjectWorkspace({
     if (!loadedModel) return
     if (isDevMode) {
       const prevUserMessages = messages.slice(0, index).filter(m => m.role === 'user' && !String(m.content).startsWith('[tool:'))
-      toolChatHook.clearAndResend(prevUserMessages, newText, buildDevSystemPrompt(params), projectSkillsHook)
+      toolChatHook.clearAndResend(
+        prevUserMessages, newText, buildDevSystemPrompt(params), projectSkillsHook,
+        { temperature: params.temperature, maxTokens: params.maxTokens, enableThinking: params.enableThinking },
+      )
     } else {
       const updated = { ...messages[index], content: newText }
       chatHook.sendFromHistory([...messages.slice(0, index), updated])
@@ -757,6 +763,7 @@ function ProjectWorkspace({
         `Call set_tool_limit with new_limit=${cmd.value} and reason="User requested limit increase via /limit command."`,
         buildDevSystemPrompt(params),
         projectSkillsHook,
+        { temperature: params.temperature, maxTokens: params.maxTokens, enableThinking: params.enableThinking },
       )
       return
     }
