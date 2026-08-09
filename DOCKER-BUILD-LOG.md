@@ -631,3 +631,396 @@ README (Partie C).
 `README.md` mis à jour — voir section « Windows » ajoutée, remplace la ligne « Linux, macOS,
 or Windows (WSL2) » non étayée par une affirmation précise de ce qui existe réellement
 (scripts + image, non testés sur RTX 5090). Détail dans le diff du fichier, pas reproduit ici.
+
+## Étape 12 — Partie D : exécution réelle de `start.ps1` / `stop.ps1` (équipe de suite)
+
+Mandat : la validation précédente (Étape 10) ne prouvait que le *parsing* syntaxique
+(`[System.Management.Automation.Language.Parser]::ParseFile`, moteur PS 7 du conteneur).
+Aucune exécution réelle n'avait eu lieu, et le parseur PS7 ne peut par construction pas
+détecter une incompatibilité avec Windows PowerShell 5.1 (le moteur par défaut sur tout
+Windows non modifié) : il analyse avec la grammaire 7, pas 5.1. Cette étape corrige ce trou
+en exécutant réellement les scripts, dans un conteneur `mcr.microsoft.com/powershell:latest`
+jetable (supprimé après usage), sur trois scénarios : à vide, à vide avec faux
+`docker`/`wsl.exe`/`nvidia-smi.exe` simulant un poste équipé, et le même chemin avec le point
+de santé qui ne répond jamais.
+
+### Q1 — Compatibilité PowerShell 5.1 et politique d'exécution
+
+**Syntaxe** : balayage exhaustif des deux fichiers pour tout ce qui n'existe qu'en PS7+
+(opérateur ternaire `? :`, `??`, `?.`, chaînage de pipeline `&&`/`||`, `Test-Json`,
+`ForEach-Object -Parallel`, `$PSStyle`) — recherche par grep ciblée, zéro occurrence. Les
+constructions utilisées (`$PSScriptRoot`, `[CmdletBinding()]`, `*> $null`,
+`Invoke-WebRequest -UseBasicParsing`, sous-expressions `$(...)`, `-match`/`$Matches`) sont
+toutes disponibles depuis PowerShell 3.0–5.0 au plus tard. **Aucune incompatibilité de
+syntaxe trouvée.**
+
+**Défaut réel trouvé et corrigé — encodage sans BOM.** Les deux fichiers étaient en UTF-8
+**sans BOM** (confirmé : `file` → `UTF-8 text` sans mention BOM ; premier octet `23 52` = `#R`,
+pas `EF BB BF`). Les deux scripts contiennent des caractères non-ASCII dans les messages
+affichés à l'utilisateur (`—`, `─`, `▶`, `⚠`). Windows PowerShell 5.1 n'a pas de détection
+UTF-8 automatique sans BOM : il lit un `.ps1` sans BOM avec la page de code ANSI système
+(souvent Windows-1252 sur un poste FR), ce qui corrompt ces caractères à l'affichage
+(mojibake) — pas une erreur bloquante, mais un message d'erreur illisible à l'endroit précis
+où le script doit guider l'utilisateur. Source :
+[PowerShell: Encoding — renenyffenegger.ch](https://renenyffenegger.ch/notes/Windows/PowerShell/encoding/index),
+confirmée par la documentation officielle
+[about_Character_Encoding (PowerShell 5.1)](https://github.com/MicrosoftDocs/PowerShell-Docs/blob/main/reference/5.1/Microsoft.PowerShell.Core/About/about_Character_Encoding.md).
+**Corrigé** : BOM UTF-8 (`EF BB BF`) ajouté en tête des deux fichiers — solution recommandée
+par Microsoft pour ce cas exact. Reparsing PS7 revérifié après coup : 0 erreur sur les deux
+fichiers.
+
+**Politique d'exécution — le vrai blocage.** Sur une installation Windows 11 standard,
+`Get-ExecutionPolicy` vaut `Restricted` par défaut pour tout compte utilisateur (aucune
+politique définie nulle part) : **tout** script `.ps1` non signé est refusé, y compris celui-ci.
+Source : [about_Execution_Policies (Microsoft Learn)](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies).
+Taper `.\start.ps1` dans un PowerShell fraîchement ouvert produit :
+```
+.\start.ps1 : File ...\start.ps1 cannot be loaded because running scripts is disabled
+on this system. For more information, see about_Execution_Policies at
+https://go.microsoft.com/fwlink/?LinkID=135170.
+```
+`git clone` ne pose pas de Mark-of-the-Web (MOTW ne s'applique qu'aux fichiers téléchargés
+via navigateur/store, pas à un clone git) donc ce n'est pas un blocage MOTW — c'est la
+politique d'exécution elle-même. Vérifié aussi : le menu contextuel natif Windows
+« Exécuter avec PowerShell » sur un `.ps1` invoque en réalité
+`powershell.exe -ExecutionPolicy Bypass -File "%1"` (ou l'équivalent `Set-ExecutionPolicy
+-Scope Process Bypass`), donc **ce geste précis contourne le blocage sans rien changer de
+permanent**. Source : [What's behind "Run with PowerShell" context menu? — p0w3rsh3ll](https://p0w3rsh3ll.wordpress.com/2016/07/19/whats-behind-run-with-powershell-context-menu/).
+**Conclusion : la promesse « une seule commande, `.\start.ps1` tout court » du README était
+fausse pour un poste vierge.** README corrigé (section Windows, « One command ») pour dire la
+vérité : clic droit > Exécuter avec PowerShell (fonctionne sans rien changer), ou
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` une fois, ou
+`powershell -ExecutionPolicy Bypass -File .\start.ps1`.
+
+### Q2 — Comportement à vide (aucun logiciel installé)
+
+Exécution réelle de `start.ps1` dans le conteneur PowerShell, PATH ne contenant ni `docker`
+ni `wsl.exe` ni `nvidia-smi.exe`. Sortie exacte vue par l'utilisateur :
+```
+EchoHub — demarrage (Docker Desktop / WSL2 / GPU NVIDIA)
+─────────────────────────────────────────────────────────
+
+▶ Docker Desktop
+  [X]  Docker n'est pas installe (commande 'docker' introuvable).
+       Installe Docker Desktop pour Windows (inclut le moteur WSL2) :
+       https://www.docker.com/products/docker-desktop/
+       Redemarre ce script apres l'installation et le premier lancement de Docker Desktop.
+```
+Code de sortie 1, arrêt immédiat et propre — aucune trace d'exception, message actionnable
+avec lien officiel. `stop.ps1` dans les mêmes conditions : message clair
+(« Docker n'est pas installe ... — rien a arreter. »), exit 1, pareillement propre.
+**Aucun défaut : comportement exactement conforme à l'attendu.**
+
+### Q3 — Chemin nominal (faux `docker`/`wsl.exe`/`nvidia-smi.exe` dans le PATH)
+
+Trois faux exécutables bash (`docker`, `wsl.exe`, `nvidia-smi.exe`) écrits pour répondre
+comme les vrais le feraient sur un poste équipé (`docker info --format '{{.OSType}}'` →
+`linux`, `wsl.exe --status` → exit 0, `nvidia-smi.exe --query-gpu=...` →
+`NVIDIA GeForce RTX 5090, 576.02`, `docker image inspect` → image déjà présente,
+`docker compose up/down` → exit 0). Deux scénarios pour le point de santé :
+
+- **Le backend répond** (petit serveur `HttpListener` PowerShell en tâche de fond sur le port
+  37821) : `start.ps1` enchaîne ses 7 étapes dans l'ordre exact du code — Docker Desktop →
+  WSL2 → GPU → build (sauté, image déjà présente) → `compose up -d` → attente polling
+  (`[OK] Backend pret ... repond 200`, revenu bien avant le timeout de 30 s fixé pour le
+  test) → ouverture navigateur. Exit code 0.
+- **Le backend ne répond jamais** (aucun listener démarré, `-HealthTimeoutSeconds 6`/`8` pour
+  ne pas attendre les 180 s réelles) : la boucle de polling est correctement bornée — mesuré
+  à `real 0m6.583s` / `0m8.589s` pour des timeouts de 6 s/8 s (pas de blocage indéfini),
+  message final clair (« Le backend ne repond toujours pas ... apres Ns »,
+  `docker compose logs -f`, cause probable), exit code 1. **Aucun risque d'attente infinie.**
+
+**Défaut réel trouvé et corrigé — ouverture du navigateur sans filet.** `Start-Process
+$webUrl` (ligne 199 d'origine) est la façon standard et correcte d'ouvrir l'URL dans le
+navigateur par défaut sur Windows (`ShellExecute` sous le capot) — source :
+[Opening URLs in Different Browsers Using PowerShell](https://powershellprodigy.wordpress.com/2024/10/07/opening-urls-in-different-browsers-using-powershell/).
+Mais c'était le **seul** appel du script sans `try/catch`, alors que `$ErrorActionPreference
+= 'Stop'` est actif globalement et que chaque autre étape a son `Exit-WithGuidance` dédié.
+Reproduit dans le conteneur (pas d'association shell pour les URL sous Linux — échec attendu
+et normal ici, pas un signal de bug côté Windows) : le script plantait avec une trace
+d'exception PowerShell brute **après avoir réussi toutes les étapes précédentes**
+(conteneurs démarrés, backend sain) — l'utilisateur aurait vu une erreur rouge illisible à la
+toute dernière étape alors qu'EchoHub tournait déjà correctement.
+**Corrigé** : `try/catch` ajouté autour de `Start-Process $webUrl` ; en cas d'échec (pas de
+navigateur par défaut configuré, ou autre erreur `ShellExecute`), le script avertit
+(`Write-Warn`) et donne l'URL à ouvrir manuellement, au lieu de planter — le script se termine
+alors avec un code de sortie 0 puisqu'EchoHub est réellement opérationnel. Revérifié après
+correction : le warning s'affiche proprement, le script se termine bien en exit 0.
+
+`stop.ps1` chemin nominal : `docker compose down` (faux) → `[OK] Conteneurs arretes. Volumes
+... conserves.` → exit 0. Conforme, rien à corriger.
+
+### Fichiers modifiés dans cette étape
+
+- `start.ps1` : BOM UTF-8 ajouté ; `try/catch` ajouté autour de l'ouverture du navigateur.
+- `stop.ps1` : BOM UTF-8 ajouté (aucun autre changement — script déjà correct).
+- `README.md` (section Windows, « One command ») : documente la vraie procédure
+  (`Restricted` par défaut, trois façons de contourner, clic droit recommandé).
+
+Toutes les corrections revérifiées par une nouvelle exécution réelle après application
+(voir sorties ci-dessus) — pas seulement relues.
+
+### Verdict — trois lignes
+
+Cloné tel quel sur Windows 11, `.\start.ps1` tapé dans un terminal PowerShell classique
+**sera bloqué avant Docker** par `Restricted` (politique d'exécution par défaut) : il faut
+un clic droit « Exécuter avec PowerShell » (marche sans rien changer), ou activer une fois
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. Une fois ce geste fait, la logique du
+script elle-même est saine : compatible PowerShell 5.1, échoue proprement et clairement si
+Docker/WSL2/GPU manquent, enchaîne ses étapes dans le bon ordre, attend le backend sans
+jamais bloquer indéfiniment, et n'écrase plus d'exception brute si le navigateur ne s'ouvre
+pas tout seul. Le seul point encore non vérifiable ici faute de machine Windows/RTX 5090 :
+que Docker Desktop, WSL2 et le pilote NVIDIA réels répondent exactement comme les simulations
+utilisées pour ce test.
+
+---
+
+# Journal — équipe validation interface web (ccremote), 2026-08-09
+
+Équipe de suite. Mandat : valider l'interface web elle-même dans le conteneur — affichage réel,
+navigation, conversation complète de bout en bout via un navigateur automatisé (Playwright). Les
+mandats précédents avaient validé le build, le GPU, et une conversation via appel API direct
+(`/inference/chat`) — jamais via l'écran de chat effectivement rendu au navigateur. C'est ce trou
+précis que ce mandat comble.
+
+## Étape 13 — État des lieux
+
+- Aucun conteneur `echohub*` actif, ports 47820/47821 libres, instance native intacte sur
+  37821 (PID 905, non touchée), conteneurs tiers (`agora-searxng`, `flux-postgres`,
+  `bgutil-ytdlp-pot-provider`) non touchés — revérifié avant et après ce mandat.
+- Conteneur de test lancé : `echohub-uitest`, volumes dédiés `echohub_uitest_models` /
+  `echohub_uitest_userdata`, mêmes ports alternatifs 47820/47821 déjà utilisés par les mandats
+  précédents. `docker exec ... nvidia-smi` et `/health` revalidés sains avant de commencer
+  (rien de nouveau par rapport aux étapes précédentes, non répété en détail ici).
+
+## Étape 14 — Premier lancement réel dans un navigateur (Playwright, Chromium headless)
+
+Contrairement aux mandats précédents qui n'avaient jamais ouvert l'interface dans un navigateur,
+ce conteneur n'a **jamais** été configuré via l'application — premier démarrage réel. L'app
+affiche donc son propre assistant de configuration (`InstallerApp.tsx`), pas directement l'écran
+de chat. Capture `logs/screenshots/01_accueil.png` : écran « Welcome to EchoHub » bien rendu,
+sombre, cohérent, aucune erreur console/réseau.
+
+**Décision prise sans redemander** : l'étape 2 de ce wizard (« Storage locations ») mène à un
+bouton « Install now » qui, d'après lecture du code (`backend/routers/installer.py`), déclenche
+l'installation de **vLLM 0.21.0 (~4 Go de téléchargement, 10-30 min)** dès qu'un GPU NVIDIA est
+détecté — ce que le conteneur de test a bien. Interdit absolu du mandat : jamais plus d'1 Go
+téléchargé. Contournement légitime retenu, sans modification de code : appel direct de
+`POST /installer/complete` (endpoint déjà exposé par l'application elle-même, prévu pour marquer
+l'installation terminée) pour sauter cette étape. Le moteur d'inférence réellement testé plus
+bas (llama.cpp/GGUF) n'a jamais eu besoin de vLLM — ce contournement ne retire rien au test
+décisif demandé.
+
+Après rechargement, l'app affiche un onboarding produit en 6 étapes (bienvenue, stockage,
+matériel détecté, moteurs d'inférence, compatibilité modèles, écran final) — toutes parcourues
+et capturées (`02` à `09_app_shell.png`), toutes bien rendues, aucune erreur console/réseau.
+Point à noter, positif : l'étape 3/6 « Your hardware » détecte et affiche correctement
+**« NVIDIA GeForce RTX 3060, 12 GB VRAM »** — preuve supplémentaire, côté interface cette fois
+(pas seulement `nvidia-smi` en `docker exec`), que le GPU est bien exposé au conteneur et lu par
+l'application elle-même.
+
+Écran de chat principal (`09_app_shell.png`) : shell complet bien rendu — liste de
+conversations, sélecteur de modèle (« No model loaded »), panneau de droite (Profile, System
+Prompt, Permanent Rules, Parameters, Skills), zone de saisie « Load a model to start chatting »,
+indicateur GPU en bas de la barre latérale. Aucune erreur console. Une seule requête réseau en
+échec relevée en boucle sur chaque capture : `GET /api/models/downloads/stream` →
+`net::ERR_ABORTED` — investiguée plus loin (étape 15), pas un souci de streaming en soi (voir
+verdict).
+
+## Étape 15 — Écran Discover : recherche et fiche modèle
+
+`logs/screenshots/10_discover.png` : grille de modèles réelle interrogée en direct sur
+Hugging Face Hub à travers le proxy nginx (`/api/models/search` → backend → HF Hub), 20
+résultats avec badges de format/taille VRAM estimée, aucune erreur. Recherche
+« Qwen2.5-0.5B-Instruct-GGUF » (`11_search_qwen05b.png`) retourne des résultats cohérents.
+Fiche modèle ouverte (`12_fiche_modele.png`, `13_apres_clic_variant.png`) : panneau détaillé
+correct — variantes de quantification, tailles, description README, avertissement de
+compatibilité (normal, aucun moteur vLLM installé, cohérent avec le choix de l'étape 13).
+
+**Modèle retenu pour le test décisif** : `jc-builds/Qwen2.5-0.5B-Instruct-Q4_K_M-GGUF` — 0,5 Md
+de paramètres, quantification Q4_K_M, **0,37 Go** annoncés (confirmé après coup : 397 807 936
+octets réels ≈ 0,37 Gio) — dans la fourchette demandée, très en dessous de la limite d'1 Go.
+
+## Étape 16 — Défaut réel découvert : le modèle téléchargé via l'interface est invisible dans la bibliothèque
+
+Téléchargement lancé depuis l'interface (bouton « Download », capture `15_download_lance.png` :
+barre de progression réelle affichée, 0 % → en cours). Backend confirme dans ses logs :
+```
+2026-08-09 17:18:06 | INFO | download_manager:start_download:164 - Download started: jc-builds/Qwen2.5-0.5B-Instruct-Q4_K_M-GGUF
+2026-08-09 17:18:12 | INFO | download_manager:_run_download:107 - Download complete: jc-builds/Qwen2.5-0.5B-Instruct-Q4_K_M-GGUF (0.37 GB)
+```
+Le flux SSE `/models/downloads/stream` confirme aussi côté client, via `curl` direct sur le
+proxy : `state: complete, downloaded_gb: 0.37, total_gb: 0.37`. **Mais** `GET /models/downloaded`
+retourne `[]` en boucle après coup, et l'écran « My Models »/bibliothèque de l'interface
+n'affiche jamais le modèle comme disponible.
+
+**Cause établie sur artefact réel (pas une lecture de code seule)** : `docker exec` confirme le
+fichier bien présent sur disque, taille correcte, à
+`/mnt/models/echohub/jc-builds--Qwen2.5-0.5B-Instruct-Q4_K_M-GGUF/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf`
+— **pas** dans `/data/models` (le volume monté, `MODELS_DIR=/data/models` fourni en variable
+d'environnement au conteneur). `curl http://127.0.0.1:37821/settings/paths` confirme :
+`{"models_dir":"/mnt/models/echohub","models_dir_is_default":true}`.
+
+Lecture du code (`backend/services/hf_service.py`, `backend/services/config_service.py`) :
+**deux définitions différentes et incohérentes du dossier des modèles dans la même codebase** :
+- `hf_service.py:18` — `MODELS_DIR = Path(os.getenv("MODELS_DIR", "/mnt/models/echohub"))`,
+  constante figée une fois pour toutes au chargement du module. Dans ce conteneur, vaut donc
+  `/data/models` (la variable d'env est bien lue). **Utilisée par `list_downloaded()`**, donc par
+  `GET /models/downloaded` — ce qui explique la liste vide, `/data/models` étant réellement vide.
+- `hf_service.py:8-15` (`_get_models_dir()`) délègue à `config_service.get_models_dir()`, dont le
+  défaut (`config_service.py:19`) est **codé en dur** à `"/mnt/models/echohub"`, sans jamais lire
+  `os.getenv("MODELS_DIR")`. **Utilisée pour le téléchargement réel** (`_model_dir()`, appelée par
+  le download manager) — d'où l'écriture au mauvais endroit.
+
+**Conclusion sur la nature du défaut, conforme au mandat (ne pas corriger le code
+applicatif)** : ce n'est pas un problème de configuration du conteneur — la variable d'env
+`MODELS_DIR=/data/models` est correctement transmise et correctement lue par au moins un des deux
+chemins de code. C'est une incohérence interne au code Python applicatif (deux sources de vérité
+pour le même réglage, l'une respectant la variable d'environnement, l'autre l'ignorant
+totalement) — **non corrigée**, signalée ici avec fichiers et lignes exactes pour l'équipe qui
+travaille le code en parallèle. Cela affecte potentiellement aussi l'installation native (hors
+Docker) dès qu'un opérateur positionne `MODELS_DIR` en variable d'environnement système sans
+passer par l'assistant d'installation.
+
+**Contournement appliqué pour poursuivre le test d'interface, sans modifier une ligne de code** :
+`POST /settings/paths/models-dir {"path":"/data/models"}` (endpoint déjà exposé par
+l'application, celui-là même que l'assistant d'installation officiel appelle à l'étape
+« Storage locations » si l'utilisateur y confirme un chemin) pour aligner `config_service` sur
+la variable d'environnement du conteneur, puis déplacement du dossier déjà téléchargé de
+`/mnt/models/echohub/...` vers `/data/models/...` (mêmes octets, aucun nouveau téléchargement).
+
+L'appel POST a déclenché une migration asynchrone (`{"status":"migration_pending", ...
+"files_total":0}`, source déjà vidée par mon déplacement manuel) qui n'a **pas** mis à jour
+`config_service.get_models_dir()` (`GET /settings/paths` continue de répondre
+`/mnt/models/echohub`, `models_dir_is_default:true`) — troisième indice du même défaut, pas
+creusé plus loin, hors mandat. Pour couvrir les deux résolutions de chemin coexistant dans le
+code (`hf_service._get_models_dir()`/`config_service`, utilisée pour charger un modèle ;
+`hf_service.MODELS_DIR`, utilisée pour lister), un lien symbolique
+`/mnt/models/echohub/jc-builds--...` → `/data/models/jc-builds--...` a été créé (aucune
+duplication de données, aucun nouveau téléchargement).
+
+## Étape 17 — Écran « My Models » : le modèle apparaît, se charge, preuve GPU via l'interface
+
+`logs/screenshots/17_my_models.png` : après le contournement, le modèle apparaît correctement
+— « Qwen2.5-0.5B-Instruct-Q4_K_M-GGUF », statut `downloaded`, 0,28 GB VRAM estimée, bouton
+« Load ». Clic sur « Load » → modale de configuration de chargement très complète
+(`18_load_click.png`) : **monitoring matériel en direct affiché dans l'interface elle-même**
+(RTX 3060 51 °C, 1,5/12 GB VRAM, 3 % d'utilisation ; CPU 46,6 °C, 8,8/47 GB RAM) — preuve
+supplémentaire, cette fois explicitement dans l'écran destiné à l'utilisateur, que le GPU est
+lu correctement depuis l'intérieur du conteneur. Profil « Performance » (GPU complet)
+sélectionné par défaut, confirmé par clic sur « Load model ».
+
+Vérification mécanique côté API après clic (le rendu visuel de la liste n'avait pas encore
+rafraîchi son badge au moment de la capture, non bloquant) :
+```
+GET /inference/load-state → {"loading_model_id":null,
+  "loaded_model_id":"jc-builds/Qwen2.5-0.5B-Instruct-Q4_K_M-GGUF", "engine":"llama",
+  "load_config":{"n_gpu_layers":-1, "gguf_path":"/mnt/models/echohub/jc-builds--.../....gguf", ...}}
+```
+`gguf_path` résolu via le lien symbolique — confirme que le chargement passe bien par
+`config_service.get_models_dir()` (pas la variable d'env), cohérent avec l'analyse de
+l'étape 15.
+
+## Étape 18 — Conversation complète dans l'écran de chat, capture regardée réellement
+
+Navigation vers l'onglet Chat (`20_chat_model_loaded.png`) : en-tête confirme
+« Qwen2.5-0.5B-Instruct-Q4_K… », badge vert « loaded », « llama.cpp », « Q4_K_M ». Champ de
+saisie actif (« Load a model to start chatting » a disparu, remplacé par « Message... »).
+
+**Premier message envoyé depuis l'interface** : « Explique en 3 phrases ce qu'est un GPU. »
+**Réponse affichée à l'écran** (`21_chat_streaming_t0.png`, regardée réellement, pas déduite) :
+« Hi, how can I assist you today? » — réponse hors-sujet mais bien réelle, texte rendu dans la
+bulle de conversation, métriques réelles affichées sous la bulle : **9 tokens, 138.5 tok/s,
+137 ms TTFT, 0,27 s total, moteur llama**. Qualité de réponse faible (modèle 0,5 Md, attendu,
+déjà observé par le mandat précédent en test API direct).
+
+**Second message, prompt conçu pour forcer une réponse longue** : « Write a long detailed
+paragraph (at least 150 words) about the history of computers. » **Réponse complète affichée**
+(`22_streaming_a.png`/`23_streaming_b.png`, identiques — génération déjà terminée avant les deux
+captures espacées de plusieurs secondes, le modèle étant trop rapide pour ce volume de texte) :
+10 paragraphes courts, texte cohérent en anglais, factuellement peu fiable (« John Gottlieb »,
+« EDS-1 » n'existent pas — hallucinations attendues d'un modèle 0,5 Md, non représentatif de la
+qualité, la preuve recherchée est la chaîne technique). Métriques : **286 tokens, 160,8 tok/s,
+27 ms TTFT, 1,83 s total**.
+
+**Preuve du streaming progressif, indépendante du timing des captures d'écran** : les deux
+captures consécutives étant identiques (génération plus rapide que l'intervalle entre deux
+appels d'outil MCP), preuve obtenue directement au niveau réseau via `curl -N` sur
+`/inference/chat` (SSE, à travers le proxy nginx du conteneur, pas un accès direct backend) :
+```
+19:26:17 data: {"choices":[{"delta":{"content":"To"}, ...}]}
+19:26:17 data: {"choices":[{"delta":{"content":" count"}, ...}]}
+19:26:17 data: {"choices":[{"delta":{"content":" from"}, ...}]}
+...
+19:26:18 data: {"choices":[{"delta":{"content":" each"}, ...}]}
+```
+Chaque événement SSE transporte un seul mot/token, et le flux s'étale sur plusieurs secondes
+d'horloge réelle (17 → 18, sur une requête à 250 tokens max) — **la mise en tampon nginx est
+bien désactivée pour ce endpoint dans ce conteneur** (`proxy_buffering off`, confirmé en
+pratique, pas seulement dans le fichier de config). Le token n'arrive pas d'un bloc à la fin.
+
+## Étape 19 — Nettoyage final
+
+```
+docker exec echohub-uitest curl -s -X POST http://127.0.0.1:37821/inference/unload
+docker stop echohub-uitest && docker rm echohub-uitest
+docker volume rm echohub_uitest_models echohub_uitest_userdata
+```
+Vérifié après coup : `docker ps -a` ne montre plus `echohub-uitest`, `docker volume ls` ne
+montre plus `echohub_uitest_*` (donc le fichier GGUF téléchargé, quel que soit son emplacement
+réel sur la couche writable du conteneur ou le volume, a disparu avec le conteneur). `ss -tlnp`
+reconfirme `127.0.0.1:37821` toujours tenu par le PID natif d'origine (905). `docker ps`
+reconfirme `agora-searxng`, `flux-postgres`, `bgutil-pot` toujours actifs, jamais touchés.
+Navigateur Playwright fermé proprement.
+
+## Conclusion de ce mandat (validation interface web)
+
+**Critère d'arrêt atteint : une conversation complète a eu lieu dans l'interface servie par le
+conteneur** — modèle téléchargé depuis l'écran Discover, chargé depuis l'écran My Models,
+message envoyé depuis l'écran Chat, réponse affichée à l'écran et regardée réellement sur
+capture, streaming progressif confirmé au niveau réseau. Zéro erreur console JavaScript sur les
+9 écrans capturés. Une seule requête réseau en échec relevée en boucle
+(`GET /api/models/downloads/stream` → `net::ERR_ABORTED`) — investiguée : le endpoint répond
+`200 OK` et un flux SSE valide quand interrogé directement (`curl`), donc **pas un défaut du
+proxy ou du endpoint** ; le plus probable est un flux SSE laissé ouvert par un composant React
+(écran Discover ou My Models) coupé (`AbortController`/démontage de composant) à chaque
+changement d'écran pendant la session Playwright — comportement visible aussi en usage normal
+au clic rapide entre onglets, non creusé plus loin (hors mandat, pas bloquant pour le parcours).
+
+**Un vrai défaut d'interface a été trouvé et documenté avec cause exacte (étape 15)** :
+un modèle téléchargé depuis l'écran Discover n'apparaît **jamais** dans la bibliothèque
+(« My Models ») ni dans le sélecteur de modèle, tant que l'utilisateur n'a pas explicitement
+confirmé un chemin de stockage via l'assistant d'installation ou l'écran Settings → Paths — la
+variable d'environnement `MODELS_DIR` du conteneur, bien que correctement transmise et lue par
+une partie du code, est ignorée par `config_service.py` (défaut codé en dur), qui est la partie
+du code utilisée pour l'écriture réelle du fichier téléchargé. **Sur ce conteneur précis, avec
+la configuration `docker-compose.yml` actuelle (ports 37820/37821, volumes propres, jamais
+démarré une première fois avec confirmation manuelle du chemin), un utilisateur qui suit le
+parcours normal (assistant d'installation → Discover → Download → My Models → Load) rencontrera
+ce défaut au premier lancement**, sauf s'il modifie le chemin par défaut proposé à l'étape
+« Storage locations » du wizard pour qu'il corresponde à celui réellement monté en volume — ce
+que rien dans l'interface ne l'invite à faire (le champ affiche `/mnt/models/echohub` comme
+valeur déjà correcte, sans lien visible avec le volume Docker). Fichiers et lignes exactes :
+`backend/services/hf_service.py:8-18`, `backend/services/config_service.py:19`. **Non corrigé**,
+conformément au mandat — signalé pour l'équipe qui travaille le code applicatif en parallèle.
+
+**Hors du strict test décisif, tout le reste de l'interface est fonctionnel et bien rendu** :
+assistant d'installation (6+2 écrans), écran Discover (recherche Hugging Face en direct à
+travers le proxy), fiche modèle détaillée, modale de chargement avec monitoring GPU/CPU en
+direct, écran de chat complet (system prompt, permanent rules, paramètres d'inférence,
+compétences). Aucune page blanche, aucun écran d'erreur, aucune interface à moitié chargée
+observée sur les 9 écrans capturés et lus réellement.
+
+**Verdict : l'application est utilisable de bout en bout dans le conteneur**, à la condition —
+non automatique au premier lancement — que le chemin de stockage des modèles soit explicitement
+confirmé une fois (via l'assistant d'installation ou Settings → Paths) pour correspondre au
+volume Docker monté. Sans cette étape manuelle, l'utilisateur télécharge un modèle qui semble
+réussir (barre de progression à 100 %, log backend « Download complete ») mais reste ensuite
+introuvable dans sa propre bibliothèque — un piège silencieux, sans message d'erreur, que
+l'équipe suivante devrait considérer prioritaire.
+
+**Captures archivées** (`logs/screenshots/`, préfixées par ordre chronologique 01 à 23) :
+accueil installeur, storage locations, app principale post-bypass, onboarding produit (6
+écrans), shell de chat vide, Discover, recherche, fiche modèle (2 captures), progression de
+téléchargement, My Models avant/après chargement, modale de chargement, chat avec modèle chargé,
+deux réponses de chat (courte et longue).

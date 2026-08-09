@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     EchoHub — arret symetrique de start.ps1 (Docker Desktop / WSL2).

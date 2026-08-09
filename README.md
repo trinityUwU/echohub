@@ -81,13 +81,39 @@ GPU inference through Docker Desktop's WSL2 integration.
   CUDA to the WSL2 distro (as a `libcuda.so` stub); installing a Linux driver on top breaks
   GPU passthrough. Source: [NVIDIA CUDA on WSL User Guide](https://docs.nvidia.com/cuda/wsl-user-guide/index.html).
 
-### One command
+### One command — with one catch: PowerShell's default execution policy
 
 ```powershell
 git clone https://github.com/trinityUwU/echohub
 cd echohub
 .\start.ps1
 ```
+
+On a **default Windows 11 install**, typing `.\start.ps1` in a plain PowerShell window will
+be refused outright:
+
+```
+.\start.ps1 : File ...\start.ps1 cannot be loaded because running scripts is disabled
+on this system. For more information, see about_Execution_Policies at
+https://go.microsoft.com/fwlink/?LinkID=135170.
+```
+
+This is not a bug in the script — it's `Get-ExecutionPolicy` defaulting to `Restricted` on
+every Windows client install, which blocks *any* unsigned `.ps1`, including this one. Source:
+[about_Execution_Policies (Microsoft Learn)](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies).
+Pick one of these once per machine:
+
+- **Right-click `start.ps1` → "Run with PowerShell"** — Windows' built-in context-menu entry
+  runs it as `powershell.exe -ExecutionPolicy Bypass -File`, so it works with zero setup and
+  no permanent policy change.
+- **Or, from a terminal**, allow local scripts for your user once:
+  `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then `.\start.ps1` works directly
+  from then on.
+- **Or, one-off, without changing anything**:
+  `powershell -ExecutionPolicy Bypass -File .\start.ps1`
+
+So the real one-command promise is **"right-click → Run with PowerShell"**, not a bare
+`.\start.ps1` typed into a fresh terminal.
 
 `start.ps1` checks Docker Desktop, WSL2, and GPU visibility in order (with an exact fix and
 an official link for each failure), builds the `echohub:gpu` image if it isn't already built,
@@ -101,9 +127,14 @@ models and user data persist in Docker volumes between runs.
   the container exposes the GPU, and a real GGUF model (Qwen2.5-0.5B-Instruct, Q4_K_M) was
   loaded and generated text through the backend API, with GPU layer offload confirmed in the
   logs and a measured throughput — full detail in `DOCKER-BUILD-LOG.md`.
-- **Verified here**: `start.ps1`/`stop.ps1` parse as valid PowerShell (checked with the
-  official PowerShell parser, via a throwaway `mcr.microsoft.com/powershell` container —
-  no Windows machine was available to run them for real).
+- **Verified here, by actually running the scripts** (not just parsing them) inside a
+  throwaway `mcr.microsoft.com/powershell` container, with fake `docker`/`wsl.exe`/
+  `nvidia-smi.exe` standing in for the real Windows tools — full detail in
+  `DOCKER-BUILD-LOG.md`: both scripts run correctly under Windows PowerShell 5.1 syntax
+  (the default on Windows, not PowerShell 7), fail cleanly with an actionable message and
+  exit code 1 when nothing is installed, walk their steps in the right order against fake
+  tools that answer like real ones, and correctly time out (bounded, not stuck) when the
+  health endpoint never answers.
 - **Not verified — no Windows machine, no RTX 5090 available in this environment**: that
   `start.ps1`'s checks behave correctly against a real Docker Desktop/WSL2 install, that
   the GPU passthrough works end to end on Windows, and any performance number on a 5090.

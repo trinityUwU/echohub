@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     EchoHub — entree Windows en une commande (Docker Desktop + WSL2 + GPU NVIDIA).
@@ -196,8 +196,13 @@ Write-Ok "Backend pret ($healthUrl repond 200)."
 Write-Step "Ouverture de l'interface"
 
 $webUrl = 'http://localhost:37820'
-Start-Process $webUrl
-Write-Ok "Navigateur ouvert sur $webUrl"
+try {
+    Start-Process $webUrl
+    Write-Ok "Navigateur ouvert sur $webUrl"
+} catch {
+    Write-Warn "Impossible d'ouvrir automatiquement le navigateur ($($_.Exception.Message))."
+    Write-Warn "EchoHub tourne quand meme : ouvre manuellement $webUrl"
+}
 
 Write-Host "`nEchoHub est pret." -ForegroundColor Green
 Write-Host "Pour arreter : .\stop.ps1" -ForegroundColor White
