@@ -69,7 +69,8 @@ GPU inference through Docker Desktop's WSL2 integration.
 
 ### Prerequisites
 
-- **Windows 11**, 64-bit (21H2 or later; 22H2+ recommended).
+- **Windows 11**, 64-bit (Windows 10 21H2+ also works — CUDA on WSL2 isn't Windows-11-only —
+  but this is the version actually targeted and checked by `setup-windows.ps1` below).
 - **Docker Desktop**, with the WSL2 backend enabled (Settings → General → "Use the WSL 2
   based engine"). GPU support has been in Docker Desktop since 3.1 — any current release
   works. Install: <https://www.docker.com/products/docker-desktop/>
@@ -78,10 +79,53 @@ GPU inference through Docker Desktop's WSL2 integration.
 - **NVIDIA GPU driver, installed on Windows** — version 570.xx or newer for RTX 50-series
   (Blackwell). Get it from <https://www.nvidia.com/Download/index.aspx>.
   **Never install a Linux NVIDIA driver inside WSL2** — the Windows driver is what exposes
-  CUDA to the WSL2 distro (as a `libcuda.so` stub); installing a Linux driver on top breaks
-  GPU passthrough. Source: [NVIDIA CUDA on WSL User Guide](https://docs.nvidia.com/cuda/wsl-user-guide/index.html).
+  CUDA to the WSL2 distro (as a `libcuda.so` stub injected at `/usr/lib/wsl/lib`; never
+  overwrite it). Installing a Linux driver on top breaks GPU passthrough. If you ever install
+  the CUDA toolkit *inside* the WSL2 distro for something other than this project, install
+  only `cuda-toolkit-12-x` — never the `cuda` or `cuda-drivers` meta-packages, which pull in
+  the Linux driver. Source: [NVIDIA CUDA on WSL User Guide](https://docs.nvidia.com/cuda/wsl-user-guide/index.html).
+
+All three are handled automatically by `setup-windows.ps1` below — this list is for anyone
+who prefers doing it by hand, or is troubleshooting.
+
+**GPU passthrough note**: `docker-compose.yml` exposes the GPU with the CDI syntax
+`devices: [nvidia.com/gpu=all]`, validated on this project's Linux dev machine where the GPU
+is a real `/dev/nvidia0`. Under Docker Desktop on Windows, the GPU is exposed through
+paravirtualized WDDM (`/dev/dxg`), a different mechanism — CDI resolution may not behave the
+same way there. If `start.ps1`/`setup-windows.ps1` get through every check but the container
+fails specifically on GPU access, the first thing to try is the alternative already sitting
+commented-out in `docker-compose.yml`: uncomment the `deploy.resources.reservations.devices`
+block (and comment out the `devices:` line above it) and retry. Nothing here tests
+`/dev/nvidia0` directly inside WSL2 or the container — that path doesn't exist under Docker
+Desktop's GPU model, only `nvidia-smi` (Windows side) and an actual CUDA container run do.
+
+### Automatic setup (recommended, on a fresh Windows 11 machine)
+
+```powershell
+git clone https://github.com/trinityUwU/echohub
+cd echohub
+.\setup-windows.ps1
+```
+
+`setup-windows.ps1` does the rest: it re-launches itself elevated (you'll get one UAC
+prompt), detects what's already installed and only installs what's missing (WSL2, a Linux
+distribution, Docker Desktop via `winget`), checks the NVIDIA driver version, waits for
+Docker Desktop to actually respond (not a fixed delay), and finishes by calling `.\start.ps1`
+for you.
+
+**Two things it needs from you**: one Administrator-elevation prompt (UAC) right at the
+start, and, if WSL2 wasn't already installed, one confirmed restart partway through —
+enabling WSL2's Windows features requires it. The script warns you before restarting, then
+**resumes automatically** at the next logon and picks up exactly where it left off — you
+don't need to relaunch anything by hand. On a machine with nothing installed yet, budget
+**15–30 minutes** end to end, most of it Docker Desktop's own download and the Ubuntu distro
+download; on a machine that already has WSL2/Docker, it finishes in under a minute and just
+launches EchoHub.
 
 ### One command — with one catch: PowerShell's default execution policy
+
+If Docker Desktop/WSL2/the NVIDIA driver are already set up, skip `setup-windows.ps1` and go
+straight to:
 
 ```powershell
 git clone https://github.com/trinityUwU/echohub
@@ -135,10 +179,22 @@ models and user data persist in Docker volumes between runs.
   exit code 1 when nothing is installed, walk their steps in the right order against fake
   tools that answer like real ones, and correctly time out (bounded, not stuck) when the
   health endpoint never answers.
-- **Not verified — no Windows machine, no RTX 5090 available in this environment**: that
-  `start.ps1`'s checks behave correctly against a real Docker Desktop/WSL2 install, that
-  the GPU passthrough works end to end on Windows, and any performance number on a 5090.
-  Nothing here should be read as a guarantee for that hardware.
+- **`setup-windows.ps1` verified the same way**: syntax parses under the real PowerShell
+  parser, and its control flow was run end to end in the same throwaway container against
+  fake `wsl.exe`/`docker.exe`/`nvidia-smi.exe`/`winget.exe`/`schtasks.exe` — confirmed: it
+  detects already-installed WSL2/distro/Docker Desktop and skips straight to launching
+  `start.ps1`; it calls `wsl --install`/`winget install --id Docker.DockerDesktop` with the
+  exact expected arguments when something is missing; it registers the resume scheduled task
+  and exits cleanly (bounded, not hanging) when a restart is pending; it fails with an
+  actionable message (not a crash) when `winget` reports an error; it correctly flags an
+  NVIDIA driver below 570.xx as too old for Blackwell.
+- **Not verified — no Windows machine, no RTX 5090 available in this environment**: the
+  actual UAC self-elevation (`WindowsPrincipal`/`Start-Process -Verb RunAs` are Windows-only
+  APIs, unavailable to test on Linux), a real `wsl --install` run and its real restart
+  behavior, a real Docker Desktop install via `winget`, the scheduled task actually firing at
+  next logon, that `start.ps1`'s checks behave correctly against a real Docker Desktop/WSL2
+  install, that the GPU passthrough works end to end on Windows, and any performance number
+  on a 5090. Nothing here should be read as a guarantee for that hardware.
 
 ---
 

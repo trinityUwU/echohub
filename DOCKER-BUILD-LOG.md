@@ -1024,3 +1024,121 @@ accueil installeur, storage locations, app principale post-bypass, onboarding pr
 écrans), shell de chat vide, Discover, recherche, fiche modèle (2 captures), progression de
 téléchargement, My Models avant/après chargement, modale de chargement, chat avec modèle chargé,
 deux réponses de chat (courte et longue).
+
+---
+
+# Journal — équipe installation Windows automatique (ccremote), 2026-08-09
+
+Mandat : produire `setup-windows.ps1` pour qu'un poste Windows 11 neuf n'ait presque rien à
+faire — élévation admin auto, installation de ce qui manque (WSL2, une distribution Linux,
+Docker Desktop), vérification du pilote NVIDIA, reprise automatique après le redémarrage
+imposé par WSL2, puis lancement de `start.ps1`.
+
+## Étape 20 — Recherche avant écriture (sources citées dans le script et le README)
+
+- **`wsl --install`** : active les fonctionnalités optionnelles Windows requises
+  (`Microsoft-Windows-Subsystem-Linux`, `VirtualMachinePlatform`), installe le noyau WSL2 et,
+  sans `--no-distribution`, une distribution par défaut (Ubuntu) ; un redémarrage est
+  nécessaire la première fois sur une machine non modifiée, car l'activation de
+  fonctionnalités optionnelles Windows l'exige structurellement. Source :
+  [Install WSL — Microsoft Learn](https://learn.microsoft.com/en-us/windows/wsl/install).
+- **Docker Desktop via winget** : id de paquet `Docker.DockerDesktop`, installation
+  silencieuse `winget install --id Docker.DockerDesktop --exact --silent
+  --accept-package-agreements --accept-source-agreements`. Alternative directe (installeur
+  seul) : `Docker Desktop Installer.exe install --quiet --accept-license --backend=wsl-2`.
+  Sources : [issue microsoft/winget-pkgs #45705](https://github.com/microsoft/winget-pkgs/issues/45705),
+  [wingetly.io — Docker Desktop silent install](https://www.wingetly.io/apps/docker/docker-desktop/silent-install).
+- **Pilote NVIDIA minimal Blackwell (RTX 50/5090)** : 570.xx ou plus récent — confirmé,
+  cohérent avec ce que Étape 10 avait déjà établi. Sources :
+  [leadergpu.com — Install NVIDIA drivers/CUDA for RTX 50 series](https://www.leadergpu.com/articles/616-install-nvidia-drivers-and-cuda-for-rtx-50-series),
+  [NVIDIA CUDA on WSL User Guide](https://docs.nvidia.com/cuda/wsl-user-guide/index.html).
+- **Mécanisme de reprise après redémarrage** : tâche planifiée (`schtasks /SC ONLOGON
+  /RL HIGHEST`) plutôt qu'une clé de registre `RunOnce`. Deux raisons : (1) Docker Desktop
+  est une application graphique qui a besoin d'une session utilisateur interactive pour
+  démarrer — une entrée `HKLM\...\RunOnce` s'exécute en tant que SYSTEM avant l'ouverture de
+  session et ne peut pas la lancer, alors qu'`ONLOGON` s'exécute bien dans la session de
+  l'utilisateur qui se reconnecte ; (2) une tâche planifiée nommée reste visible et
+  supprimable (`Get-ScheduledTask`/`schtasks /Query`), alors que `RunOnce` est un motif que
+  des AV/EDR traitent parfois comme suspect et purgent seuls. Aucune connexion automatique
+  (autologon) n'a été configurée — stocker un mot de passe en clair dans le registre pour
+  l'éviter aurait été un risque de sécurité largement disproportionné par rapport au confort
+  gagné ; l'utilisateur rouvre sa session normalement et `ONLOGON` reprend à ce moment précis.
+  Sources : [Continuing PowerShell Scripts After Reboot](https://www.advancedinstaller.com/continue-powershell-script-after-reboot.html),
+  [Automatically resuming PowerShell Workflow jobs at logon — PowerShell Team](https://devblogs.microsoft.com/powershell/automatically-resuming-windows-powershell-workflow-jobs-at-logon/).
+
+## Étape 21 — Vérification mécanique (conteneur PowerShell jetable, comme l'Étape 10)
+
+Même méthode que l'équipe précédente : aucune machine Windows disponible ici non plus.
+`mcr.microsoft.com/powershell:latest` lancé via Docker, supprimé après usage.
+
+**Parsing** : `[System.Management.Automation.Language.Parser]::ParseFile` sur
+`setup-windows.ps1` → 0 erreur de syntaxe. Balayage grep pour les constructions PS7+
+(`??`, `?.`, `&&`, `||`, `Test-Json`, `ForEach-Object -Parallel`, `$PSStyle`, opérateur
+ternaire) → zéro occurrence, comme pour `start.ps1`/`stop.ps1`.
+
+**Exécution réelle, trois scénarios**, avec de faux `wsl.exe`/`docker.exe`/`nvidia-smi.exe`/
+`winget.exe`/`schtasks.exe` dans le `PATH` du conteneur (les deux appels à des API
+Windows-only — `WindowsPrincipal` pour l'élévation, `Restart-Computer` — ont dû être
+neutralisés dans une copie de test uniquement, ces types n'existant pas sous PowerShell sur
+Linux ; le fichier réel commité n'est pas modifié) :
+
+1. **Tout déjà présent** (WSL2 + distribution + Docker Desktop) : le script détecte chaque
+   composant présent, saute son installation, attend Docker (bornage `-DockerReadyTimeoutSeconds`,
+   testé à 10 s), puis enchaîne correctement sur `start.ps1`, qui lui-même déroule ses 7 étapes
+   jusqu'au timeout attendu du point de santé (aucun backend réel dans ce conteneur — signature
+   identique à la validation de l'Étape 10). Chaînage `setup-windows.ps1` → `start.ps1` confirmé.
+2. **WSL2 absent + redémarrage signalé requis** (`FAKE_PENDING_REBOOT=1` en test) : le script
+   lance `wsl --install --no-distribution`, détecte le redémarrage requis, enregistre la tâche
+   planifiée avec la commande exacte attendue
+   (`schtasks /Create /TN EchoHubSetupResume /TR "powershell.exe ... -File \"...\"" /SC ONLOGON /RL HIGHEST /F`),
+   avertit l'utilisateur, et se termine proprement en exit 0 (borné : sleep 15 s, pas une
+   attente indéfinie) au lieu de rester bloqué.
+3. **Docker Desktop absent, `winget` en échec simulé** : le script appelle bien
+   `winget install --id Docker.DockerDesktop --exact --silent --accept-package-agreements
+   --accept-source-agreements`, puis, sur échec (code non nul), sort avec un message
+   actionnable (lien direct docker.com) et exit 1 — pas de crash, pas de trace d'exception brute.
+4. **Pilote NVIDIA trop ancien** (`551.23` simulé) : correctement détecté et signalé comme
+   insuffisant pour Blackwell (< 570.xx), sans bloquer la suite (avertissement, pas un arrêt).
+
+**Non vérifié — aucune machine Windows disponible** : l'élévation UAC réelle
+(`Start-Process -Verb RunAs`), un vrai `wsl --install` avec son vrai redémarrage, une vraie
+installation Docker Desktop via `winget`, le déclenchement réel de la tâche planifiée à la
+prochaine connexion, et le comportement du pilote NVIDIA/GPU réel. Les scénarios 1 à 4
+ci-dessus prouvent le *chemin de contrôle* du script (quelle branche s'exécute, quels
+arguments exacts sont passés aux outils externes, quels codes de sortie et quels messages),
+pas le comportement des outils Windows eux-mêmes.
+
+## Étape 22 — Complément technique de l'orchestrateur, intégré en cours de mandat
+
+Trois précisions reçues pendant la rédaction, vérifiées contre le code existant :
+
+- **GPU sous WSL2 : `/dev/dxg`, pas `/dev/nvidia*`.** Ni `setup-windows.ps1` ni `start.ps1`
+  ne testent un chemin `/dev/nvidia0` côté Linux — les deux s'appuient sur `nvidia-smi.exe`
+  (côté Windows) et sur l'exécution réelle d'un conteneur CUDA (`docker run --gpus all ...`),
+  ce qui est le bon test. Aucune correction de code nécessaire ; ajouté explicitement au
+  README pour que la prochaine équipe ne cherche pas ce chemin par erreur.
+- **`libcuda.so` injecté par Windows dans `/usr/lib/wsl/lib`, jamais à écraser** ; si CUDA
+  toolkit est installé à la main dans la distribution WSL2, seul `cuda-toolkit-12-x` — jamais
+  `cuda`/`cuda-drivers` (pilote Linux embarqué). Ni le script ni ce mandat n'installent quoi
+  que ce soit à l'intérieur de la distribution WSL2 (seule `wsl --install -d Ubuntu` crée la
+  distro, rien n'y est ensuite installé) — avertissement ajouté au README (section
+  Prerequisites) pour l'opérateur qui voudrait le faire lui-même plus tard.
+- **CUDA fonctionne aussi nativement depuis WSL2 sur Windows 10 21H2**, pas seulement
+  Windows 11 — mentionné au README à titre informatif ; la cible réelle du mandat
+  (poste neuf de l'opérateur) reste Windows 11, et `setup-windows.ps1` continue de le
+  documenter comme cible testée.
+- **`docker-compose.yml` (non modifié, hors périmètre) expose déjà en commentaire
+  l'alternative `deploy.resources.reservations.devices`** au cas où la syntaxe CDI
+  (`nvidia.com/gpu=all`, validée sur la machine Linux du projet avec un vrai `/dev/nvidia0`)
+  ne se résolve pas de la même façon sous le mécanisme WDDM/`dxg` de Docker Desktop. Rendu
+  explicite dans le README (section Prerequisites, « GPU passthrough note ») avec la marche à
+  suivre exacte si le démarrage échoue précisément sur l'accès GPU.
+
+## Conclusion de ce mandat (installation Windows automatique)
+
+`setup-windows.ps1` produit, marqueur BOM UTF-8 appliqué (comme `start.ps1`/`stop.ps1`),
+syntaxiquement valide et compatible PowerShell 5.1 (vérifié par exécution réelle en conteneur
+jetable, pas seulement par relecture). README mis à jour : section « Automatic setup » pour
+le poste neuf, section Prerequisites enrichie des précisions GPU/WSL2, et section
+« What's verified and what isn't » qui distingue explicitement ce qui a été exécuté de ce qui
+reste non vérifiable sans machine Windows réelle.
