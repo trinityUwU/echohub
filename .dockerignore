@@ -1,0 +1,58 @@
+# EchoHub — .dockerignore
+# But : ne jamais faire entrer de données de dev/runtime dans le contexte de build Docker.
+# Le contexte de build est envoyé en entier au démon Docker avant même la première instruction
+# du Dockerfile — un dossier oublié ici ralentit chaque build et peut fuiter des données locales
+# dans les layers de l'image.
+
+# --- Environnements Python/JS locaux (recréés dans l'image, jamais copiés) ---
+backend/.venv/
+backend/**/__pycache__/
+**/__pycache__/
+*.pyc
+.venv-vllm/
+frontend/node_modules/
+frontend/dist/
+frontend/src-tauri/target/
+
+# --- Bases de données et données utilisateur — ne doivent JAMAIS entrer dans le build ---
+# ChromaDB (dev local + collections binaires nommées par UUID) et SQLite.
+chroma_data/
+chroma.sqlite3
+*.db
+*.sqlite3
+*/*.sqlite3
+# Dossiers à nom d'UUID générés par ChromaDB à la racine (collections HNSW binaires).
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]/
+
+# --- Logs (reset à chaque restart natif, jamais des artefacts de build) ---
+logs/
+*.log
+
+# --- Secrets et config locale ---
+.env
+.env.*
+!frontend/.env.example
+frontend/.env.development
+
+# --- VCS, IDE, outils Claude Code ---
+.git/
+.claude/
+.brainstorm/
+.ruff_cache/
+
+# --- Docs volumineuses non nécessaires à l'image (gardent le contexte de build léger) ---
+docs/
+*.md
+!README.md
+
+# --- Fichier non identifié à la racine du dépôt (PostScript, ~3 Mo, pas du code Python
+# malgré son nom — signalé, non touché, exclu du contexte par prudence) ---
+shutil
+
+# --- Artefacts divers rencontrés au fil de l'audit ---
+# mockup/ : maquettes de design, non lues par le code applicatif — exclu.
+# connectors/ : NE PAS exclure — connectors/discord est lu par backend/routers/connectors.py:197
+# (sidecar Discord lancé depuis ce dossier), nécessaire au fonctionnement natif comme conteneurisé.
+mockup/
+scripts/__pycache__/
+.echoforge.yml

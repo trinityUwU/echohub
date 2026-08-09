@@ -1,0 +1,49 @@
+# EchoHub — conteneurisation GPU.
+#
+# GPU : `devices: [nvidia.com/gpu=all]` (syntaxe Compose Spec / CDI), retenu après test réel
+# sur cette machine plutôt que `deploy.resources.reservations.devices` + `driver: nvidia`.
+# Sur cet hôte, seul le NVIDIA Container Toolkit + la résolution CDI native de Docker 29 sont
+# configurés (aucun runtime `nvidia` enregistré dans /etc/docker/daemon.json) — `--gpus all`
+# échoue ici avec "AMD CDI spec not found" (bug de résolution multi-vendor de Docker), alors que
+# la forme CDI explicite fonctionne (validé : `docker run --device=nvidia.com/gpu=all ... nvidia-smi`
+# affiche la RTX 3060). Voir DOCKER-BUILD-LOG.md pour le détail. Si la machine cible (Windows +
+# Docker Desktop + WSL2) a le runtime `nvidia` classique configuré, la forme alternative
+# `deploy.resources.reservations.devices` ci-dessous (commentée) fonctionne aussi — à activer si
+# `nvidia.com/gpu=all` échoue là-bas.
+services:
+  echohub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: echohub:gpu
+    container_name: echohub
+    restart: unless-stopped
+
+    devices:
+      - nvidia.com/gpu=all
+    # Alternative si le runtime `nvidia` classique est configuré (pas CDI) sur la machine cible :
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+    ports:
+      - "37820:80"      # Interface web (frontend statique + proxy /api, sans coquille Tauri)
+      - "37821:37821"   # API backend FastAPI directe (debug / futures équipes)
+
+    volumes:
+      - echohub_models:/data/models   # Modèles GGUF/AWQ téléchargés (MODELS_DIR)
+      - echohub_userdata:/data/user   # echohub.db, chromadb/, logs/, config.json (XDG_DATA_HOME)
+
+    environment:
+      - MODELS_DIR=/data/models
+      - XDG_DATA_HOME=/data/user
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+volumes:
+  echohub_models:
+  echohub_userdata:
