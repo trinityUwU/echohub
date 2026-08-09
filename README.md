@@ -20,6 +20,8 @@ cd echohub
 ./stop.sh   # stop everything
 ```
 
+**On Windows**, use `start.ps1` instead — see [Windows](#windows) below.
+
 ---
 
 ## What it does
@@ -46,9 +48,66 @@ cd echohub
 - A GPU (NVIDIA recommended, AMD and Apple Silicon work too)
 - 8 GB+ of GPU memory for most models
 - 20–50 GB of disk space (models are large)
-- Linux, macOS, or Windows (WSL2)
+- **Linux or macOS**: native, via `start.sh` (`cargo tauri dev` under the hood).
+- **Windows**: via Docker Desktop + WSL2 + `start.ps1` — see [Windows](#windows) below. This
+  is a real, working path (Docker image builds and runs GPU inference — verified, see
+  `DOCKER-BUILD-LOG.md`), not the WSL2-native-app path this line used to imply with no
+  script or code behind it.
 
-You don't need Python knowledge or configuration files. No terminal access after the first install.
+You don't need Python knowledge or configuration files on Linux/macOS. No terminal access
+after the first install. On Windows, `start.ps1` opens one PowerShell window on first run
+(Docker build can take 15–30 minutes) and the browser after that.
+
+---
+
+## Windows
+
+There is no native Windows build yet (the desktop app is Tauri/Rust and hasn't been ported —
+see `PORTAGE-WINDOWS.md` for the full zone-by-zone map of what that would take). The path
+that exists **today** is a Docker container running the full backend + web frontend, with
+GPU inference through Docker Desktop's WSL2 integration.
+
+### Prerequisites
+
+- **Windows 11**, 64-bit (21H2 or later; 22H2+ recommended).
+- **Docker Desktop**, with the WSL2 backend enabled (Settings → General → "Use the WSL 2
+  based engine"). GPU support has been in Docker Desktop since 3.1 — any current release
+  works. Install: <https://www.docker.com/products/docker-desktop/>
+- **WSL2** itself (`wsl --install` from an admin PowerShell if not already present):
+  <https://learn.microsoft.com/windows/wsl/install>
+- **NVIDIA GPU driver, installed on Windows** — version 570.xx or newer for RTX 50-series
+  (Blackwell). Get it from <https://www.nvidia.com/Download/index.aspx>.
+  **Never install a Linux NVIDIA driver inside WSL2** — the Windows driver is what exposes
+  CUDA to the WSL2 distro (as a `libcuda.so` stub); installing a Linux driver on top breaks
+  GPU passthrough. Source: [NVIDIA CUDA on WSL User Guide](https://docs.nvidia.com/cuda/wsl-user-guide/index.html).
+
+### One command
+
+```powershell
+git clone https://github.com/trinityUwU/echohub
+cd echohub
+.\start.ps1
+```
+
+`start.ps1` checks Docker Desktop, WSL2, and GPU visibility in order (with an exact fix and
+an official link for each failure), builds the `echohub:gpu` image if it isn't already built,
+starts the container, waits for the backend to actually answer on `/health` (polling, not a
+fixed delay — up to 3 minutes by default), then opens the browser. `.\stop.ps1` stops it;
+models and user data persist in Docker volumes between runs.
+
+### What's verified and what isn't
+
+- **Verified, on Linux (RTX 3060, CDI GPU passthrough)**: the `echohub:gpu` image builds,
+  the container exposes the GPU, and a real GGUF model (Qwen2.5-0.5B-Instruct, Q4_K_M) was
+  loaded and generated text through the backend API, with GPU layer offload confirmed in the
+  logs and a measured throughput — full detail in `DOCKER-BUILD-LOG.md`.
+- **Verified here**: `start.ps1`/`stop.ps1` parse as valid PowerShell (checked with the
+  official PowerShell parser, via a throwaway `mcr.microsoft.com/powershell` container —
+  no Windows machine was available to run them for real).
+- **Not verified — no Windows machine, no RTX 5090 available in this environment**: that
+  `start.ps1`'s checks behave correctly against a real Docker Desktop/WSL2 install, that
+  the GPU passthrough works end to end on Windows, and any performance number on a 5090.
+  Nothing here should be read as a guarantee for that hardware.
 
 ---
 
